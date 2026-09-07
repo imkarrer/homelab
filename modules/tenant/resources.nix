@@ -137,14 +137,41 @@ let
 
   enabledTenants = lib.filterAttrs (_: t: t.enable) cfg.tenants;
 
-  # Every (unit, tier) pair a tenant declares, flattened so unit names can be
-  # turned into systemd.services.<unit>.serviceConfig entries. Unit names are
-  # taken verbatim from homelab.tenants.<name>.units — this file assigns them
-  # to a slice, it never renames them (README: "Unit and container names
-  # never change").
+  # A unit only gets Slice= if it can survive the restart required to receive it.
+  #
+  # Slice= is applied when a unit STARTS; `daemon-reload` will not move a running
+  # service between slices. So adding it to an existing unit forces a restart —
+  # and for assetto that is unacceptable, because ac-host-static's ExecStop is
+  # `docker rm -f`, making "restart" mean deleting three live race servers.
+  # Slice membership is also the only resource property that cannot be changed
+  # live: MemoryMax, CPUWeight and IOWeight can all be adjusted on a running
+  # slice afterwards.
+  #
+  # Skipping critical costs nothing, because critical never needed a slice to be
+  # protected. The guarantee runs the other way round: AllowedCPUs fences
+  # background and batch AWAY from the low-numbered cores, so a Nix build or an
+  # LLM cannot reach the cores races run on. Confining races was never what
+  # delivered that, and critical is deliberately uncapped regardless.
+  #
+  # Two independent reasons to skip a tenant, both honoured:
+  #   tier == "critical"        — yields to nothing, wants no cap
+  #   quiet.drainable == false  — bouncing it hurts, whatever its tier
+  sliceableTenants = lib.filterAttrs
+    (_: t: t.tier != "critical" && t.quiet.drainable)
+    enabledTenants;
+
+  # Unit names are taken verbatim from homelab.tenants.<name>.units — this file
+  # assigns them to a slice, it never renames them (README: "Unit and container
+  # names never change").
   tenantUnitTiers = lib.flatten (lib.mapAttrsToList
     (_: tenantCfg: map (unit: { inherit unit; tier = tenantCfg.tier; }) tenantCfg.units)
-    enabledTenants);
+    sliceableTenants);
+
+  # Surfaced as a warning rather than left silent, so "why is ac-host-static not
+  # in a slice?" has an answer visible in the built system.
+  unsliceableUnits = lib.flatten (lib.mapAttrsToList
+    (name: t: map (u: "${u} (tenant ${name}, tier=${t.tier}, drainable=${lib.boolToString t.quiet.drainable})") t.units)
+    (lib.filterAttrs (n: _: !(sliceableTenants ? ${n})) enabledTenants));
 
   unitServiceConfigs = lib.listToAttrs (map
     (u: lib.nameValuePair u.unit {
@@ -246,6 +273,18 @@ in
       systemd.slices = lib.mapAttrs mkSlice cfg.tiers;
 
       systemd.services = unitServiceConfigs;
+
+      # Deliberately excluded from slice assignment, and said out loud. These
+      # units keep running in system.slice; they are protected by background and
+      # batch being fenced off their cores, not by being confined themselves.
+      warnings = lib.optional (unsliceableUnits != [ ]) ''
+        homelab: these units are intentionally NOT assigned a slice, because
+        Slice= only takes effect on unit start and restarting them is harmful:
+          ${lib.concatStringsSep "\n          " unsliceableUnits}
+        They remain in system.slice. The tiering guarantee does not depend on
+        confining them -- background and batch are fenced away from the cores
+        they use via AllowedCPUs.
+      '';
 
       system.activationScripts.homelabCapacityCheck = {
         text = capacityCheckText;

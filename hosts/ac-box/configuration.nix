@@ -45,10 +45,30 @@ in
   # blast radius required editing the repo first. With mkDefault, a variant can
   # override cleanly and each flip can be dry-activated before it is committed.
   homelab.enforce = {
-    firewall = lib.mkDefault false;
+    # Phase 4. Derives interface-scoped rules from the port registry. Verified
+    # additive: dry-activate adds only a firewall.service RELOAD, and the
+    # generated ruleset is a correct superset of what is live -- AC's forwarded
+    # 8081-8096, 8181-8196 and 9600-9615 all present on enp8s0, arcade's ports
+    # intact, and 11200 correctly getting no rule at all because it is declared
+    # scope = "local". ac-host's global openings still exist alongside these;
+    # removing them is the separate step where the exposure actually shrinks.
+    firewall = lib.mkDefault true;
+
+    # Phase 3. Writes /etc/homelab/tenants.json for boxctl. Touches no units --
+    # its activation plan came out byte-identical to phase 1's.
+    inventory = lib.mkDefault true;
+
+    # Phase 5. Generates prometheus scrapeConfigs from tenant declarations,
+    # reproducing the existing five job names byte-for-byte, because renaming a
+    # job orphans every dashboard built on it.
+    scrape = lib.mkDefault true;
+
+    # Phase 6, still off. The only flag that restarts units: Slice= applies at
+    # unit start, so assigning it bounces the unit. resources.nix now skips
+    # non-drainable and critical tenants for exactly that reason, but the
+    # remaining churn (arcade, grafana, the exporters all moving into slices)
+    # deserves its own switch rather than riding along with three quiet flags.
     slices = lib.mkDefault false;
-    scrape = lib.mkDefault false;
-    inventory = lib.mkDefault false;
   };
 
   # ---------------------------------------------------------------------------
