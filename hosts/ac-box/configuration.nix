@@ -39,11 +39,16 @@ in
   # inventory, then firewall, then scrape, then slices. Set explicitly rather
   # than relying on the defaults, so the phase is legible in the config itself.
   # ---------------------------------------------------------------------------
+  # mkDefault, not a bare false. Setting these at normal priority made every
+  # phase flip untestable: `extendModules` with `inventory = true` failed with
+  # "conflicting definition values" against this file, so proving a phase's
+  # blast radius required editing the repo first. With mkDefault, a variant can
+  # override cleanly and each flip can be dry-activated before it is committed.
   homelab.enforce = {
-    firewall = false;
-    slices = false;
-    scrape = false;
-    inventory = false;
+    firewall = lib.mkDefault false;
+    slices = lib.mkDefault false;
+    scrape = lib.mkDefault false;
+    inventory = lib.mkDefault false;
   };
 
   # ---------------------------------------------------------------------------

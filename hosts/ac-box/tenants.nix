@@ -165,6 +165,18 @@
     # Phase 1 of the local coding-agent host: llama.cpp model server only,
     # LAN-bound. Runner phase (repo access, PR creation) is not enabled yet.
     agent-hub = {
+      # Declared but NOT enabled: agent-hub's module is not imported by this
+      # host yet, so agent-hub-llm.service does not exist. Testing the
+      # enforce.firewall flip showed the consequence of leaving this on -- the
+      # contract dutifully opened tcp/8100 on enp8s0 for a service that is not
+      # running, and would have assigned a slice to a non-existent unit.
+      #
+      # The declaration stays so its ports keep participating in collision
+      # detection (8100 was moved here off 8091 precisely because it clashed
+      # with assetto's HTTP block). enable flips to true in the phase that
+      # actually imports the module.
+      enable = false;
+
       description = "LAN-only llama.cpp model server for the local coding agent (phase 1: serving only).";
       tier = "background";
 
