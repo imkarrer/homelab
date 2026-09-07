@@ -30,6 +30,21 @@ nix build .#nixosConfigurations.ac-box.config.system.build.toplevel
 nix store diff-closures /run/current-system ./result
 ```
 
+> **WARNING — gate 1 alone is not sufficient, and gives false confidence.**
+> `diff-closures` compares *package sets*: what was added, removed, or changed
+> version. It does **not** compare file contents. Run live on 7 Sep 2026 it
+> reported **completely clean output** while seventeen files differed between the
+> two systems — including `ac-host-static.service`, the one unit whose restart
+> runs `docker rm -f` and destroys the race containers.
+>
+> A clean gate 1 means "no packages changed". It does not mean "nothing changed".
+> Never switch on gate 1 alone; gate 2 is the gate that actually protects you.
+> To see file-level differences, compare the trees directly:
+>
+> ```bash
+> diff -rq /run/current-system/etc <new-system>/etc
+> ```
+
 **Acceptance criterion:** no *substantive* differences. Expect literally zero output in the ideal case, but the following are permissible and do not block:
 
 - the NixOS version label / `configurationRevision`, which embeds the flake revision and therefore always differs once the config comes from a different repo;
@@ -211,3 +226,37 @@ You have successfully cut over when:
 Condition 4 is the one that catches the failure this whole runbook exists to prevent: if the containers came back but their uptimes reset, `ac-host-static` was bounced and the race servers were destroyed and recreated, losing session state.
 
 Do not return to normal operations until all six conditions are met.
+
+## Phase 1 Result — 7 September 2026
+
+Both gates run against `github:imkarrer/homelab` at commit `46500af`+, built on the box.
+
+**Gate 1** (`diff-closures`): clean — and, as the warning above records, misleadingly so.
+
+**Gate 1a** (`diff -rq .../etc`): seventeen files differ. All four significant ones are understood:
+
+| File | Difference | Verdict |
+| --- | --- | --- |
+| `ac-host-static.service` | `+TimeoutStartSec=15min` | A fix that has been sitting in git while the box ran without it. Desirable. |
+| `arcade-mindustry.service` | `ExecStart` store path | The stdin-piping fix. The box's copy passes startup commands as argv, which is why the server reports active and never binds 6567. Desirable. |
+| `journald.conf` | leading indentation only | `SystemMaxUse=200M` and `MaxRetentionSec=14day` present in both. Semantically identical. |
+| `grafana.service` | unit-script store path | Wrapper path only; no option difference found. |
+
+**Gate 2** (`switch-to-configuration dry-activate`):
+
+```
+would stop: arcade-mindustry.service, grafana.service, systemd-tmpfiles-resetup.service
+would NOT stop the following changed units: ac-host-static.service
+would reload: dbus-broker.service
+would restart: systemd-journald.service
+would start: arcade-mindustry.service, grafana.service, systemd-tmpfiles-resetup.service
+```
+
+Acceptance criteria satisfied:
+
+- `docker.service` — absent from the output entirely. The 13 containers are untouched.
+- `ac-host-static.service` — changed, but listed under *would NOT stop*. The module carries `stopIfChanged = false`, which is what its "never bounce this on nixos-rebuild" comment implements. **The race containers survive the switch.**
+
+Actual service impact, all on drainable tenants: Mindustry stops and starts (and begins working for the first time), Grafana blinks, `systemd-tmpfiles-resetup` and a journald restart are routine.
+
+So phase 1 is **proven**, with the caveat that "no-op" is not literally true — two deliberate fixes ride along, both on drainable units. Given no races are running, this is the moment the switch is cheapest.
