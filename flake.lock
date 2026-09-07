@@ -1,0 +1,64 @@
+{
+  "nodes": {
+    "ac-host": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1788809302,
+        "narHash": "sha256-urEKaMKTNAf5r4m5ASYVbOoBZ6Op/f2Xi5uZ0jnPHjY=",
+        "owner": "imkarrer",
+        "repo": "ac-host",
+        "rev": "b5949797ef7e83b72ac24bad653eceab54cf89e5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "imkarrer",
+        "repo": "ac-host",
+        "type": "github"
+      }
+    },
+    "home-arcade": {
+      "locked": {
+        "lastModified": 1788786959,
+        "narHash": "sha256-KRp+rb/iegMg0wiCvfXgxwo7+pXlmryek+cN+MrGQ2Q=",
+        "owner": "imkarrer",
+        "repo": "home-arcade",
+        "rev": "5cd057dd5a7c5d5d906de4a2083658a465a4853c",
+        "type": "github"
+      },
+      "original": {
+        "owner": "imkarrer",
+        "repo": "home-arcade",
+        "type": "github"
+      }
+    },
+    "nixpkgs": {
+      "locked": {
+        "lastModified": 1787962033,
+        "narHash": "sha256-u6z9VTZA4Kf3RkHQo9sQI7NI4Ei/uiU9vrMqOiwWP1Y=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "c5c4a43b0e8056328ec4529f735cabdb8f1942bb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "c5c4a43b0e8056328ec4529f735cabdb8f1942bb",
+        "type": "github"
+      }
+    },
+    "root": {
+      "inputs": {
+        "ac-host": "ac-host",
+        "home-arcade": "home-arcade",
+        "nixpkgs": "nixpkgs"
+      }
+    }
+  },
+  "root": "root",
+  "version": 7
+}

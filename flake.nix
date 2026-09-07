@@ -1,0 +1,96 @@
+{
+  description = "Platform layer for ac-box: host facts, a tenant contract, and the tenants as inputs";
+
+  inputs = {
+    # This repo owns nixpkgs, and a tenant must not drag its own copy into the
+    # closure -- hence the follows below.
+    #
+    # Pinned to the EXACT revision ac-box is running, not to the nixos-26.05
+    # branch. `nixos-version --json` on the box reports
+    # nixpkgsRevision c5c4a43b0e8056328ec4529f735cabdb8f1942bb; tracking the
+    # branch instead resolved six days newer and renamed the system derivation
+    # from ...20260829.c5c4a43 to ...20260906.c257840, which would have made
+    # phase 1's diff-closures show hundreds of unrelated package differences and
+    # buried any real one. Advancing this pin is a deliberate, separate change
+    # with its own window -- never a side effect of composing.
+    nixpkgs.url = "github:NixOS/nixpkgs/c5c4a43b0e8056328ec4529f735cabdb8f1942bb";
+
+    # The Assetto Corsa tenant, and (for now) the observability stack, which
+    # still lives inside that repo. Lifting monitoring to L2 is a later phase;
+    # phase 1 consumes it unchanged so the closure stays identical.
+    ac-host = {
+      url = "github:imkarrer/ac-host";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+
+    # The arcade tenant. Module-only flake with no inputs of its own, so there
+    # is nothing to make follow.
+    home-arcade.url = "github:imkarrer/home-arcade";
+  };
+
+  outputs =
+    { self, nixpkgs, ac-host, home-arcade }:
+    let
+      system = "x86_64-linux";
+      pkgs = nixpkgs.legacyPackages.${system};
+    in
+    {
+      # The contract and the platform, offered separately so another host can
+      # take the layer without taking ac-box's tenants.
+      nixosModules = {
+        tenantContract = ./modules/tenant;
+        platform = ./modules/platform;
+      };
+
+      nixosConfigurations.ac-box = nixpkgs.lib.nixosSystem {
+        inherit system;
+        modules = [
+          # L1: the contract. Assertions run unconditionally; every effect is
+          # gated behind homelab.enforce.*, all of which default false. That is
+          # what lets this configuration be a no-op on the first switch.
+          ./modules/tenant/schema.nix
+          ./modules/tenant/enforce.nix
+          ./modules/tenant/ports.nix
+          ./modules/tenant/resources.nix
+          ./modules/tenant/metrics.nix
+          ./modules/tenant/quiet.nix
+
+          # L0: the platform. Reproduces what ac-box already runs, deliberately
+          # without improving it.
+          #
+          # platform/docker.nix is NOT imported yet. ac-host.nix sets
+          # virtualisation.docker.enable itself, and two modules setting a bool
+          # to the same value merge silently in NixOS while only conflicting on
+          # differing values -- so importing both is a latent landmine rather
+          # than an immediate error. Moving Docker down is its own phase.
+          ./modules/platform/host-options.nix
+          ./modules/platform/network.nix
+          ./modules/platform/identity.nix
+          ./modules/platform/nix.nix
+          ./modules/platform/ssh.nix
+          ./modules/platform/boot.nix
+
+          # L3: the tenants, as inputs rather than vendored copies. arcade-hub
+          # comes from home-arcade's canonical module -- not the drifted,
+          # mojibake copy that used to live in the ac-host tree.
+          ac-host.nixosModules.ac-host
+          ac-host.nixosModules.monitoring
+          home-arcade.nixosModules.arcade-hub
+
+          # This host.
+          ./hosts/ac-box/host.nix
+          ./hosts/ac-box/tenants.nix
+          ./hosts/ac-box/configuration.nix
+        ];
+      };
+
+      formatter.${system} = pkgs.nixfmt-rfc-style;
+
+      packages.${system}.boxctl = pkgs.callPackage ./pkgs/boxctl { };
+
+      # `nix flake check` evaluates the host configuration, which is the cheap
+      # gate that catches a port collision or a budget overrun before anyone
+      # opens a maintenance window.
+      checks.${system}.ac-box = self.nixosConfigurations.ac-box.config.system.build.toplevel;
+    };
+}
