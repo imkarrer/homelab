@@ -8,3 +8,9 @@ hosts/*/hardware-configuration.nix
 
 # Public keys are not secret, but keep the tracked/local split ac-host uses.
 hosts/*/ssh-keys.local.nix
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
