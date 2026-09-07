@@ -100,12 +100,41 @@ Before making any change, pin the current running system so `nix.gc` does not de
 
 The platform runs `nix.gc` with `--delete-older-than 7d` on a weekly schedule. Without a GC root, the current closure becomes a deletion candidate the moment the new closure is activated. If the new system has a bug and you need to fall back within a week, the old closure is gone and you cannot use the boot menu to rollback.
 
-**Before gate 1, run:**
+**Already done** — pinned on 7 Sep 2026, before any of this began:
 ```bash
-nix-store --add-root /nix/var/nix/gcroots/pre-homelab --indirect -r $(readlink -f /run/current-system)
+nix-store --add-root /nix/var/nix/gcroots/pre-homelab -r $(readlink -f /run/current-system)
 ```
 
-This creates an indirect GC root at `/nix/var/nix/gcroots/pre-homelab` pointing to the current system closure. It will not be touched by `nix.gc --delete-older-than 7d` as long as the root exists. The root survives reboots.
+Note the absence of `--indirect`. A symlink placed *inside* `/nix/var/nix/gcroots/` is a **direct** root, which Nix finds by scanning that directory; `--indirect` is for roots living elsewhere (like a `./result` symlink), which get registered via `gcroots/auto/`. Passing `--indirect` for a path already under `gcroots/` is the wrong form. The command above is the one that was actually run and verified.
+
+Verify a root is real rather than assuming it — creating the symlink is not proof that Nix honours it:
+```bash
+nix-store --gc --print-roots | grep pre-homelab
+```
+
+Currently protecting:
+```
+/nix/var/nix/gcroots/pre-homelab -> /nix/store/52rfi2kgix05hmyawfz4wj04pngcfn82-nixos-system-ac-box-26.05.20260829.c5c4a43
+```
+
+It will survive `nix.gc --delete-older-than 7d` and reboots for as long as the symlink exists.
+
+## Recorded Baseline
+
+Captured 7 Sep 2026 with no races running, into `.cutover/` (gitignored — regenerate per attempt, diff the raw files). The summary is recorded here so the provenance survives even if the raw captures do not:
+
+| | Baseline |
+|---|---|
+| Closure | `52rfi2kgix05hmyawfz4wj04pngcfn82-nixos-system-ac-box-26.05.20260829.c5c4a43` |
+| Containers | 13 |
+| Running services | 28 |
+| Listening sockets | 46 lines of `ss -tulnp` |
+| Prometheus targets | 5, all `up`: cadvisor, docker-names, node, udr-fw, unpoller |
+| `NRestarts` | `0` for docker, ac-host-static, arcade-freeciv, arcade-mindustry |
+
+The `NRestarts` row is the load-bearing one. After the switch, those four counters must still read `0` — a non-zero value on `ac-host-static` means its `ExecStop` ran `docker rm -f` and the race servers were destroyed and recreated, which is the exact failure gate 2 exists to prevent.
+
+One measurement trap worth recording: `before.prometheus.json` is a single line with no trailing newline, so `wc -l` reports `0` on a file that holds 2.6 KB. Check these captures with `wc -c`, not `wc -l`, or you will conclude a capture failed when it did not.
 
 **After a successful cutover,** you can remove the root if you are confident the new system is stable:
 ```bash

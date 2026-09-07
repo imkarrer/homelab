@@ -14,3 +14,6 @@ hosts/*/ssh-keys.local.nix
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Cutover surface captures — ephemeral working state, regenerated per attempt.
+.cutover/
