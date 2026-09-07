@@ -1,0 +1,44 @@
+# The ONLY file in this repo containing literals specific to this machine.
+# Adapting to another box is a new hosts/<name>/host.nix plus a tenant choice.
+# Values below were surveyed live on ac-box, 7 Sep 2026.
+{ ... }:
+
+{
+  homelab.host = {
+    name = "ac-box";
+    timezone = "America/Chicago";
+
+    networks = {
+      lan = {
+        interface = "enp8s0";
+        address = "192.168.1.50";
+        prefixLength = 24;
+      };
+      # Cabled but DOWN. The dual-NIC runbook brings this up as management.
+      # Nothing may be scoped to it until it has an address.
+      mgmt = {
+        interface = "eno1";
+        address = null;
+      };
+    };
+
+    # HP Z840. Verified against /proc at activation — copying this file to a
+    # smaller machine without editing it is the classic portability bug, so the
+    # platform warns rather than silently overcommitting.
+    capacity = {
+      cpuThreads = 56;
+      memoryGiB = 251;
+    };
+
+    paths = {
+      data = "/srv";
+      state = "/var/lib";
+    };
+
+    # The 03:00 ritual the Discord community already understands. Read by the
+    # drain policy; not reinvented.
+    maintenance.window = "03:00";
+
+    gpu = "nvidia";
+  };
+}
