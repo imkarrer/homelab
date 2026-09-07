@@ -167,6 +167,13 @@ let
     (_: tenantCfg: map (unit: { inherit unit; tier = tenantCfg.tier; }) tenantCfg.units)
     sliceableTenants);
 
+  # Tenants whose real workload is containers, sitting in a tier that carries an
+  # AllowedCPUs fence. These are the ones where the tier model looks like it is
+  # protecting something and is not.
+  dockerTenantsInFencedTiers = lib.mapAttrsToList
+    (name: t: "${name} (tier=${t.tier})")
+    (lib.filterAttrs (_: t: t.needsDocker && sliceUnitsAreFenced t.tier) enabledTenants);
+
   # Surfaced as a warning rather than left silent, so "why is ac-host-static not
   # in a slice?" has an answer visible in the built system.
   unsliceableUnits = lib.flatten (lib.mapAttrsToList
@@ -293,7 +300,31 @@ in
       # Deliberately excluded from slice assignment, and said out loud. These
       # units keep running in system.slice; they are protected by background and
       # batch being fenced off their cores, not by being confined themselves.
-      warnings = lib.optional (nonServiceUnits != [ ]) ''
+      # The tier model fences systemd units. It cannot fence Docker containers,
+      # and that is not a bug in this file -- container cgroup placement is
+      # decided by dockerd, not by the cgroup of whoever invoked docker. A
+      # container started from an SSH session (user.slice) still lands in
+      # system.slice, a sibling of any invoking unit rather than a child of its
+      # slice. So a Docker-based tenant in a fenced tier looks protected here
+      # while its actual workload runs unconstrained.
+      #
+      # The fix lives in the tenant's own compose file, as
+      # `cgroup_parent: <tier>.slice` on each service, which makes the container
+      # inherit this slice's AllowedCPUs and MemoryMax. Verified on ac-box:
+      # --cgroup-parent=batch.slice yields cpuset 28-55, without it 0-55.
+      #
+      # Warned rather than asserted: the contract cannot see another repo's
+      # compose file, so it can flag the risk but must not claim to know whether
+      # it was handled.
+      warnings = lib.optional (dockerTenantsInFencedTiers != [ ]) ''
+        homelab: these tenants declare needsDocker and sit in a CPU-fenced tier,
+        but a slice cannot constrain Docker containers on its own:
+          ${lib.concatStringsSep "\n          " dockerTenantsInFencedTiers}
+        dockerd places container scopes under system.slice regardless of which
+        slice started them, so the containers run unfenced unless the tenant's
+        own compose file sets `cgroup_parent: <tier>.slice` per service. Slicing
+        the unit that runs docker-compose is NOT sufficient.
+      '' ++ lib.optional (nonServiceUnits != [ ]) ''
         homelab: these declared units are not .service units, so Slice= cannot
         apply to them and they were skipped:
           ${lib.concatMapStringsSep "\n          " (u: u.unit) nonServiceUnits}
