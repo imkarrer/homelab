@@ -25,6 +25,25 @@
       ];
 
       portRanges = {
+        # acServer opens a second UDP socket at gamePort + 1600 per slot; live
+        # on 11200/11201/11202/11208 for the four running lobbies. Nothing
+        # firewalls or forwards these — ac-host.nix never mentions them and
+        # unifi_pf.py only forwards game/http/details — so they are effectively
+        # host-local despite binding on all interfaces.
+        #
+        # Declared anyway, and this is precisely why the registry exists: these
+        # sixteen port numbers ARE occupied on this host, so leaving them out
+        # means the collision assertion would let another tenant claim 11200 and
+        # nobody would find out until runtime. Found by cross-checking
+        # `ss -ulnp` against the declarations, because no config file mentions
+        # them at all.
+        pluginUdp = {
+          start = 11200;
+          count = 16;
+          proto = [ "udp" ];
+          scope = "local";
+        };
+
         game = {
           start = 9600;
           count = 16;
