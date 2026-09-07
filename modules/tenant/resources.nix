@@ -173,14 +173,30 @@ let
     (name: t: map (u: "${u} (tenant ${name}, tier=${t.tier}, drainable=${lib.boolToString t.quiet.drainable})") t.units)
     (lib.filterAttrs (n: _: !(sliceableTenants ? ${n})) enabledTenants));
 
+  # systemd.services is keyed by BARE unit name -- "grafana", not
+  # "grafana.service". Tenants declare units with the suffix, because the README
+  # requires verbatim names and that is what systemctl shows.
+  #
+  # Keying systemd.services with the suffix does not error. It silently defines a
+  # unit called "grafana.service.service". That is exactly what happened: the
+  # built closure carried ten phantom *.service.service units, no real unit
+  # referenced any slice, and dry-activate cheerfully reported no restarts --
+  # because nothing real had changed. The slices existed, so it looked like it
+  # worked. The whole tiering guarantee was inert.
+  #
+  # Only .service units can take Slice=. A .timer does not run processes, so
+  # slicing one is meaningless; those are reported instead of silently dropped.
+  sliceableServiceUnits = builtins.filter (u: lib.hasSuffix ".service" u.unit) tenantUnitTiers;
+  nonServiceUnits = builtins.filter (u: !(lib.hasSuffix ".service" u.unit)) tenantUnitTiers;
+
   unitServiceConfigs = lib.listToAttrs (map
-    (u: lib.nameValuePair u.unit {
+    (u: lib.nameValuePair (lib.removeSuffix ".service" u.unit) {
       serviceConfig = {
         Slice = "${u.tier}.slice";
         Nice = cfg.tiers.${u.tier}.nice;
       };
     })
-    tenantUnitTiers);
+    sliceableServiceUnits);
 
   # Inline (rather than a separate pkgs.writeShellScript derivation) so this
   # activation check is just one more fragment of the same stitched-together
@@ -277,7 +293,13 @@ in
       # Deliberately excluded from slice assignment, and said out loud. These
       # units keep running in system.slice; they are protected by background and
       # batch being fenced off their cores, not by being confined themselves.
-      warnings = lib.optional (unsliceableUnits != [ ]) ''
+      warnings = lib.optional (nonServiceUnits != [ ]) ''
+        homelab: these declared units are not .service units, so Slice= cannot
+        apply to them and they were skipped:
+          ${lib.concatMapStringsSep "\n          " (u: u.unit) nonServiceUnits}
+        A .timer runs no processes of its own; the service it activates is what
+        needs the slice.
+      '' ++ lib.optional (unsliceableUnits != [ ]) ''
         homelab: these units are intentionally NOT assigned a slice, because
         Slice= only takes effect on unit start and restarting them is harmful:
           ${lib.concatStringsSep "\n          " unsliceableUnits}
