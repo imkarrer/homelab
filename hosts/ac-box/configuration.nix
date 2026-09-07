@@ -63,12 +63,16 @@ in
     # job orphans every dashboard built on it.
     scrape = lib.mkDefault true;
 
-    # Phase 6, still off. The only flag that restarts units: Slice= applies at
-    # unit start, so assigning it bounces the unit. resources.nix now skips
-    # non-drainable and critical tenants for exactly that reason, but the
-    # remaining churn (arcade, grafana, the exporters all moving into slices)
-    # deserves its own switch rather than riding along with three quiet flags.
-    slices = lib.mkDefault false;
+    # Phase 6. The only flag with real service churn, deliberately taken in its
+    # own switch rather than riding along with the three quiet ones.
+    #
+    # Safe now because resources.nix assigns Slice= only where tier != critical
+    # AND quiet.drainable. Slice= applies at unit start, so assigning it bounces
+    # the unit -- and bouncing ac-host-static means `docker rm -f` on three live
+    # race servers. assetto is therefore never sliced, which costs nothing: the
+    # guarantee comes from AllowedCPUs fencing background and batch away from
+    # the cores races use, not from confining races.
+    slices = lib.mkDefault true;
   };
 
   # ---------------------------------------------------------------------------
