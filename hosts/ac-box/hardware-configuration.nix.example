@@ -1,0 +1,21 @@
+# Tracked fallback so the flake evaluates for anyone who hasn't fetched the
+# real hardware-configuration.nix from the box yet. It will not boot a real
+# machine. On (or for) the actual box:
+#
+#   nixos-generate-config --show-hardware-config > hosts/ac-box/hardware-configuration.nix
+#
+# hosts/ac-box/hardware-configuration.nix is gitignored; this .example is the
+# only copy tracked in git, mirroring the same stub used in the ac-host repo.
+{ modulesPath, ... }:
+
+{
+  imports = [ (modulesPath + "/installer/scan/not-detected.nix") ];
+
+  fileSystems."/" = {
+    device = "/dev/disk/by-label/nixos";
+    fsType = "ext4";
+  };
+
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.efi.canTouchEfiVariables = true;
+}
