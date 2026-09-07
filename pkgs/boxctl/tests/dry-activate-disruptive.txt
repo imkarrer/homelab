@@ -1,0 +1,6 @@
+would stop the following units: old-cruft.service
+would NOT stop the following changed units: sshd-keygen.service
+would activate the configuration...
+would reload the following units: prometheus.service
+would restart the following units: ac-host-static.service, agent-hub-llm.service, docker.service
+would start the following units: arcade-mindustry.service

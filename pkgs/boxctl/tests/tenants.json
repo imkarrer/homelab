@@ -1,0 +1,39 @@
+{
+  "generated": "modules/tenant/quiet.nix",
+  "tenants": [
+    {
+      "name": "agent-hub",
+      "tier": "background",
+      "units": ["agent-hub-llm.service"],
+      "quiet": { "drainable": true, "busyCheck": null, "drain": null, "resume": null },
+      "ports": {},
+      "portRanges": {}
+    },
+    {
+      "name": "arcade",
+      "tier": "interactive",
+      "units": ["arcade-freeciv.service", "arcade-mindustry.service"],
+      "quiet": { "drainable": true, "busyCheck": null, "drain": null, "resume": null },
+      "ports": {},
+      "portRanges": {}
+    },
+    {
+      "name": "assetto",
+      "tier": "critical",
+      "units": ["ac-host-static.service", "docker.service"],
+      "quiet": { "drainable": false, "busyCheck": "/run/current-system/sw/bin/true", "drain": null, "resume": null },
+      "ports": { "web": { "number": 8090, "proto": ["tcp"], "scope": "lan", "justification": null } },
+      "portRanges": {
+        "lobbies": { "start": 9600, "count": 20, "proto": ["udp", "tcp"], "scope": "forwarded", "justification": "AC lobbies are internet-facing by design; unifi_pf.py forwards per slot." }
+      }
+    },
+    {
+      "name": "observability",
+      "tier": "critical",
+      "units": ["prometheus.service", "grafana.service"],
+      "quiet": { "drainable": false, "busyCheck": null, "drain": null, "resume": null },
+      "ports": {},
+      "portRanges": {}
+    }
+  ]
+}
