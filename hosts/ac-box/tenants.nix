@@ -83,6 +83,29 @@
         };
       };
 
+      # The auth sidecars. Both containers run with NetworkMode: host, so they
+      # bind the host's loopback directly rather than publishing a mapped port
+      # -- which is why they are invisible to `docker port` and were missed on
+      # the first pass through this file.
+      #
+      # Found the same way as the 11200 range: by diffing `ss -tlnp` against
+      # these declarations, not by reading a config file. Neither appears in
+      # ac-host.nix. They are registered so the collision assertion knows the
+      # numbers are taken; scope = "local" means no firewall rule is emitted,
+      # matching how they actually bind.
+      ports = {
+        auth = {
+          number = 18080;
+          proto = [ "tcp" ];
+          scope = "local";
+        };
+        auth-dev = {
+          number = 18081;
+          proto = [ "tcp" ];
+          scope = "local";
+        };
+      };
+
       # Preserved, not derived: /var/lib/ac-host predates this repo and holds
       # the whitelist, race/series history and generated content. Renaming it
       # is a data migration, not a config change (README, "State paths").
