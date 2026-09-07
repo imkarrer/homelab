@@ -29,6 +29,7 @@
 
 let
   inherit (lib)
+    mkIf
     mkMerge
     concatMap
     concatLists
@@ -43,6 +44,7 @@ let
 
   tenants = config.homelab.tenants;
   netCfg = config.homelab.host.networks;
+  enforceFirewall = config.homelab.enforce.firewall;
 
   # A single explicit `ports.<name>` claim, unpacked to the shape the rest of
   # this file works with. `proto` stays a list here; it's fanned out later.
@@ -118,25 +120,41 @@ let
   mgmtUdp = portsOn "mgmt" "udp";
 in
 {
-  config = {
-    assertions = collisionAssertions ++ forwardedAssertions ++ mgmtAssertions;
+  config = mkMerge [
+    # Assertions are evaluation-time only -- they cost nothing in the closure
+    # -- so they run unconditionally, independent of homelab.enforce.firewall
+    # (declared in enforce.nix). This is what lets the contract ship before
+    # any of its effects are turned on: the collision, forwarded-justification
+    # and mgmt-address checks all still fire with the switch off.
+    {
+      assertions = collisionAssertions ++ forwardedAssertions ++ mgmtAssertions;
+    }
 
-    # Two separate fragments merged through the option system (rather than a
-    # single `//`-built attrset) so this doesn't blow up if lanIface and
-    # mgmtIface were ever the same string.
-    networking.firewall.interfaces = mkMerge [
-      {
-        ${lanIface} = {
-          allowedTCPPorts = lanTcp;
-          allowedUDPPorts = lanUdp;
-        };
-      }
-      {
-        ${mgmtIface} = {
-          allowedTCPPorts = mgmtTcp;
-          allowedUDPPorts = mgmtUdp;
-        };
-      }
-    ];
-  };
+    # The actual firewall effect. Wrapped in mkIf rather than left
+    # unconditional with empty lists when off: an mkIf false contributes
+    # NOTHING to networking.firewall.interfaces -- not an entry with empty
+    # allowedTCPPorts/allowedUDPPorts -- which matters because even an empty
+    # per-interface block is a definition the real firewall module has to
+    # process. See tests/eval.nix's allFalse case, which asserts the
+    # attribute is entirely absent from config.
+    (mkIf enforceFirewall {
+      # Two separate fragments merged through the option system (rather than
+      # a single `//`-built attrset) so this doesn't blow up if lanIface and
+      # mgmtIface were ever the same string.
+      networking.firewall.interfaces = mkMerge [
+        {
+          ${lanIface} = {
+            allowedTCPPorts = lanTcp;
+            allowedUDPPorts = lanUdp;
+          };
+        }
+        {
+          ${mgmtIface} = {
+            allowedTCPPorts = mgmtTcp;
+            allowedUDPPorts = mgmtUdp;
+          };
+        }
+      ];
+    })
+  ];
 }

@@ -14,7 +14,7 @@
 { config, lib, ... }:
 
 let
-  inherit (lib) filterAttrs mapAttrsToList;
+  inherit (lib) filterAttrs mapAttrsToList mkIf;
 
   tenants = config.homelab.tenants;
 
@@ -36,11 +36,17 @@ let
 
 in
 {
-  config.environment.etc."homelab/tenants.json" = {
-    mode = "0444";
-    text = builtins.toJSON {
-      generated = "modules/tenant/quiet.nix";
-      tenants = mapAttrsToList toEntry enabledTenants;
+  # mkIf, not an unconditional environment.etc entry: an mkIf false
+  # contributes NOTHING to environment.etc -- the "homelab/tenants.json" key
+  # is entirely absent, not present with empty/placeholder content -- see
+  # tests/eval-quiet.nix's allFalse case.
+  config = mkIf config.homelab.enforce.inventory {
+    environment.etc."homelab/tenants.json" = {
+      mode = "0444";
+      text = builtins.toJSON {
+        generated = "modules/tenant/quiet.nix";
+        tenants = mapAttrsToList toEntry enabledTenants;
+      };
     };
   };
 }

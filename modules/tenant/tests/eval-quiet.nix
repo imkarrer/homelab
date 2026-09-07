@@ -8,94 +8,144 @@
 # now declares it), so only the one leaf it writes to is stubbed:
 # environment.etc (tests/stub-etc.nix).
 #
+# homelab.enforce.inventory (modules/tenant/enforce.nix) gates the whole
+# /etc/homelab/tenants.json effect; there are no assertions in quiet.nix to
+# keep unconditional, so the two cases below are a straight on/off split.
+#
 # Usage:
 #   nix --extra-experimental-features "nix-command flakes" eval \
-#     -f modules/tenant/tests/eval-quiet.nix checked
+#     -f modules/tenant/tests/eval-quiet.nix allTrue.checked
 #   nix --extra-experimental-features "nix-command flakes" eval --json \
-#     -f modules/tenant/tests/eval-quiet.nix tenantsJson
+#     -f modules/tenant/tests/eval-quiet.nix allTrue.tenantsJson
+#   nix --extra-experimental-features "nix-command flakes" eval \
+#     -f modules/tenant/tests/eval-quiet.nix allFalse.checked
 { lib ? (import <nixpkgs> { }).lib }:
 
 let
   schema = ../schema.nix;
+  enforce = ../enforce.nix;
   quiet = ../quiet.nix;
   stubEtc = ./stub-etc.nix;
   tenants = ./fixtures/metrics-quiet-tenants.nix;
 
-  evaluated = lib.evalModules {
-    modules = [
-      stubEtc
-      schema
-      quiet
-      tenants
-    ];
-  };
-
-  etcFile = evaluated.config.environment.etc."homelab/tenants.json";
-  tenantsJson = builtins.fromJSON etcFile.text;
-  byName = lib.listToAttrs (map (t: lib.nameValuePair t.name t) tenantsJson.tenants);
-
-  checks = [
-    {
-      assertion = etcFile.mode == "0444";
-      message = "tenants.json must be world-readable, not writable -- it's boxctl's read-only input";
-    }
-    {
-      assertion = lib.length tenantsJson.tenants == 4;
-      message = "expected exactly 4 tenants (assetto, arcade, agent-hub, observability) -- the disabled ci tenant must be excluded entirely";
-    }
-    {
-      assertion = !(byName ? ci);
-      message = "a disabled tenant must not appear in tenants.json at all";
-    }
-    {
-      assertion = byName.assetto.quiet == {
-        drainable = false;
-        busyCheck = "/run/current-system/sw/bin/true";
-        drain = null;
-        resume = null;
+  mkCase =
+    { extraModules ? [ ], checks }:
+    let
+      evaluated = lib.evalModules {
+        modules = [
+          stubEtc
+          schema
+          enforce
+          quiet
+          tenants
+        ]
+        ++ extraModules;
       };
-      message = "quiet policy must pass through unchanged (drainable + busyCheck, plus drain/resume)";
-    }
-    {
-      assertion = byName.assetto.units == [
-        "ac-host-static.service"
-        "docker.service"
-      ];
-      message = "units must be reproduced verbatim, in declared order, unrenamed";
-    }
-    {
-      assertion = byName.assetto.ports.web.number == 8090 && byName.assetto.ports.web.scope == "lan";
-      message = "explicit port claims must be included";
-    }
-    {
-      assertion =
-        byName.assetto.portRanges.lobbies.start == 9600 && byName.assetto.portRanges.lobbies.count == 20;
-      message = "port ranges must be included";
-    }
-    {
-      assertion = byName.observability.quiet.drainable == false && byName.observability.quiet.busyCheck == null;
-      message = "a tenant with drainable = false and no busyCheck must still round-trip (busyCheck: null)";
-    }
-    {
-      assertion = byName.arcade.quiet.drainable == true;
-      message = "a drainable tenant's policy must round-trip too";
-    }
-    {
-      assertion = !(tenantsJson ? maintenanceWindow);
-      message = "tenants.json must NOT embed homelab.host.maintenance.window -- that's an L0 fact, out of scope for a module that only knows the tenant schema (see quiet.nix's header)";
-    }
-  ];
 
-  failed = lib.filter (c: !c.assertion) checks;
+      cfg = evaluated.config;
+      hasFile = cfg.environment.etc ? "homelab/tenants.json";
+
+      failed = lib.filter (c: !c.assertion) (checks cfg hasFile);
+    in
+    {
+      ok = failed == [ ];
+      messages = map (c: c.message) failed;
+      checked =
+        if failed == [ ] then
+          "OK: all checks passed"
+        else
+          throw (lib.concatStringsSep "\n" (map (c: c.message) failed));
+    }
+    // lib.optionalAttrs hasFile (
+      let
+        etcFile = cfg.environment.etc."homelab/tenants.json";
+      in
+      {
+        mode = etcFile.mode;
+        tenantsJson = builtins.fromJSON etcFile.text;
+      }
+    );
 in
 {
-  inherit tenantsJson;
-  mode = etcFile.mode;
-  ok = failed == [ ];
-  messages = map (c: c.message) failed;
-  checked =
-    if failed == [ ] then
-      "OK: all checks passed"
-    else
-      throw (lib.concatStringsSep "\n" (map (c: c.message) failed));
+  # enforce.inventory = true: behaviour unchanged from what this harness
+  # always asserted -- same checks, just moved under this case name.
+  allTrue = mkCase {
+    extraModules = [ { homelab.enforce.inventory = true; } ];
+    checks =
+      cfg: hasFile:
+      let
+        etcFile = cfg.environment.etc."homelab/tenants.json";
+        tenantsJson = builtins.fromJSON etcFile.text;
+        byName = lib.listToAttrs (map (t: lib.nameValuePair t.name t) tenantsJson.tenants);
+      in
+      [
+        {
+          assertion = hasFile;
+          message = "enforce.inventory = true: /etc/homelab/tenants.json must be written";
+        }
+        {
+          assertion = etcFile.mode == "0444";
+          message = "tenants.json must be world-readable, not writable -- it's boxctl's read-only input";
+        }
+        {
+          assertion = lib.length tenantsJson.tenants == 4;
+          message = "expected exactly 4 tenants (assetto, arcade, agent-hub, observability) -- the disabled ci tenant must be excluded entirely";
+        }
+        {
+          assertion = !(byName ? ci);
+          message = "a disabled tenant must not appear in tenants.json at all";
+        }
+        {
+          assertion = byName.assetto.quiet == {
+            drainable = false;
+            busyCheck = "/run/current-system/sw/bin/true";
+            drain = null;
+            resume = null;
+          };
+          message = "quiet policy must pass through unchanged (drainable + busyCheck, plus drain/resume)";
+        }
+        {
+          assertion = byName.assetto.units == [
+            "ac-host-static.service"
+            "docker.service"
+          ];
+          message = "units must be reproduced verbatim, in declared order, unrenamed";
+        }
+        {
+          assertion = byName.assetto.ports.web.number == 8090 && byName.assetto.ports.web.scope == "lan";
+          message = "explicit port claims must be included";
+        }
+        {
+          assertion =
+            byName.assetto.portRanges.lobbies.start == 9600 && byName.assetto.portRanges.lobbies.count == 20;
+          message = "port ranges must be included";
+        }
+        {
+          assertion = byName.observability.quiet.drainable == false && byName.observability.quiet.busyCheck == null;
+          message = "a tenant with drainable = false and no busyCheck must still round-trip (busyCheck: null)";
+        }
+        {
+          assertion = byName.arcade.quiet.drainable == true;
+          message = "a drainable tenant's policy must round-trip too";
+        }
+        {
+          assertion = !(tenantsJson ? maintenanceWindow);
+          message = "tenants.json must NOT embed homelab.host.maintenance.window -- that's an L0 fact, out of scope for a module that only knows the tenant schema (see quiet.nix's header)";
+        }
+      ];
+  };
+
+  # enforce.inventory left at its default (false): the same tenants fixture
+  # (real units, ports, quiet policies) must NOT produce
+  # /etc/homelab/tenants.json at all -- not a present-but-empty file, no key
+  # named "homelab/tenants.json" in environment.etc whatsoever -- proving
+  # quiet.nix contributes NOTHING when off.
+  allFalse = mkCase {
+    checks = cfg: hasFile: [
+      {
+        assertion = !hasFile;
+        message = "enforce.inventory = false (default): environment.etc must not contain \"homelab/tenants.json\" at all, even though the fixture declares real tenants/units/ports";
+      }
+    ];
+  };
 }

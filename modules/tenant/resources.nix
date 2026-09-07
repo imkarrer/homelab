@@ -26,7 +26,7 @@
 { config, lib, pkgs, ... }:
 
 let
-  inherit (lib) mkOption types mkDefault;
+  inherit (lib) mkOption types mkDefault mkIf mkMerge;
 
   cfg = config.homelab;
   capacity = cfg.host.capacity;
@@ -195,34 +195,63 @@ in
     '';
   };
 
-  config = {
-    homelab.tiers = lib.mapAttrs (_: v: {
-      memoryShare = mkDefault v.memoryShare;
-      cpuShare = mkDefault v.cpuShare;
-      ioWeight = mkDefault v.ioWeight;
-      nice = mkDefault v.nice;
-    }) tierDefaults;
+  config = mkMerge [
+    {
+      # homelab.tiers itself is this module's own option, not a NixOS
+      # derivation surface -- setting its defaults doesn't touch the closure,
+      # so it (and the assertion computed from it) stays unconditional. This
+      # is also what lets the budget assertion below still fire with
+      # enforce.slices = false.
+      homelab.tiers = lib.mapAttrs (_: v: {
+        memoryShare = mkDefault v.memoryShare;
+        cpuShare = mkDefault v.cpuShare;
+        ioWeight = mkDefault v.ioWeight;
+        nice = mkDefault v.nice;
+      }) tierDefaults;
 
-    systemd.slices = lib.mapAttrs mkSlice cfg.tiers;
+      # Evaluation-time only -- costs nothing in the closure -- so it runs
+      # unconditionally, independent of homelab.enforce.slices (enforce.nix).
+      assertions = [
+        {
+          assertion = totalMemoryShare <= 0.9;
+          message = ''
+            homelab.tiers: memoryShare must sum to <= 0.9 across all tiers
+            (critical + interactive + background + batch), leaving headroom
+            for the kernel and anything running outside a tenant slice. Got
+            ${toString totalMemoryShare}.
+          '';
+        }
+      ];
+    }
 
-    systemd.services = unitServiceConfigs;
+    # The actual slice/scheduling effect, PLUS the activation-time capacity
+    # check. The capacity check isn't one of the four named enforce switches,
+    # but it writes system.activationScripts.homelabCapacityCheck -- a real
+    # closure change (a new script in the activation stitching) that doesn't
+    # exist on ac-box today, same as systemd.slices and the per-unit
+    # Slice=/Nice= overrides. It exists purely to warn when the capacity
+    # figures the slice math is built on (homelab.host.capacity) have drifted
+    # from what /proc reports, so it's meaningless without the slices it's
+    # validating -- there is no fifth enforce flag for it (the option set is
+    # pinned to exactly firewall/slices/scrape/inventory), and bundling it
+    # under enforce.slices is a closer fit than either adding a flag or
+    # shipping it unconditionally, which would break closure-identity with
+    # ac-box before any switch is flipped.
+    #
+    # mkIf, not an always-present attrset with a conditional body: an mkIf
+    # false contributes NOTHING to systemd.slices / systemd.services /
+    # system.activationScripts -- not an empty attrset -- see tests/
+    # eval-resources.nix's allFalse case.
+    (mkIf cfg.enforce.slices {
+      systemd.slices = lib.mapAttrs mkSlice cfg.tiers;
 
-    assertions = [
-      {
-        assertion = totalMemoryShare <= 0.9;
-        message = ''
-          homelab.tiers: memoryShare must sum to <= 0.9 across all tiers
-          (critical + interactive + background + batch), leaving headroom
-          for the kernel and anything running outside a tenant slice. Got
-          ${toString totalMemoryShare}.
-        '';
-      }
-    ];
+      systemd.services = unitServiceConfigs;
 
-    system.activationScripts.homelabCapacityCheck = {
-      text = capacityCheckText;
-      # Read-only check; doesn't need to run relative to any other script.
-      deps = [ ];
-    };
-  };
+      system.activationScripts.homelabCapacityCheck = {
+        text = capacityCheckText;
+        # Read-only check; doesn't need to run relative to any other script.
+        deps = [ ];
+      };
+    })
+  ];
 }

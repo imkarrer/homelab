@@ -21,7 +21,7 @@
 { config, lib, ... }:
 
 let
-  inherit (lib) filterAttrs mapAttrsToList optionalAttrs;
+  inherit (lib) filterAttrs mapAttrsToList optionalAttrs mkIf;
 
   tenants = config.homelab.tenants;
 
@@ -45,5 +45,13 @@ let
 
 in
 {
-  config.services.prometheus.scrapeConfigs = mapAttrsToList toScrapeConfig tenantsWithMetrics;
+  # mkIf, not an unconditional list that happens to be empty when off: an
+  # mkIf false contributes NOTHING to services.prometheus.scrapeConfigs --
+  # not a [] entry merged in alongside whatever else sets it -- see
+  # tests/eval-metrics.nix's allFalse case, which asserts the option is
+  # entirely undefined by this module (config ? services.prometheus is
+  # false) rather than merely empty.
+  config = mkIf config.homelab.enforce.scrape {
+    services.prometheus.scrapeConfigs = mapAttrsToList toScrapeConfig tenantsWithMetrics;
+  };
 }
