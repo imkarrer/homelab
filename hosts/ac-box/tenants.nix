@@ -141,9 +141,21 @@
       ];
 
       ports = {
+        # TCP only. The server's UDP socket is a different port entirely -- see
+        # freeciv-announce below. Declaring udp here claimed 5556/udp, which
+        # nothing listens on, and left the real one unregistered.
         freeciv = {
           number = 5556;
-          proto = [ "tcp" "udp" ];
+          proto = [ "tcp" ];
+          scope = "lan";
+        };
+        # The LAN-discovery socket, verified live on 0.0.0.0:4555. Third set of
+        # live ports found by diffing `ss` against these declarations rather than
+        # by reading a config file -- after assetto's 11200 range and its 18080
+        # auth sidecars.
+        freeciv-announce = {
+          number = 4555;
+          proto = [ "udp" ];
           scope = "lan";
         };
         mindustry = {

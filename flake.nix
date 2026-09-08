@@ -58,11 +58,19 @@
           # L0: the platform. Reproduces what ac-box already runs, deliberately
           # without improving it.
           #
-          # platform/docker.nix is NOT imported yet. ac-host.nix sets
-          # virtualisation.docker.enable itself, and two modules setting a bool
-          # to the same value merge silently in NixOS while only conflicting on
-          # differing values -- so importing both is a latent landmine rather
-          # than an immediate error. Moving Docker down is its own phase.
+          # Phase 7: platform/docker.nix is now imported, so the daemon is owned
+          # here rather than by the racing tenant. ac-host.nix still sets
+          # virtualisation.docker.enable = true itself, and that is fine rather
+          # than a conflict: NixOS merges two definitions of the same bool
+          # silently when they AGREE, and both evaluate true while assetto
+          # declares needsDocker. Verified experimentally before relying on it.
+          #
+          # It stops being fine the moment they disagree -- if assetto were ever
+          # disabled, or its needsDocker cleared, this becomes a hard eval error
+          # rather than a silent divergence. Removing the line from ac-host.nix is
+          # the cleanup that closes that window; it is not required for the daemon
+          # to change hands.
+          ./modules/platform/docker.nix
           ./modules/platform/host-options.nix
           ./modules/platform/network.nix
           ./modules/platform/identity.nix
