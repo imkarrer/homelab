@@ -7,11 +7,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1788809302,
-        "narHash": "sha256-urEKaMKTNAf5r4m5ASYVbOoBZ6Op/f2Xi5uZ0jnPHjY=",
+        "lastModified": 1788827175,
+        "narHash": "sha256-D4GbJoRlXMo53G4gbs4kUjEQTlrhebIu+Z0Y1DJRGi8=",
         "owner": "imkarrer",
         "repo": "ac-host",
-        "rev": "b5949797ef7e83b72ac24bad653eceab54cf89e5",
+        "rev": "920b04cad4fa6755230fa75cf4940bd8a35d25d4",
         "type": "github"
       },
       "original": {
