@@ -20,6 +20,26 @@
         "type": "github"
       }
     },
+    "agent-hub": {
+      "inputs": {
+        "nixpkgs": [
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1788823544,
+        "narHash": "sha256-HchAuloV9IP0g6rUNdhV4+uZBoae1LXOOgAUkQCT3xI=",
+        "owner": "imkarrer",
+        "repo": "agent-hub",
+        "rev": "6bcefeedb9596d27921c7c36726efe155a5ab00d",
+        "type": "github"
+      },
+      "original": {
+        "owner": "imkarrer",
+        "repo": "agent-hub",
+        "type": "github"
+      }
+    },
     "home-arcade": {
       "locked": {
         "lastModified": 1788826924,
@@ -54,6 +74,7 @@
     "root": {
       "inputs": {
         "ac-host": "ac-host",
+        "agent-hub": "agent-hub",
         "home-arcade": "home-arcade",
         "nixpkgs": "nixpkgs"
       }

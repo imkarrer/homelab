@@ -26,10 +26,20 @@
     # The arcade tenant. Module-only flake with no inputs of its own, so there
     # is nothing to make follow.
     home-arcade.url = "github:imkarrer/home-arcade";
+
+    # The local coding-agent tenant: llama.cpp model serving plus a sandboxed
+    # repo+task->PR runner. Declared in hosts/ac-box/tenants.nix but not yet
+    # enabled there (homelab.tenants.agent-hub.enable = false) -- importing
+    # the module here is the no-op half of turning it on; a human still has
+    # to flip services.agent-hub.enable, set llm.modelPath, and switch.
+    agent-hub = {
+      url = "github:imkarrer/agent-hub";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
-    { self, nixpkgs, ac-host, home-arcade }:
+    { self, nixpkgs, ac-host, home-arcade, agent-hub }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -88,6 +98,17 @@
           # mojibake copy that used to live in the ac-host tree.
           ac-host.nixosModules.ac-host
           home-arcade.nixosModules.arcade-hub
+
+          # agent-hub: imported but inert. services.agent-hub.enable defaults
+          # false (mkEnableOption) and nothing below sets it, so this
+          # contributes nothing to the composed config yet -- verified by
+          # comparing nixosConfigurations.ac-box's toplevel store path
+          # before/after this line was added. Turning the tenant on is a
+          # separate, later change: flip services.agent-hub.enable (and
+          # .llm.enable) in hosts/ac-box/configuration.nix with a real
+          # llm.modelPath, matching how services.ac-host/arcade-hub are
+          # wired just below.
+          agent-hub.nixosModules.agent-hub
 
           # This host.
           ./hosts/ac-box/host.nix
