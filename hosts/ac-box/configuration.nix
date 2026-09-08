@@ -76,6 +76,28 @@ in
   };
 
   # ---------------------------------------------------------------------------
+  # CI stack (Buildkite agent + MinIO), adopted under systemd (beads
+  # homelab-bqo.12). Was hand-started via `docker compose up -d --build`, per
+  # the compose file's own header -- no lifecycle management, no start-on-boot,
+  # no supervised restart. Not a resource-fencing fix (that's already handled
+  # by the compose file's own cgroup_parent, see homelab-bqo.27): this is
+  # purely about the stack surviving a reboot without a human remembering to
+  # run docker compose by hand.
+  #
+  # THIS FLAG MUST NOT REACH THE BOX BEFORE THE HAND-STARTED STACK IS STOPPED.
+  # docker-compose up -d --build against the same project name as an
+  # already-running stack is a port/network collision, not a clean takeover --
+  # see modules/ci/default.nix's own HAZARD 1. The runbook sequences this:
+  # commit and push this line, but do not switch until the box-side stop +
+  # volume/port verification (module header, steps 1-4) is done.
+  homelab.ci.enable = true;
+
+  # modules/ci/default.nix deliberately leaves wantedBy unset -- "a decision
+  # for whoever wires this module in" -- because the whole point of this bead
+  # is starting on boot instead of a human remembering docker compose up -d.
+  systemd.services.ac-host-ci.wantedBy = [ "multi-user.target" ];
+
+  # ---------------------------------------------------------------------------
   # Tenants, reproducing ac-box's live configuration exactly.
   # ---------------------------------------------------------------------------
 
