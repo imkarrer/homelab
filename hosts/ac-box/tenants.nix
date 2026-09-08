@@ -198,26 +198,34 @@
     };
 
     # Phase 1 of the local coding-agent host: llama.cpp model server only,
-    # LAN-bound. Runner phase (repo access, PR creation) is not enabled yet.
+    # LAN-bound. Runner phase (repo access, PR creation) is not enabled yet --
+    # services.agent-hub.runner.enable stays false in configuration.nix.
     agent-hub = {
-      # Declared but NOT enabled: flake.nix now imports agent-hub.nixosModules
-      # .agent-hub (proven a no-op -- same toplevel store path before and
-      # after), but services.agent-hub.enable itself still defaults false, so
-      # agent-hub-llm.service does not exist yet. Testing the enforce.firewall
-      # flip showed the consequence of leaving THIS flag (homelab.tenants.
-      # agent-hub.enable) on prematurely -- the contract dutifully opened
-      # tcp/8100 on enp8s0 for a service that is not running, and would have
-      # assigned a slice to a non-existent unit.
+      # ON as of 8 Sep 2026, in the same change that sets
+      # services.agent-hub.enable + .llm.enable with a real llm.modelPath in
+      # hosts/ac-box/configuration.nix. That pairing is the rule: this flag
+      # and the service's own enable flip together, because either one alone
+      # is a lie -- this flag alone opens a firewall port and assigns a slice
+      # to a unit that does not exist, and the service alone runs a unit the
+      # platform does not know about.
       #
-      # The declaration stays so its ports keep participating in collision
-      # detection (8100 was moved here off 8091 precisely because it clashed
-      # with assetto's HTTP block). enable flips to true in the same phase
-      # that sets services.agent-hub.enable = true (hosts/ac-box/
-      # configuration.nix) with a real llm.modelPath -- not before, for the
-      # reason above.
-      enable = false;
+      # Historical note worth keeping: while this was false, the contract
+      # STILL opened tcp/8100 on enp8s0 (verified live -- `iptables -S` had
+      # the accept rule with nothing listening). ports.nix did not filter on
+      # enable the way resources.nix and quiet.nix do; that is fixed now, so
+      # the pairing above is enforced by the code rather than by comment.
+      enable = true;
 
       description = "LAN-only llama.cpp model server for the local coding agent (phase 1: serving only).";
+
+      # Deliberately still "background", not a promotion to "critical", even
+      # though this box's whole point is now the model server. background is
+      # the tier that CAN be fenced and capped; critical is the tier that is
+      # never sliced at all (see resources.nix's sliceableTenants). Routing
+      # the machine's resources here is done by moving the SHARES in
+      # configuration.nix's homelab.tiers block -- background now holds 0.70
+      # of memory and the bulk of the cores -- not by moving the tenant into
+      # the tier that opts out of resource control entirely.
       tier = "background";
 
       units = [ "agent-hub-llm.service" ];
@@ -233,6 +241,31 @@
         };
       };
 
+      # Model weights: hundreds of GiB, and every one of them is re-obtainable
+      # from Hugging Face. Same call arcade makes about ROMs -- not worth a
+      # backup slot.
+      data = {
+        dirs = [ "/srv/agent-hub" ];
+        backup = false;
+      };
+
+      state = {
+        dirs = [ "/var/lib/agent-hub" ];
+        backup = true;
+      };
+
+      # null even though llama-server has a real Prometheus endpoint
+      # (`--metrics` exists in the pinned build 9190 and is passed in
+      # configuration.nix, so /metrics IS being served on 8100).
+      #
+      # It cannot be declared here yet: metrics.nix hardcodes the scrape
+      # target to 127.0.0.1:<port> -- its header pins that as a deliberate
+      # convention, since every exporter on this box binds loopback -- and
+      # agent-hub-llm binds the LAN address instead, because the whole point
+      # of the service is to be reachable from other machines. Declaring it
+      # would generate a scrape job that fails on every interval. Wiring this
+      # up properly means giving metricsEndpoint an address field, which the
+      # metrics.nix header says is a schema change, not a metrics.nix change.
       metrics = null;
     };
 

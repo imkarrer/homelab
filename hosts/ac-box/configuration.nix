@@ -105,6 +105,175 @@ in
   };
 
   # ---------------------------------------------------------------------------
+  # agent-hub: the local coding-agent model server (tenant declared in
+  # tenants.nix, module imported from the agent-hub flake input).
+  #
+  # Phase 1 only -- serving, no repo access. runner.enable is deliberately
+  # left false: it needs a sops-backed githubTokenFile (beads homelab-bqo.10,
+  # still open) and the runner image loaded into this box's Docker, neither of
+  # which is done. Turning llm on does not turn runner on; they are separate
+  # flags for exactly this reason.
+  #
+  # lanAddress/gameInterface come from homelab.host rather than the module's
+  # own defaults, same as services.arcade-hub above. The module happens to
+  # default to this box's values today, which is precisely the drift trap the
+  # arcade-hub comment describes -- host facts are read from the host, never
+  # inherited from a tenant's guess.
+  services.agent-hub = {
+    enable = true;
+    lanAddress = config.homelab.host.networks.lan.address;
+    gameInterface = config.homelab.host.networks.lan.interface;
+
+    llm = {
+      enable = true;
+
+      # Qwen3-Coder-Next, 80B total / 3B active MoE (512 experts, 10 routed
+      # per token), Q8_0, ~85 GB across four shards. Point llama.cpp at shard
+      # 1; it finds the rest in the same directory.
+      #
+      # Chosen over the bigger Qwen3-Coder-480B-A35B deliberately, and the
+      # reasoning is worth keeping because it inverts the obvious answer:
+      #
+      #   - The 480B does not fit here at a quantization that preserves code
+      #     quality. Q4_K_S is 273 GB against 251 GiB of physical RAM, so it
+      #     is not a tuning question -- it does not fit at all. What fits is
+      #     Q2_K_XL (180 GB) or Q3_K_S (207 GB), and sub-Q4 quantization
+      #     damage lands hardest on exactly this workload.
+      #   - Qwen's own line on the 80B-A3B variant is that it retains ~96% of
+      #     the 480B flagship's quality. Trading ~4% of a full-precision model
+      #     against Q2/Q3 damage to a larger one is not a close call.
+      #   - Q8_0 is effectively lossless, so the number above is the quality
+      #     we actually get rather than a starting point to degrade from.
+      #   - CPU token rate tracks ACTIVE parameters, not total. 3B active vs
+      #     35B active is roughly a tenfold difference in memory traffic per
+      #     token on a box with no GPU and ~130 GB/s of DDR4 -- the difference
+      #     between a tool you use and one you wait on.
+      #
+      # If this turns out to be wrong, the 480B UD-Q2_K_XL is a modelPath
+      # change plus a memoryShare bump, and both can be A/B'd on this box.
+      #
+      # A quoted STRING, not a Nix path literal. The option's type is
+      # types.path, which accepts either -- but an unquoted ./path literal
+      # would make Nix copy the whole GGUF into /nix/store at eval time.
+      # At a hundred-plus gigabytes that is not a mistake you notice early.
+      modelPath = "/srv/agent-hub/models/Qwen3-Coder-Next-Q8_0-00001-of-00004.gguf";
+
+      # PHYSICAL cores inside background.slice's fence, not logical threads
+      # and not the host's 56. The fence (resources.nix) gives background
+      # cores 3-25 plus their SMT siblings; llama.cpp's generation threads
+      # want one per physical core -- oversubscribing to the siblings makes
+      # a memory-bandwidth-bound workload slower, not faster.
+      #
+      # This is the option's own documented contract: "must be set to match
+      # the CPU allowance the platform's tenant tier actually grants this
+      # service". If the tier shares below move, this moves with them.
+      threads = 23;
+
+      # Not larger, even though the model natively supports 262144 and
+      # background.slice's ceiling would hold the KV cache for it. The binding
+      # constraint on CPU is PREFILL, not RAM: prompt processing is
+      # compute-bound, this is Broadwell (no AVX-512), and ingesting a
+      # six-figure-token prompt would take longer than the answer is worth.
+      # Raise it once a measured prefill rate says it is affordable.
+      contextSize = 32768;
+
+      extraArgs = [
+        # THE flag on this box. Two NUMA nodes (dual E5-2680 v4); without
+        # it llama.cpp allocates on whichever node loaded the model and the
+        # other socket's threads pay remote-memory latency on every token.
+        "--numa" "distribute"
+
+        # Prompt processing is compute-bound rather than bandwidth-bound, so
+        # unlike --threads it does benefit from the SMT siblings: 23 physical
+        # cores x 2 threads inside the fence.
+        "--threads-batch" "46"
+
+        # Swap is 0 on this box, so an evicted model page is a disk re-read
+        # in the middle of a token. Pinning is safe here only because
+        # background.slice's MemoryMax (0.70 * 251 GiB ~= 176 GiB) is far
+        # above the model + KV cache -- mlock'd pages cannot be reclaimed,
+        # so a model sized near the ceiling turns a slowdown into an OOM
+        # kill. Needs LimitMEMLOCK below; systemd's default is 8 MiB.
+        "--mlock"
+
+        "--flash-attn" "on"
+
+        # Serves /metrics on the same port. Not yet scraped -- see the
+        # agent-hub tenant's `metrics = null` in tenants.nix for why
+        # (metrics.nix scrapes 127.0.0.1 and this binds the LAN address).
+        "--metrics"
+      ];
+    };
+  };
+
+  # --mlock is a no-op-with-a-warning without this: systemd's default
+  # LimitMEMLOCK is 8 MiB, and llama.cpp will fail to pin a 100+ GiB model
+  # against it. Set here rather than in the agent-hub module because it is a
+  # consequence of THIS host's extraArgs choice, not a property of the module.
+  # Merges with the module's own serviceConfig -- different keys, no conflict.
+  systemd.services.agent-hub-llm.serviceConfig.LimitMEMLOCK = "infinity";
+
+  # ---------------------------------------------------------------------------
+  # Tier shares, rebalanced to point this machine at the model server.
+  #
+  # The defaults in modules/tenant/resources.nix (critical 0.35/0.50,
+  # interactive 0.15/0.20, background 0.30/0.25, batch 0.10/0.05) were written
+  # before ac-box had an LLM tenant, and they cap agent-hub at 75 GiB of a
+  # 251 GiB machine. Measured on the box 8 Sep 2026 before changing anything:
+  # 4 GiB of 251 in use, load average 0.00, and all thirteen containers
+  # together at 275 MiB. There is nothing to reclaim from the other tenants --
+  # the tier table was the only thing standing between the LLM and the box.
+  #
+  # Every value here is an override of a mkDefault in resources.nix, so no
+  # mkForce is needed and the defaults stay intact for any other host.
+  #
+  # memoryShare must sum to <= 0.9 (resources.nix's budget assertion, which
+  # runs whether or not enforce.slices is on). These sum to exactly 0.90.
+  #
+  # Two consequences worth stating out loud rather than discovering later:
+  #
+  #   1. assetto is never assigned a slice at all (tier = critical AND
+  #      quiet.drainable = false), so its processes and containers run in
+  #      system.slice, whose CPUWeight is unset -- i.e. 100. Giving background
+  #      a CPUWeight of 700 therefore ranks the model server ABOVE the race
+  #      servers under contention, not merely above the other tiers. That is
+  #      the deliberate choice being made here. What protects racing is the
+  #      fence, not the weight: cores 0-2 (plus siblings 28-30) are outside
+  #      background's and batch's AllowedCPUs entirely, so system.slice has
+  #      exclusive use of them no matter what the LLM is doing.
+  #
+  #   2. critical.cpuShare is not about how much CPU assetto gets -- its slice
+  #      is empty. It is the input to reservedForCritical, i.e. how many
+  #      physical cores the fence keeps for everything unsliced. Lowering it
+  #      to 0.10 is what hands the model server the other 23 cores.
+  homelab.tiers = {
+    critical = {
+      memoryShare = 0.10; # 25.1 GiB. Measured usage of the whole racing stack: well under 1 GiB.
+      cpuShare = 0.10; # -> 3 physical cores (0-2) reserved outside the fence.
+    };
+    interactive = {
+      memoryShare = 0.05; # 12.5 GiB for arcade + observability; Grafana+Prometheus measured at ~0.4 GiB.
+      cpuShare = 0.05;
+    };
+    background = {
+      memoryShare = 0.70; # ~176 GiB for the model + KV cache.
+      cpuShare = 0.70; # CPUWeight 700, and cores 3-25 + siblings via the fence.
+      # resources.nix defaults this to 10, which niced the inference server
+      # down against everything else on the box. The tenant this tier exists
+      # for is now the machine's primary workload.
+      nice = 0;
+    };
+    batch = {
+      memoryShare = 0.05;
+      # Sizes batch's OWN fence block (cores 26-27) as well as its weight.
+      # Before the resources.nix fix, batch and background shared one
+      # AllowedCPUs string, so a Buildkite Nix build ran on exactly the CPUs
+      # the LLM was pinned to.
+      cpuShare = 0.05;
+    };
+  };
+
+  # ---------------------------------------------------------------------------
   # Identified as the one hard gap by docs/noop-reconciliation.md: nothing in
   # modules/platform/, host.nix or tenants.nix set this, and omitting it changes
   # the closure in a way that is tedious to trace back to its cause.
