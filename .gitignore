@@ -27,3 +27,8 @@ result-*
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Navigation links into the sibling trees. Machine-local by design: they point
+# outside the repo, so a clone elsewhere would only get broken links.
+# scripts/hub-links.sh regenerates them from hub/repos.psv.
+hub/trees/
