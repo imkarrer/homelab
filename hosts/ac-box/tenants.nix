@@ -223,7 +223,7 @@
       # the tier that CAN be fenced and capped; critical is the tier that is
       # never sliced at all (see resources.nix's sliceableTenants). Routing
       # the machine's resources here is done by moving the SHARES in
-      # configuration.nix's homelab.tiers block -- background now holds 0.70
+      # configuration.nix's homelab.tiers block -- background now holds 0.65
       # of memory and the bulk of the cores -- not by moving the tenant into
       # the tier that opts out of resource control entirely.
       tier = "background";

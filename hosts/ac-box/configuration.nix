@@ -212,7 +212,7 @@ in
 
         # Swap is 0 on this box, so an evicted model page is a disk re-read
         # in the middle of a token. Pinning is safe here only because
-        # background.slice's MemoryMax (0.70 * 251 GiB ~= 176 GiB) is far
+        # background.slice's MemoryMax (0.65 * 251 GiB ~= 163 GiB) is far
         # above the model + KV cache -- mlock'd pages cannot be reclaimed,
         # so a model sized near the ceiling turns a slowdown into an OOM
         # kill. Needs LimitMEMLOCK below; systemd's default is 8 MiB.
@@ -278,7 +278,15 @@ in
       cpuShare = 0.05;
     };
     background = {
-      memoryShare = 0.70; # ~176 GiB for the model + KV cache.
+      # ~163 GiB for the model + KV cache. Sized from the model that is
+      # actually deployed (Qwen3-Coder-Next Q8_0, ~79 GiB) with room for a
+      # much larger one, rather than from "give it everything": memoryShare is
+      # a CEILING, not a reservation, so an oversized one costs nothing at
+      # runtime -- but it does consume the 0.9 budget, and the tier it was
+      # taking that budget from was batch, whose ceiling ac-host's
+      # docker-compose.buildkite.yml documents as "~25 GiB" for Nix builds.
+      # Starving CI to leave an unusable ceiling here is not a trade.
+      memoryShare = 0.65;
       cpuShare = 0.70; # CPUWeight 700, and cores 3-25 + siblings via the fence.
       # resources.nix defaults this to 10, which niced the inference server
       # down against everything else on the box. The tenant this tier exists
@@ -286,7 +294,11 @@ in
       nice = 0;
     };
     batch = {
-      memoryShare = 0.05;
+      # Left at the default 0.10 (~25 GiB), the figure ac-host's
+      # docker-compose.buildkite.yml already cites to its readers as the
+      # number to revisit if a build OOMs. Memory is where CI actually needs
+      # headroom; CPU is where it must yield, hence the small cpuShare below.
+      memoryShare = 0.10;
       # Sizes batch's OWN fence block (cores 26-27) as well as its weight.
       # Before the resources.nix fix, batch and background shared one
       # AllowedCPUs string, so a Buildkite Nix build ran on exactly the CPUs
