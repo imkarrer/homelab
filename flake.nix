@@ -78,11 +78,15 @@
           ./modules/platform/ssh.nix
           ./modules/platform/boot.nix
 
+          # L2: shared services that cross tenants. Lifted out of ac-host in
+          # phase 8 -- see modules/observability/default.nix for why it lived
+          # inside a tenant repo until now.
+          ./modules/observability
+
           # L3: the tenants, as inputs rather than vendored copies. arcade-hub
           # comes from home-arcade's canonical module -- not the drifted,
           # mojibake copy that used to live in the ac-host tree.
           ac-host.nixosModules.ac-host
-          ac-host.nixosModules.monitoring
           home-arcade.nixosModules.arcade-hub
 
           # This host.
