@@ -31,6 +31,11 @@ let
   # hand-placed secrets (the Grafana admin password, the unifi-poller password,
   # the Discord webhook). Renaming it would be a data migration for no benefit --
   # the same reasoning ADR 0003 applies to /var/lib/ac-host.
+  # The dashboard binds the LAN address rather than 0.0.0.0, and now takes it
+  # from the one place this repo keeps machine literals.
+  grafanaAddr = config.homelab.host.networks.lan.address;
+  grafanaPort = 3000;
+
   secretsDir = "/var/lib/monitoring/secrets";
   grafanaAdminFile = "${secretsDir}/grafana-admin";
   grafanaSecretFile = "${secretsDir}/grafana-secret-key";
@@ -334,11 +339,21 @@ in
   services.grafana = {
     enable = true;
     settings = {
+      # Derived, not literal. These were three separate hardcoded copies of
+      # 192.168.1.50 -- a fourth, fifth and sixth alongside the ones that had
+      # already drifted between arcade-hub and agent-hub, and exactly what the
+      # README's "a module contains no host facts" rule exists to stop.
+      #
+      # This module can read homelab.host directly because it is L2, owned by this
+      # repo. A tenant flake cannot: arcade-hub and agent-hub have to stay usable
+      # standalone, so they take the address as a required option and the host
+      # composition passes it in. Same rule, different mechanism, because the
+      # constraint on them is different.
       server = {
-        http_addr = "192.168.1.50";
-        http_port = 3000;
-        domain = "192.168.1.50";
-        root_url = "http://192.168.1.50:3000/";
+        http_addr = grafanaAddr;
+        http_port = grafanaPort;
+        domain = grafanaAddr;
+        root_url = "http://${grafanaAddr}:${toString grafanaPort}/";
         enable_gzip = true;
       };
       security = {
