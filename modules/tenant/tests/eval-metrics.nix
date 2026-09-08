@@ -123,4 +123,12 @@ in
       }
     ];
   };
+
+  # Case name -> whether `<case>.checked` must evaluate cleanly. Both cases
+  # here are positive (on/off behaviour), neither is a rejected-bad-config
+  # fixture. Read by modules/ci/scripts/run-eval-tests.sh.
+  expected = {
+    allTrue = true;
+    allFalse = true;
+  };
 }

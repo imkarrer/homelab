@@ -148,4 +148,21 @@ in
       }
     ];
   };
+
+  # Case name -> whether `<case>.checked` must evaluate cleanly (true) or
+  # throw (false, for the fixtures above that exist to prove a bad config is
+  # rejected). Read by modules/ci/scripts/run-eval-tests.sh; every case above
+  # still supports the three manual `nix eval` invocations documented at the
+  # top of this file, unchanged.
+  expected = {
+    collision = false;
+    clean = true;
+    forwardedMissingJustification = false;
+    forwardedWithJustification = true;
+    mgmtNoAddress = false;
+    mgmtWithAddress = true;
+    allFalseCollisionStillFails = false;
+    allFalseNoFirewallEmitted = true;
+    allTrueFirewallEmitted = true;
+  };
 }

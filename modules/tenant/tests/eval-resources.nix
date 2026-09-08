@@ -141,4 +141,13 @@ in
       }
     ];
   };
+
+  # Case name -> whether `<case>.checked` must evaluate cleanly (false for
+  # brokenBudget, which exists to prove the 0.9 memoryShare budget assertion
+  # fires). Read by modules/ci/scripts/run-eval-tests.sh.
+  expected = {
+    good = true;
+    allFalseNoSlicesEmitted = true;
+    brokenBudget = false;
+  };
 }

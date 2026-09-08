@@ -1,0 +1,30 @@
+# CI for the homelab flake (beads homelab-bqo.29). Before this pipeline
+# existed, nothing evaluated nixosConfigurations.ac-box on push -- every gate
+# was run by hand, and phase .25.13 removed ac-host's own full-system flake
+# check, so the composed host config had no automated evaluation anywhere.
+#
+# Runs on ac-box's own self-hosted agent (BUILDKITE_AGENT_TAGS=queue=self --
+# see modules/ci/default.nix's header), so the Nix store and the Flox/MinIO
+# S3 substituter it already warms are reused: this build is mostly
+# substitution, not compilation from source.
+agents:
+  queue: "self"
+
+steps:
+  - label: ":nix: flake check (nixosConfigurations.ac-box)"
+    command: |
+      nix --extra-experimental-features "nix-command flakes" flake check -L
+    # checks.${system}.ac-box (flake.nix) IS
+    # nixosConfigurations.ac-box.config.system.build.toplevel -- the same
+    # cheap gate flake.nix's own comment describes: catches a port
+    # collision, a broken tenant module, or a bad lock bump before a human
+    # opens a maintenance window.
+
+  - label: ":nix: module eval harnesses"
+    command: |
+      ./modules/ci/scripts/run-eval-tests.sh
+    # Unit-level coverage for modules/tenant/ and modules/ci/ themselves --
+    # e.g. that ports.nix still REJECTS a colliding fixture -- which the
+    # flake-check step above can't exercise since the real ac-box config
+    # has no such fixture to reject. See that script's header for how a
+    # case's expected pass/throw outcome is read.

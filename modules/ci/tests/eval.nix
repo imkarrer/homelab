@@ -86,4 +86,16 @@ in
       }
     ];
   };
+
+  # Case name -> whether the case must evaluate cleanly. None of these three
+  # fixtures are invalid configs -- unlike modules/tenant/tests, this module
+  # has no assertions to reject -- so every case is expected to succeed. Read
+  # by modules/ci/scripts/run-eval-tests.sh; this file has no `.checked`
+  # field (see the module header), so the runner forces full evaluation of
+  # the whole case instead.
+  expected = {
+    disabledByDefault = true;
+    enabledDefaults = true;
+    enabledCustomPaths = true;
+  };
 }
