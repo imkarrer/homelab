@@ -53,6 +53,28 @@ if [ -f .flox/env/manifest.toml ]; then
   done
 fi
 
+# Tests run with PYTHONPATH spanning the whole repo, so every import resolves
+# on the host whatever the image actually contains. Only the container
+# disagrees, and it disagrees at runtime, in production, on restart. Compare
+# what each entrypoint imports against what its Dockerfile copies.
+for df in $(find . -name Dockerfile -not -path "*/node_modules/*" 2>/dev/null); do
+  dir=$(dirname "$df")
+  copied=$(grep -oE "[a-z_]+/[a-z_]+\.py" "$df" | xargs -n1 basename 2>/dev/null | sed "s/\.py$//" | sort -u)
+  [ -n "$copied" ] || continue
+  echo "== image imports: $df =="
+  gap=0
+  for rel in $(grep -oE "[a-z_]+/[a-z_]+\.py" "$df" | sort -u); do
+    [ -f "$rel" ] || continue
+    for imp in $(grep -oE "^import [a-z_]+|^from [a-z_]+ import" "$rel" 2>/dev/null | awk "{print \$2}" | sort -u); do
+      # only local modules matter; stdlib and pip packages are not our problem
+      if ls */"$imp".py >/dev/null 2>&1; then
+        echo "$copied" | grep -qx "$imp" || { echo "  MISSING from image: $imp (imported by $rel)"; gap=1; RC=1; }
+      fi
+    done
+  done
+  [ $gap -eq 0 ] && echo "  every local import is copied"
+done
+
 # Nix trees prove themselves by evaluating every host they declare. An eval
 # failure here is a box that cannot be rebuilt, which no test suite would catch.
 if [ -f flake.nix ]; then
