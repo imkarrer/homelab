@@ -13,12 +13,13 @@
 # references changed from ../scripts/ to ./scripts/. Both are stdlib-only, so
 # nothing else had to follow.
 #
-# Still to do, deliberately not bundled with moving the file: this declares its
-# own ports and its own firewall rule rather than deriving them from
-# homelab.tenants. The observability tenant IS declared in
-# hosts/ac-box/tenants.nix, so the contract already opens Grafana's 3000 scoped
-# to the LAN NIC and knows every exporter port -- which makes the rule below
-# redundant.
+# Deliberately not bundled with moving the file: this used to declare its own
+# Grafana firewall rule alongside homelab.tenants' identical one (beads
+# homelab-bqo.30, fixed below) -- the observability tenant in
+# hosts/ac-box/tenants.nix already knows every port this module opens or
+# binds, so the contract is the single source of truth for what gets a
+# firewall rule; this module's job is only to actually run the services at
+# the addresses/ports the contract already knows about.
 {
   config,
   lib,
@@ -69,11 +70,16 @@ in
   users.users.unifi-poller.extraGroups = [ "monitoring" ];
   users.users.grafana.extraGroups = [ "monitoring" ];
 
-  # Scoped to the LAN NIC, not global. Grafana already binds 192.168.1.50, so a
-  # global opening bought nothing -- but it would have published the dashboard on
-  # a management link the moment the dual-NIC plan brought one up.
-  networking.firewall.interfaces.enp8s0.allowedTCPPorts = [ 3000 ];
-
+  # No firewall rule declared here (beads homelab-bqo.30): the observability
+  # tenant in hosts/ac-box/tenants.nix already claims grafana as
+  # number = 3000, scope = "lan", so modules/tenant/ports.nix derives the
+  # identical enp8s0/3000 opening whenever homelab.enforce.firewall is on --
+  # this module hardcoding the same rule a second time was pure redundancy,
+  # not a second real source of truth. Every other exporter here
+  # (prometheus/alertmanager/node/cadvisor/unpoller/udr-fw/docker-names)
+  # binds loopback-only and is declared scope = "local" in tenants.nix, so
+  # the contract already contributes nothing for them either -- consistent
+  # with what this module actually does.
   services.prometheus.exporters.node = {
     enable = true;
     listenAddress = "127.0.0.1";
