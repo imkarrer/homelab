@@ -237,11 +237,23 @@ def cmd_plan(args: argparse.Namespace) -> int:
     touched = set(parsed["stop"]) | set(parsed["restart"]) | set(parsed["reload"])
     danger = sorted(touched & DANGER_UNITS)
 
+    # switch-to-configuration doesn't always say "would restart the following
+    # units" for a bounced unit -- it sometimes reports the same unit in both
+    # "would stop" and "would start" instead (seen live on the phase 6 plan,
+    # with prometheus.service and grafana.service). Either shape is a
+    # restart, not a stop plus an unrelated new start: a unit in this
+    # intersection must never get labeled "(newly-started units, not
+    # disruptive)" below, which undersells exactly the disruption (a scrape
+    # gap, a dashboard blink) an operator most needs to see.
+    bounced = set(parsed["stop"]) & set(parsed["start"])
+    all_restarts = sorted(set(parsed["restart"]) | bounced)
+    new_starts = [u for u in parsed["start"] if u not in bounced]
+
     print("would stop:   ", ", ".join(parsed["stop"]) or "(none)")
     print("would reload: ", ", ".join(parsed["reload"]) or "(none)")
-    print("would restart:", ", ".join(parsed["restart"]) or "(none)")
-    if parsed["start"]:
-        print("would start:  ", ", ".join(parsed["start"]), "(newly-started units, not disruptive)")
+    print("would restart:", ", ".join(all_restarts) or "(none)")
+    if new_starts:
+        print("would start:  ", ", ".join(new_starts), "(newly-started units, not disruptive)")
     if parsed["restart_systemd"]:
         print(
             "WARNING: systemd itself would re-exec ('would restart systemd') "

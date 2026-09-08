@@ -37,6 +37,7 @@ TENANTS_JSON = HERE / "tenants.json"
 DISRUPTIVE = HERE / "dry-activate-disruptive.txt"
 SAFE = HERE / "dry-activate-safe.txt"
 RESTART_SYSTEMD = HERE / "dry-activate-restart-systemd.txt"
+BOUNCED = HERE / "dry-activate-bounced.txt"
 
 # Import boxctl.py by path (it has no shebang-stripped package identity, and
 # nothing about it should require being on sys.path/installed to be tested).
@@ -71,6 +72,21 @@ class ParseDryActivateTests(unittest.TestCase):
         parsed = boxctl.parse_dry_activate(RESTART_SYSTEMD.read_text())
         self.assertTrue(parsed["restart_systemd"])
         self.assertEqual(parsed["reload"], ["grafana.service"])
+
+    def test_bounced_fixture_reports_raw_buckets(self):
+        # parse_dry_activate is a literal transcription of dry-activate's own
+        # buckets -- a unit in both "stop" and "start" stays in both here.
+        # Reclassifying stop+start as a restart is cmd_plan's job (see
+        # CmdPlanTests.test_bounced_units_reported_as_restart_not_new_start),
+        # not the parser's.
+        parsed = boxctl.parse_dry_activate(BOUNCED.read_text())
+        self.assertEqual(
+            parsed["stop"], ["prometheus.service", "grafana.service", "old-cruft.service"]
+        )
+        self.assertEqual(
+            parsed["start"], ["prometheus.service", "grafana.service", "arcade-mindustry.service"]
+        )
+        self.assertEqual(parsed["restart"], [])
 
     def test_empty_input(self):
         parsed = boxctl.parse_dry_activate("")
@@ -184,6 +200,27 @@ class CmdPlanTests(unittest.TestCase):
         code, out = self._run_plan(DISRUPTIVE, extra=["--maintenance-window", "04:30"])
         self.assertEqual(code, 1, out)
         self.assertIn("04:30", out)
+
+    def test_bounced_units_reported_as_restart_not_new_start(self):
+        # homelab-bqo.26: a unit dry-activate lists in both "would stop" and
+        # "would start" (prometheus/grafana, seen live on the phase 6 plan)
+        # is a restart -- it must appear on the "would restart:" line and
+        # must NOT be labeled "(newly-started units, not disruptive)", which
+        # would understate a real scrape gap / dashboard blink.
+        _, out = self._run_plan(BOUNCED)
+        self.assertIn("would restart:", out)
+        restart_line = next(l for l in out.splitlines() if l.startswith("would restart:"))
+        self.assertIn("prometheus.service", restart_line)
+        self.assertIn("grafana.service", restart_line)
+
+        start_line = next(l for l in out.splitlines() if l.startswith("would start:"))
+        self.assertNotIn("prometheus.service", start_line)
+        self.assertNotIn("grafana.service", start_line)
+        self.assertIn("arcade-mindustry.service", start_line)
+        self.assertIn("(newly-started units, not disruptive)", start_line)
+
+        stop_line = next(l for l in out.splitlines() if l.startswith("would stop:"))
+        self.assertIn("old-cruft.service", stop_line)
 
     def test_plan_never_mentions_switch_or_boot_actions(self):
         # boxctl's own output must never suggest it performed (or could be
