@@ -53,6 +53,22 @@ if [ -f .flox/env/manifest.toml ]; then
   done
 fi
 
+# Nix trees prove themselves by evaluating every host they declare. An eval
+# failure here is a box that cannot be rebuilt, which no test suite would catch.
+if [ -f flake.nix ]; then
+  hosts=$(nix eval --raw .#nixosConfigurations --apply 'c: builtins.concatStringsSep " " (builtins.attrNames c)' 2>/dev/null)
+  if [ -n "$hosts" ]; then
+    echo "== nix eval: $hosts =="
+    for h in $hosts; do
+      if nix eval --raw ".#nixosConfigurations.$h.config.system.build.toplevel.drvPath" >/dev/null 2>&1; then
+        echo "  $h: evaluates"
+      else
+        echo "  $h: EVAL FAILED"; RC=1
+      fi
+    done
+  fi
+fi
+
 # The pages step republishes the live site from these templates. render_site.py
 # fills site/ and ci_publish_pages.py copies the result over the Pages checkout,
 # so a template that lost markup deletes it from production on the next green build.

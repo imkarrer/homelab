@@ -1,8 +1,8 @@
 # Source trees homelab coordinates. Fields: name|path|remote|deploy|agent-push
 #   deploy      how the tree reaches ac-box ("buildkite" or "none")
-#   agent-push  may an agent push this remote unattended? ("yes" or "ask")
-ac-host|/home/nixos/src/ac-host|git@github.com:imkarrer/ac-host|buildkite|ask
-homelab|/home/nixos/src/homelab|git@github.com:imkarrer/homelab|none|ask
-agent-hub|/home/nixos/src/agent-hub|git@github.com:imkarrer/agent-hub|none|ask
-home-arcade|/home/nixos/src/home-arcade|git@github.com:imkarrer/home-arcade|none|ask
+#   agent-push  may an agent push this remote unattended, on green gates? ("yes" or "ask")
+ac-host|/home/nixos/src/ac-host|git@github.com:imkarrer/ac-host|buildkite|yes
+homelab|/home/nixos/src/homelab|git@github.com:imkarrer/homelab|none|yes
+agent-hub|/home/nixos/src/agent-hub|git@github.com:imkarrer/agent-hub|none|yes
+home-arcade|/home/nixos/src/home-arcade|git@github.com:imkarrer/home-arcade|none|yes
 inquire-platform|/home/nixos/src/inquire-platform|none|none|ask
