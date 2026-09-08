@@ -93,6 +93,20 @@
           # inside a tenant repo until now.
           ./modules/observability
 
+          # modules/ci: imported but inert (beads homelab-bqo.12 prep).
+          # homelab.ci.enable defaults false and nothing sets it, so this is
+          # a no-op -- verified by comparing nixosConfigurations.ac-box's
+          # toplevel store path before/after this line was added, same as
+          # agent-hub below. Do NOT flip homelab.ci.enable from here or from
+          # any other agent-authored change: the module's own header
+          # documents a specific, human-run, live-SSH adoption sequence
+          # (stop the hand-started compose stack, verify its three named
+          # volumes and freed ports, THEN flip enable and switch) that must
+          # happen first, and a nixos-rebuild that bounces this unit can
+          # never be shipped as a step run BY the Buildkite agent this unit
+          # itself is -- see modules/ci/default.nix's "HAZARD 2" comment.
+          ./modules/ci
+
           # L3: the tenants, as inputs rather than vendored copies. arcade-hub
           # comes from home-arcade's canonical module -- not the drifted,
           # mojibake copy that used to live in the ac-host tree.
