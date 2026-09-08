@@ -76,6 +76,31 @@ in
             type = types.ints.positive;
             description = "Logical CPU threads, verified against /proc at activation.";
           };
+          threadsPerCore = mkOption {
+            type = types.ints.positive;
+            default = 1;
+            description = ''
+              SMT threads per physical core (`lscpu`'s "Thread(s) per core").
+              A topology fact, not a share: resources.nix needs it to build a
+              correct AllowedCPUs fence, because Linux does NOT enumerate
+              logical CPUs core-by-core on an SMT machine. It enumerates every
+              first thread first, then every sibling -- so on ac-box (56
+              threads, 2 per core) CPUs 0-27 are the 28 PHYSICAL cores and
+              28-55 are their siblings, one per core.
+
+              Getting this wrong is silent and expensive: a fence written as
+              the naive index range "28-55" reads like "the top half of the
+              cores" and is actually "the second thread of every core",
+              which fences nothing physically and is close to the worst
+              possible CPU set for a memory-bound workload. Default 1 (no
+              SMT) is the conservative reading -- the derived fence then
+              degenerates to a single contiguous range, which is correct for
+              a non-SMT host.
+
+              Verified on ac-box 8 Sep 2026 against `lscpu`: Thread(s) per
+              core: 2, NUMA node0 CPU(s) 0-13,28-41, node1 14-27,42-55.
+            '';
+          };
           memoryGiB = mkOption {
             type = types.ints.positive;
             description = "Physical RAM in GiB, verified against /proc at activation.";

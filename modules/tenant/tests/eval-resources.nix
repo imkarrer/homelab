@@ -102,7 +102,63 @@ in
   # enforce.slices flipped on -- must evaluate cleanly, and is where the
   # derived MemoryMax/AllowedCPUs numbers are checked against hand
   # computation. This is the "all-true: behaviour unchanged" case.
-  good = mkCase { extraModules = [ { homelab.enforce.slices = true; } ]; };
+  good = mkCase {
+    extraModules = [ { homelab.enforce.slices = true; } ];
+
+    # The AllowedCPUs checks below are the regression test for the fence bug
+    # found live on ac-box, 8 Sep 2026: resources.nix built the fence out of
+    # LOGICAL thread indices ("${reservedForCritical}-${cpuThreads - 1}"),
+    # which on this dual-socket, 2-threads-per-core box produced "28-55" --
+    # and CPUs 28-55 are the SMT siblings of 0-27, one per physical core. The
+    # fence therefore separated background/batch from critical on paper while
+    # they shared every physical core in reality.
+    #
+    # Hand-computed against hosts/ac-box/host.nix (56 threads, threadsPerCore
+    # = 2 -> 28 physical cores) and resources.nix's own tier defaults:
+    #   reservedForCritical = ceil(0.50 * 28) = 14   -> critical keeps 0-13
+    #   batchCores          = ceil(0.05 * 28) = 2    -> batch gets 26-27
+    #   background          = the rest               -> 14-25
+    # then each physical-core range is expanded to its logical CPUs by adding
+    # a second range offset by physicalCores (+28).
+    checks = cfg: [
+      {
+        assertion = cfg.systemd.slices.background.sliceConfig.AllowedCPUs == "14-25,42-53";
+        message = ''
+          background.slice AllowedCPUs must be the physical cores 14-25 AND
+          their SMT siblings 42-53, got
+          "${cfg.systemd.slices.background.sliceConfig.AllowedCPUs or "<unset>"}".
+          A single contiguous range here (notably "28-55") is the old bug:
+          it hands the tier one thread per core instead of whole cores.
+        '';
+      }
+      {
+        assertion = cfg.systemd.slices.batch.sliceConfig.AllowedCPUs == "26-27,54-55";
+        message = ''
+          batch.slice AllowedCPUs must be its own block (physical cores 26-27
+          plus siblings), got
+          "${cfg.systemd.slices.batch.sliceConfig.AllowedCPUs or "<unset>"}".
+        '';
+      }
+      {
+        assertion =
+          cfg.systemd.slices.batch.sliceConfig.AllowedCPUs
+          != cfg.systemd.slices.background.sliceConfig.AllowedCPUs;
+        message = ''
+          batch and background must not share one AllowedCPUs string. They
+          did, which meant a Buildkite Nix build ran on exactly the CPUs the
+          model server was pinned to and only CPUWeight separated them.
+        '';
+      }
+      {
+        assertion = !(cfg.systemd.slices.critical.sliceConfig ? AllowedCPUs);
+        message = ''
+          critical.slice must carry NO AllowedCPUs -- the tier is fenced
+          around, never confined itself, so it can still burst onto every
+          core when the fenced tiers are idle.
+        '';
+      }
+    ];
+  };
 
   # Same tenants/capacity, but homelab.enforce.slices left at its default
   # (false): systemd.slices, every per-unit serviceConfig, AND the

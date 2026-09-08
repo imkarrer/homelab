@@ -108,21 +108,77 @@ let
     let w = builtins.floor (cfg.tiers.${tierName}.cpuShare * 1000);
     in if w < 1 then 1 else if w > 10000 then 10000 else w;
 
-  # Cores [0, reservedForCritical) are the ones critical is expected to lean
-  # on; background/batch are fenced out of that range via AllowedCPUs. This
-  # is a fence, not a cap: critical itself gets no AllowedCPUs restriction at
-  # all, so it can still spread onto the fenced-off cores when it needs to.
+  # ---------------------------------------------------------------------------
+  # AllowedCPUs fences, computed in PHYSICAL cores and then expanded to logical
+  # CPUs.
+  #
+  # This used to be `"${reservedForCritical}-${cpuThreads - 1}"`, derived
+  # straight from logical thread indices, with a comment claiming "cores [0,
+  # reservedForCritical) are the ones critical is expected to lean on". That is
+  # false on any SMT machine and was false on ac-box: with critical.cpuShare =
+  # 0.50 and 56 threads it produced AllowedCPUs = "28-55", and on this box CPUs
+  # 28-55 are the SMT SIBLINGS of 0-27, one per physical core (`lscpu`: node0
+  # 0-13,28-41 / node1 14-27,42-55). So the fence handed background and batch
+  # the second thread of every core: it fenced nothing physically -- they still
+  # shared every physical core with critical -- while giving a memory-bound
+  # workload the worst possible CPU set. Found live on ac-box, 8 Sep 2026.
+  #
+  # The fix is to do the arithmetic in physical cores and expand at the end,
+  # using homelab.host.capacity.threadsPerCore (a topology fact, declared once
+  # in hosts/<name>/host.nix, never guessed here). Shares still drive the
+  # sizes, so ADR 0002 holds: no absolute CPU index appears in a host file.
+  physicalCores =
+    let n = capacity.cpuThreads / capacity.threadsPerCore;
+    in if n < 1 then 1 else n;
+
+  # Physical cores [0, reservedForCritical) are the ones critical is expected
+  # to lean on; the fenced tiers are kept out of that range. Still a fence,
+  # not a cap: critical itself gets no AllowedCPUs restriction at all, so it
+  # can still spread onto every core when it needs to.
   reservedForCritical =
     let
-      raw = builtins.ceil (cfg.tiers.critical.cpuShare * capacity.cpuThreads);
+      raw = builtins.ceil (cfg.tiers.critical.cpuShare * physicalCores);
       # Always leave at least one core outside the fence, even on a tiny or
-      # misconfigured host, so background/batch's AllowedCPUs is never empty.
-      clamped = if raw >= capacity.cpuThreads then capacity.cpuThreads - 1 else raw;
+      # misconfigured host, so the fenced tiers' AllowedCPUs is never empty.
+      clamped = if raw >= physicalCores then physicalCores - 1 else raw;
     in if clamped < 0 then 0 else clamped;
 
-  fencedAllowedCPUs = "${toString reservedForCritical}-${toString (capacity.cpuThreads - 1)}";
+  # batch gets its OWN block at the top of the range rather than sharing
+  # background's. Previously both tiers got the identical string, which meant a
+  # Buildkite Nix build landed on exactly the CPUs the LLM was pinned to and
+  # the only thing separating them was CPUWeight (50 vs 250) -- a share, not an
+  # isolation. Sized from batch's own cpuShare, so it is still shares all the
+  # way down.
+  batchCores =
+    let
+      raw = builtins.ceil (cfg.tiers.batch.cpuShare * physicalCores);
+      atLeastOne = if raw < 1 then 1 else raw;
+      # Never let batch's block swallow background's: leave background at
+      # least one core above whatever critical reserved.
+      headroom = physicalCores - reservedForCritical - 1;
+    in if atLeastOne > headroom then (if headroom < 1 then 1 else headroom) else atLeastOne;
 
-  sliceUnitsAreFenced = tierName: tierName == "background" || tierName == "batch";
+  backgroundLastCore =
+    let last = physicalCores - batchCores - 1;
+    in if last < reservedForCritical then reservedForCritical else last;
+
+  # One physical-core range -> the logical CPUs that back it. Thread t of
+  # physical core c is logical CPU c + t*physicalCores, which is Linux's
+  # enumeration on x86 (all first threads, then all siblings) and is what
+  # ac-box's lscpu output shows. threadsPerCore = 1 collapses this to the
+  # single range it always was on a non-SMT host.
+  logicalCPUs =
+    lo: hi:
+    lib.concatMapStringsSep "," (
+      t: "${toString (lo + t * physicalCores)}-${toString (hi + t * physicalCores)}"
+    ) (lib.range 0 (capacity.threadsPerCore - 1));
+
+  tierAllowedCPUs = {
+    background = logicalCPUs reservedForCritical backgroundLastCore;
+    batch = logicalCPUs (backgroundLastCore + 1) (physicalCores - 1);
+  };
+
+  sliceUnitsAreFenced = tierName: tierAllowedCPUs ? ${tierName};
 
   mkSlice = tierName: tierCfg: {
     description = "homelab ${tierName} tier";
@@ -131,7 +187,7 @@ let
       CPUWeight = cpuWeight tierName;
       IOWeight = tierCfg.ioWeight;
     } // lib.optionalAttrs (sliceUnitsAreFenced tierName) {
-      AllowedCPUs = fencedAllowedCPUs;
+      AllowedCPUs = tierAllowedCPUs.${tierName};
     };
   };
 

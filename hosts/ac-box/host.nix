@@ -27,6 +27,10 @@
     # platform warns rather than silently overcommitting.
     capacity = {
       cpuThreads = 56;
+      # Dual Xeon E5-2680 v4: 2 sockets x 14 cores x 2 threads. So 28 physical
+      # cores, and CPUs 28-55 are the SMT siblings of 0-27 -- see
+      # host-options.nix's threadsPerCore for why the fence math needs this.
+      threadsPerCore = 2;
       memoryGiB = 251;
     };
 

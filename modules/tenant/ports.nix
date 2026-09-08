@@ -67,10 +67,30 @@ let
       inherit (r) proto scope justification;
     }) (range 0 (r.count - 1));
 
+  # `enabled` rides along on every claim because the two consumers below want
+  # DIFFERENT populations, and conflating them was a live bug:
+  #
+  #   - collision / justification / mgmt assertions read every claim, enabled
+  #     or not. A disabled tenant's numbers are still spoken for (agent-hub's
+  #     8100 was moved off 8091 precisely because the registry caught the
+  #     clash while the tenant was disabled), so filtering here would let a
+  #     second tenant claim a port and nobody would find out until runtime.
+  #
+  #   - the firewall effect must read ONLY enabled tenants. It did not, and
+  #     the consequence was live on ac-box: with homelab.tenants.agent-hub
+  #     .enable = false, `iptables -S` still showed
+  #     `-A nixos-fw -i enp8s0 -p tcp --dport 8100 -j nixos-fw-accept` with
+  #     nothing listening behind it. resources.nix and quiet.nix both filter
+  #     on enable (enabledTenants / the tenants.json inventory, which
+  #     correctly had no agent-hub entry); this file was the outlier, and
+  #     tenants.nix's comment claiming enable=false held the port shut was
+  #     describing an intention the code did not implement.
   claimsOfTenant =
     tenantName: tenant:
-    concatLists (mapAttrsToList (explodeClaim tenantName) tenant.ports)
-    ++ concatLists (mapAttrsToList (explodeRange tenantName) tenant.portRanges);
+    map (c: c // { inherit (tenant) enable; }) (
+      concatLists (mapAttrsToList (explodeClaim tenantName) tenant.ports)
+      ++ concatLists (mapAttrsToList (explodeRange tenantName) tenant.portRanges)
+    );
 
   # One entry per claim, across every tenant. `proto` is still the list from
   # the schema at this point.
@@ -107,9 +127,11 @@ let
     }
   ];
 
+  # `c.enable` here, unlike everywhere else in this file: a rule is only
+  # emitted for a tenant that is actually turned on. See claimsOfTenant.
   portsOn =
     scope: proto:
-    map (c: c.number) (filter (c: c.scope == scope && c.proto == proto) perProto);
+    map (c: c.number) (filter (c: c.enable && c.scope == scope && c.proto == proto) perProto);
 
   lanIface = netCfg.lan.interface;
   mgmtIface = netCfg.mgmt.interface;
