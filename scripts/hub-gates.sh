@@ -26,7 +26,38 @@ find_flox() {
 }
 
 RC=0
+# Gates that could not run at all. Kept apart from RC on purpose: "this gate
+# went red" and "this gate never ran" are different facts, and collapsing them
+# is how a skipped gate came to look like a passed one. Nothing here is silent
+# -- the summary at the bottom lists every entry and refuses to print a bare
+# GATES PASS while the list is non-empty.
+SKIPPED=()
+
+FLOX_MISSING=""
 if [ -f .flox/env/manifest.toml ]; then
+  # A tree can track a manifest without carrying a materialized environment.
+  # ac-host tracks .flox/env.json and .flox/env/manifest.lock; home-arcade
+  # tracks only manifest.toml, so flox refuses to activate ("unable to locate
+  # an 'env.json'"). That is a missing local environment, not a red test --
+  # CI's flox plugin builds the environment from the manifest itself. Reporting
+  # it as FAIL is what made `hub-gates.sh home-arcade` read as a broken tree
+  # rather than an ungated one, which is the whole defect this file is fixing.
+  [ -f .flox/env.json ] || FLOX_MISSING="$FLOX_MISSING .flox/env.json"
+  [ -f .flox/env/manifest.lock ] || FLOX_MISSING="$FLOX_MISSING .flox/env/manifest.lock"
+fi
+
+if [ -f .flox/env/manifest.toml ] && [ -n "$FLOX_MISSING" ]; then
+  echo "== flox: environment not materialized in this tree =="
+  echo "  .flox/env/manifest.toml is present, but$FLOX_MISSING is not."
+  echo "  There is nothing to activate, so the source gates below are NOT run"
+  echo "  here. Not a failure: CI's flox plugin builds the environment from the"
+  echo "  manifest. It is a hole in LOCAL coverage, and it is counted as one."
+  gaps=""
+  for gate in scripts/ci_test.sh scripts/ci_lint.sh; do
+    [ -f "$gate" ] && gaps="$gaps $gate"
+  done
+  SKIPPED+=("flox source gates${gaps:- (none present)}: no flox environment in $PATHX")
+elif [ -f .flox/env/manifest.toml ]; then
   FLOX=$(NIX_CONFIG="experimental-features = nix-command flakes" find_flox)
   [ -n "$FLOX" ] || { echo "flox unavailable; cannot reproduce the CI environment"; exit 2; }
   echo "== flox: $($FLOX --version 2>&1 | tail -1) =="
@@ -77,6 +108,42 @@ done
 
 # Nix trees prove themselves by evaluating every host they declare. An eval
 # failure here is a box that cannot be rebuilt, which no test suite would catch.
+#
+# A MODULE-ONLY flake declares no host of its own -- `outputs = { self }: {
+# nixosModules.arcade-hub = ...; }` and nothing else. home-arcade, agent-hub and
+# ac-host are all this shape, and for all three the enumeration below came back
+# empty and the gate fell through in SILENCE. modules/arcade-hub.nix ships
+# systemd units and firewall rules to ac-box and had no evaluation gate at all;
+# a syntax error or a dead option reference in it passed this script and only
+# surfaced later, inside homelab.
+#
+# So a module-only tree is gated through the host that COMPOSES it. That host is
+# the only place the tree's modules are actually put together with the options
+# they reference, so it is the only place their breakage is visible -- and it
+# checks the real composition rather than the module in isolation.
+#
+# Discovery is DERIVED, not declared:
+#   consuming tree   $HUB -- the tree this script ships in. homelab is the hub
+#                    for all five trees (AGENTS.md) and the only one that owns
+#                    nixosConfigurations (README's layer table: L3 tenants
+#                    "declare, never reach").
+#   consuming hosts  $HUB's own nixosConfigurations attribute names, read the
+#                    same way a self-hosting tree's are, so a second host costs
+#                    no new configuration anywhere.
+#   input name       the registry name from hub/repos.psv.
+# hub/repos.psv deliberately gains no `consumer` column: homelab's flake.nix
+# already states which trees compose into ac-box and under which input name, and
+# a column would be a second spelling of a decided fact -- which README's Pinned
+# conventions forbid -- free to drift out of agreement with the flake. Silent
+# drift is the defect being closed here, not a tool to close it with.
+#
+# The input-name check below is load-bearing, not defensive. `nix eval
+# --override-input <name> <path>` accepts a name that is NOT an input of the
+# flake, without error or warning, and evaluates the pinned revision instead
+# (verified: `--override-input nosuchinput /tmp` exits 0 and returns the
+# unmodified drvPath). Rename an input in homelab's flake.nix without renaming
+# the registry entry and, without this check, the gate silently goes back to
+# proving github's copy while reporting the working tree as green.
 if [ -f flake.nix ]; then
   hosts=$(nix eval --raw .#nixosConfigurations --apply 'c: builtins.concatStringsSep " " (builtins.attrNames c)' 2>/dev/null)
   if [ -n "$hosts" ]; then
@@ -88,7 +155,53 @@ if [ -f flake.nix ]; then
         echo "  $h: EVAL FAILED"; RC=1
       fi
     done
+  else
+    echo "== nix eval: $REPO is module-only, gating through the hub =="
+    hubhosts=$(cd "$HUB" && nix eval --raw .#nixosConfigurations --apply 'c: builtins.concatStringsSep " " (builtins.attrNames c)' 2>/dev/null)
+    # The hub's real input names, read from its lock rather than grepped out of
+    # flake.nix, so an input added by a `follows` or a rename is seen as nix
+    # sees it. No jq/python3 on the CI agent's PATH; nix parses its own JSON.
+    META=$(mktemp -t hub-gates-meta.XXXXXX.json)
+    nix flake metadata --json "$HUB" >"$META" 2>/dev/null
+    hubinputs=$(nix eval --impure --raw --expr \
+      "builtins.concatStringsSep \" \" (builtins.attrNames (builtins.fromJSON (builtins.readFile $META)).locks.nodes.root.inputs)" 2>/dev/null)
+    rm -f "$META"
+
+    if [ -z "$hubhosts" ]; then
+      echo "  NO NIX GATE: $REPO declares no nixosConfigurations, and neither"
+      echo "  does the hub tree $HUB -- there is no host to compose it through."
+      echo "  Its modules would reach ac-box unproven."
+      RC=1
+    elif ! printf ' %s ' "$hubinputs" | grep -q " $REPO "; then
+      echo "  NO NIX GATE: $HUB/flake.nix has no input named '$REPO'."
+      echo "  hub inputs: ${hubinputs:-<could not be read>}"
+      echo "  --override-input ignores an unknown name WITHOUT erroring, so"
+      echo "  gating on a mismatched name would quietly evaluate the pinned"
+      echo "  revision and call this working tree green. Make the input name in"
+      echo "  $HUB/flake.nix and the name column in $REG agree."
+      RC=1
+    else
+      echo "  composed into: $hubhosts (as input '$REPO' of $HUB)"
+      for h in $hubhosts; do
+        if (cd "$HUB" && nix eval --override-input "$REPO" "$PATHX" \
+              --raw ".#nixosConfigurations.$h.config.system.build.toplevel.drvPath") >/tmp/nixgate.$$ 2>&1; then
+          echo "  $h: evaluates with '$REPO' = $PATHX"
+          grep -q "Updated input '$REPO'" /tmp/nixgate.$$ \
+            && echo "    (input redirected off its pin onto this working tree)"
+        else
+          echo "  $h: EVAL FAILED with '$REPO' = $PATHX"
+          grep -vE "^warning: (Git tree|not writing)" /tmp/nixgate.$$ | tail -25 | sed 's/^/    /'
+          RC=1
+        fi
+        rm -f /tmp/nixgate.$$
+      done
+    fi
   fi
+else
+  # Not a Nix tree at all (inquire-platform). Nothing here reaches ac-box
+  # through a system closure, so there is no eval to run -- but it is still a
+  # gate that did not happen, and it says so rather than passing quietly.
+  SKIPPED+=("nix eval: $REPO has no flake.nix, so nothing was evaluated")
 fi
 
 # The pages step republishes the live site from these templates. render_site.py
@@ -117,5 +230,20 @@ if [ -f scripts/render_site.py ] && [ -d site ]; then
 fi
 
 echo
-[ $RC -eq 0 ] && echo "===== GATES PASS - safe to push =====" || echo "===== GATES FAIL - pushing would stall the pipeline ====="
+if [ ${#SKIPPED[@]} -gt 0 ]; then
+  echo "Gates that did NOT run -- neither proven nor disproven:"
+  for s in "${SKIPPED[@]}"; do echo "  - $s"; done
+  echo
+fi
+
+if [ $RC -ne 0 ]; then
+  echo "===== GATES FAIL - pushing would stall the pipeline ====="
+elif [ ${#SKIPPED[@]} -gt 0 ]; then
+  # Deliberately not the same banner as a clean run. A gate that never ran is
+  # the thing that let modules/arcade-hub.nix reach ac-box unevaluated, and it
+  # is only harmless while somebody can see it.
+  echo "===== GATES PASS WITH GAPS - ${#SKIPPED[@]} gate(s) above did not run ====="
+else
+  echo "===== GATES PASS - safe to push ====="
+fi
 exit $RC
