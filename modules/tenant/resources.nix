@@ -252,11 +252,45 @@ let
   sliceableServiceUnits = builtins.filter (u: lib.hasSuffix ".service" u.unit) tenantUnitTiers;
   nonServiceUnits = builtins.filter (u: !(lib.hasSuffix ".service" u.unit)) tenantUnitTiers;
 
+  # mkOverride 90, not a bare value, and this is a priority LADDER rather than
+  # a way to win an argument:
+  #
+  #     upstream nixpkgs module   100  (a plain definition)
+  #     this contract              90  (here)
+  #     the host composition       50  (lib.mkForce in hosts/<name>/*.nix)
+  #
+  # A bare value here is priority 100, which ties with any upstream module that
+  # sets Slice= or Nice= itself -- and a tie is a hard evaluation error, not a
+  # merge. That is not hypothetical: nixpkgs' samba module pins
+  # `Slice = "system-samba.slice"` on samba-smbd and samba-winbindd, so the
+  # moment arcade declared those two units the whole config stopped evaluating
+  # with "has conflicting definition values". Every service in nixpkgs that
+  # groups itself into a slice is un-adoptable by a tenant until this is
+  # resolved, and there is no way for a tenant to opt out of the collision --
+  # its only lever is `units`, which is the very thing that causes it.
+  #
+  # Winning is correct, because assigning units to slices is precisely what
+  # this contract is for (README: "The contract assigns units to slices; it
+  # does not rename them"). An upstream module's slice choice is a sensible
+  # DEFAULT grouping made without knowledge of this host's tiers; naming a unit
+  # in homelab.tenants.<name>.units is a deliberate, reviewed statement that
+  # this tenant owns its placement. The narrower claim beats the general one.
+  #
+  # It is deliberately mkOverride 90 rather than mkForce (50), so the ladder
+  # stays open at the top: a host that genuinely needs a unit somewhere else
+  # can still say so in its own configuration.nix without having to edit this
+  # pinned module. mkForce here would close that door and make the contract
+  # unarguable, which is a different and worse property than being authoritative.
+  #
+  # The cost, stated plainly: a typo in a `units` list now silently relocates
+  # some other module's unit instead of failing loudly. That is a real
+  # regression in blast radius, and the mitigation is that `units` is a short,
+  # explicit, hand-reviewed list per tenant -- not a glob, not derived.
   unitServiceConfigs = lib.listToAttrs (map
     (u: lib.nameValuePair (lib.removeSuffix ".service" u.unit) {
       serviceConfig = {
-        Slice = "${u.tier}.slice";
-        Nice = cfg.tiers.${u.tier}.nice;
+        Slice = lib.mkOverride 90 "${u.tier}.slice";
+        Nice = lib.mkOverride 90 cfg.tiers.${u.tier}.nice;
       };
     })
     sliceableServiceUnits);

@@ -44,6 +44,55 @@
           scope = "local";
         };
 
+        # The OTHER end of the same ACSP conversation. pluginUdp above is
+        # acServer's socket (`UDP_PLUGIN_LOCAL_PORT`); this range is the
+        # leaderboard sidecar's, the one acServer is told to send events to
+        # (`UDP_PLUGIN_ADDRESS=127.0.0.1:<this>`). Two ranges, not one,
+        # because both ends are real bound sockets on this host — missing
+        # that is how 11300 stayed unregistered while 11200 was declared.
+        #
+        # start/count are read off the tenant's source, NOT off `ss`.
+        # scripts/render_cfg.py, which writes every server_cfg.ini:
+        #
+        #     GAME_PORT_START = 9600
+        #     PLUGIN_LOCAL_START = 11200
+        #     PLUGIN_EVENT_START = 11300
+        #
+        #     def plugin_ports(udp: int) -> tuple[int, int]:
+        #         slot = max(0, udp - GAME_PORT_START)
+        #         return PLUGIN_LOCAL_START + slot, PLUGIN_EVENT_START + slot
+        #
+        # sidecar/plugin.py repeats the same constants and binds one socket
+        # per slot at `event_port = PLUGIN_EVENT_START + slot`, so the range
+        # is one-per-lobby-slot exactly like pluginUdp. The slot space is
+        # bounded at 16 by scripts/acctl.py (`SLOT_COUNT = 16`, and
+        # next_free_slot() iterates `range(SLOT_COUNT)` before raising "no
+        # free race slots (9600–9615)"), which is where game/http/details
+        # get their count = 16 too. Hence 11300..11315.
+        #
+        # Deliberately NOT derived from what was running: `ss -ulnp` on
+        # 9 Sep 2026 showed only 11300/11301/11302 bound (pid 198812,
+        # `python -u /app/plugin.py` in container ac-host-plugin-1), because
+        # only three lobbies were up. Sizing the claim to that would leave
+        # 11303-11315 free for another tenant to take and collide the next
+        # time a fourth lobby starts — the exact failure this registry is
+        # for. Fourth live-listener gap found this way, after the 11200
+        # range, the 18080/18081 auth sidecars and arcade's 4555.
+        #
+        # scope = "local" is the bind address for once, not just the
+        # platform's exposure: compose/docker-compose.yml pins
+        # `PLUGIN_HOST: 127.0.0.1` on the plugin service and plugin.py binds
+        # `self.host`, confirmed live as 127.0.0.1:11300-11302 rather than
+        # the `*:11200` acServer shows. ports.nix emits firewall rules only
+        # for lan/forwarded/mgmt (`portsOn` is never called with "local"),
+        # so this adds no rule — the same way 11200 already gets none.
+        pluginEvent = {
+          start = 11300;
+          count = 16;
+          proto = [ "udp" ];
+          scope = "local";
+        };
+
         game = {
           start = 9600;
           count = 16;
@@ -135,9 +184,35 @@
       description = "LAN arcade hub: Freeciv/Mindustry dedicated servers, SMB + rsync ROM library export.";
       tier = "interactive";
 
+      # The ROM export is arcade's too, not the platform's. smbd, winbindd and
+      # rsyncd all exist solely because services.arcade-hub turns them on
+      # (arcade-hub.nix's services.samba / services.rsyncd blocks, gated on
+      # cfg.smb.enable and cfg.rsync.enable), and this tenant already declares
+      # their ports -- 445, 139 and 873 are right below. Declaring the ports
+      # but not the units was half a declaration: the three ran in
+      # system.slice, outside interactive.slice, uncapped by the tier they
+      # belong to and invisible to drain and to /etc/homelab/tenants.json.
+      #
+      # Names are verbatim from the box (`systemctl list-unit-files`), per the
+      # README's unit-name rule. Note rsync.service, NOT rsyncd.service --
+      # NixOS's services.rsyncd generates a unit called rsync.service and
+      # carries rsyncd.service only as an alias, so the alias is the wrong
+      # string to put here even though the option is spelled rsyncd.
+      #
+      # Consequence, stated because it is a real one: arcade is sliceable
+      # (tier != critical, quiet.drainable defaults true), so resources.nix
+      # now emits Slice=interactive.slice and Nice=0 for these three. Slice=
+      # applies at unit start, so the next switch RESTARTS them -- open SMB
+      # sessions and in-flight rsync transfers drop. That is acceptable here
+      # in a way it explicitly is not for assetto: nothing is mid-race, the
+      # clients are kids' machines that reconnect, and the alternative is
+      # leaving the ROM library permanently outside the tier model.
       units = [
         "arcade-freeciv.service"
         "arcade-mindustry.service"
+        "samba-smbd.service"
+        "samba-winbindd.service"
+        "rsync.service"
       ];
 
       ports = {
@@ -161,6 +236,58 @@
         mindustry = {
           number = 6567;
           proto = [ "tcp" "udp" ];
+          scope = "lan";
+        };
+        # Mindustry's LAN-discovery multicast socket, the second UDP socket on
+        # the same java pid as 6567 (`ss -ulnp` 9 Sep 2026: `*:20151` and
+        # `*:6567`, both pid 151330 fd=14/fd=13). Fourth undeclared live
+        # listener found by that diff.
+        #
+        # Declared because it is a fixed constant, not a port the JVM picked.
+        # That was the whole question: 20151 appears in no config file, in no
+        # arcade-mindustry journal line (the service only ever logs "Opened a
+        # server on port 6567"), and it binds on all interfaces, which is the
+        # shape of an ephemeral source port. It is not one. Two pieces of
+        # evidence, since the service cannot be restarted to test:
+        #
+        #   - It is outside the kernel's ephemeral range. `sysctl
+        #     net.ipv4.ip_local_port_range` on ac-box is 32768-60999, so no
+        #     bind-to-port-0 could ever land on 20151; something asked for it
+        #     by number.
+        #   - That something is the shipped jar. In
+        #     /var/lib/arcade/mindustry/server-release.jar, mindustry.Vars
+        #     carries `public static final int multicastPort = 20151` and
+        #     `public static final String multicastGroup = "227.2.7.7"`
+        #     (javap -constants), and ArcNetProvider's constructor calls
+        #     `arc.net.Server.setMulticast(multicastGroup, multicastPort)`.
+        #     Compile-time finals, with no console command and no
+        #     services.arcade-hub option behind them. Corroborated live:
+        #     /proc/net/igmp lists group 070702E3 -- 227.2.7.7 -- joined on
+        #     enp8s0, which is that exact multicastGroup.
+        #
+        # scope = "lan", because discovery is supposed to work. This started
+        # as "local" on the reasoning that scope describes what the platform
+        # exposes rather than where a socket binds (the alertmanager-mesh
+        # call), and that homelab must not open a hole the tenant module never
+        # asked for. Both halves were right; the conclusion was wrong, because
+        # the tenant module not asking was itself the bug.
+        #
+        # arcade-hub.nix opened only cfg.mindustry.port on the game interface,
+        # so `iptables -S` had accept rules for 6567/tcp and 6567/udp and
+        # nothing for 20151: every multicast discovery packet from a LAN
+        # client was dropped, and the only way onto the server was typing its
+        # address -- on a hub whose entire purpose is that a kid can find the
+        # game without being told an IP. Exactly the failure freeciv had
+        # before announcePort was split out, one game later.
+        #
+        # home-arcade now declares mindustry.multicastPort (default 20151) and
+        # opens it alongside the game port, mirroring freeciv.announcePort. So
+        # "lan" is no longer homelab reaching past the tenant -- it is the
+        # registry agreeing with what the tenant module asks for, which is the
+        # only arrangement the contract permits.
+        mindustry-multicast = {
+          number = 20151;
+          proto = [ "udp" ];
           scope = "lan";
         };
         smb = {
