@@ -251,7 +251,7 @@ default route is; on ac-box those are one Dream Router wearing both hats, and a
 controller moves. Proven a no-op: the toplevel drvPath is byte-identical with
 and without the change.
 
-**F7 — the eval harnesses depend on `<nixpkgs>`, not on the flake.**
+**F7 — the eval harnesses depended on `<nixpkgs>`, not on the flake. Fixed.**
 `modules/tenant/tests/*.nix`, `modules/ci/tests/eval.nix` and
 `modules/ci/scripts/run-eval-tests.sh` all default to
 `(import <nixpkgs> { }).lib`, so they resolve through `NIX_PATH` rather than
@@ -261,6 +261,30 @@ since the real config has nothing to reject — so they are load-bearing. Being
 load-bearing and unpinned is the objection: they can pass against a different
 `lib` than the one the system is built with. Threading `lib` from the flake
 (or exposing them as flake `checks`) closes it.
+
+Fixed in `365e1d5`, with a correction to the finding as first written: the
+*runner* was already pinned — `9c21cc7` injects the flake's nixpkgs with
+`-I nixpkgs=…`. The live hole was the **harnesses**, each of which documents
+`nix eval -f modules/tenant/tests/eval.nix <case>.checked` in its own Usage
+block; that path got the channel's lib, or an error where no channel exists.
+Fixing the injection would have fixed only the scripted path.
+
+The pin now lives in `modules/tenant/tests/pinned-nixpkgs.nix`, which reads
+`flake.lock` and `fetchTree`s the locked node verbatim — pure, no re-locking,
+and the lock is *read* rather than the rev copied, so the pin keeps one home.
+The `<nixpkgs>` fallback is gone, and `run-eval-tests.sh` passes
+`--option nix-path ""` so a reintroduced lookup dies loudly instead of
+resolving a channel. All 19 cases match baseline, including the five
+expected-throw negatives, with `NIX_PATH` both cleared and poisoned. Suite
+runtime dropped 18.0s → 3.8s, because three lib-only harnesses no longer
+instantiate the whole package set.
+
+**Open follow-up.** Exposing the harnesses as flake `checks` (F4's neighbour)
+would let `nix flake check` cover them directly. The blocker is real: a fixture
+that must *throw* cannot be a check that must *succeed* without inverting it
+through `builtins.tryEval` and asserting `success == expected`. That inversion
+belongs in the harnesses, and it would make `run-eval-tests.sh` largely
+redundant — a separate design task, not a tidy-up.
 
 **F8 — the contract could not claim any unit nixpkgs already sliced. Fixed.**
 Found by doing the arcade work, not by reading: `resources.nix` emitted
@@ -338,7 +362,7 @@ Ordered by risk carried per unit of effort.
 | 7 | Split the Discord bot into its own tenant | Deferral expired at phase 6. Needs a decision on tenant name and port/unit ownership. |
 | 8 | Drop the `inquire-platform` registry row | Trivial, but it is a decision about the user's tree layout, not a defect. |
 | 9 | Give the UniFi router address a home on `homelab.host` (F6) | **Done** — `6e18170`. `homelab.host.unifi.address`, not `networks.lan.gateway`. Proven a no-op: drvPath unchanged. |
-| 10 | Pin the eval harnesses to the flake's `lib` (F7) | **Still open.** Attempted; the agent was lost to a rate limit before editing anything. |
+| 10 | Pin the eval harnesses to the flake's `lib` (F7) | **Done** — `365e1d5`. The runner was already pinned; the harnesses were not. |
 | 11 | Decide: does homelab get a pipeline, or a documented hand-off? | **Decision, not code.** Either is defensible — a switch that can bounce the CI agent may genuinely belong to a human. What is not defensible is the current state, where the registry says `deploy=none`, no runbook step names the switch, and drift accrues silently. |
 
 ---
