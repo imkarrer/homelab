@@ -61,15 +61,21 @@ own nixpkgs into the closure. `agent-hub` currently pins `nixos-unstable` and
 must be made to follow — `llama-cpp` on 26.05 is version `9190`, so verify any
 `llama-server` flag against that build, not against unstable.
 
-**`hardware-configuration.nix` is not in git.** Only `.example` is tracked
-upstream. Fetch the real one read-only from
-`ac-box:/var/lib/ac-host/src/hosts/ac-box/hardware-configuration.nix`, keep it
-gitignored, and import it conditionally with the `.example` fallback — the same
-pattern the existing `hosts/ac-box/configuration.nix` uses. Never invent one.
+**`hardware-configuration.nix` and `ssh-keys.local.nix` are tracked.** A flake
+copies only git-tracked files into the store, so a build from
+`github:imkarrer/homelab` sees exactly what git sees. Ignoring them — the
+convention inherited from rsync-deployed `ac-host` — made gate 1 build a system
+with no authorized keys and the hardware stub that says of itself it will not
+boot a real machine, and it did so without an error. `.gitignore`'s NOTE and
+commit `daac96f` carry the full account; do not re-add either path to it. Fetch
+them read-only from `ac-box:/var/lib/ac-host/src/hosts/ac-box/` and never invent
+one. `hosts/ac-box/configuration.nix` now *throws* on a missing hardware file
+rather than substituting the `.example` stub.
 
 **Everything is public except one file.** `whitelist.json` holds third-party
 `steam_id` + `discord_id` pairs and stays box state, never git. Credentials go
-to sops-nix. SSH *public* keys are not secrets.
+to sops-nix. SSH *public* keys are not secrets, and neither are disk UUIDs —
+which is why the two files above are tracked in a public repo.
 
 ## Working agreements for automated changes
 

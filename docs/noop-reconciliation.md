@@ -24,6 +24,16 @@ similar inspection commands only — nothing was written to the box).
 intentionally not read as sources of truth here — every "GAP" below is a gap
 against the files that exist *today*.
 
+> **Correction, 9 Sep 2026 — `hardware-configuration.nix` and
+> `ssh-keys.local.nix` are no longer gitignored.** The survey below describes
+> them as gitignored, which was true when it was written and stopped being true
+> hours later: Gate 1 showed that a flake copies only git-tracked files, so a
+> build from `github:imkarrer/homelab` had neither file and fell back to the
+> `[]` key list and the hardware stub that will not boot a real machine. Both
+> files were tracked in commit `daac96f`; `.gitignore`'s NOTE is the
+> authoritative account. Read the parentheticals below as a record of what was
+> true on 7 Sep, not as the current rule.
+
 ---
 
 ## Boot
@@ -34,7 +44,7 @@ against the files that exist *today*.
 | `boot.loader.systemd-boot.configurationLimit` | `5` (5 entries in `/boot/loader/entries`, live-verified) | `modules/platform/boot.nix` — **exact-match value, verified equal** |
 | `boot.loader.efi.canTouchEfiVariables` | `true` | `modules/platform/boot.nix` |
 | `boot.tmp.cleanOnBoot` | `true` | `modules/platform/boot.nix` |
-| `fileSystems."/"`, `fileSystems."/boot"`, `swapDevices = []`, `nixpkgs.hostPlatform`, `hardware.cpu.intel.updateMicrocode` (all from `hardware-configuration.nix`) | ext4 root (`5ae5d017-…`), vfat `/boot` (`F5F3-902E`, `fmask=0022,dmask=0022`), no swap (`/proc/swaps` empty), `x86_64-linux` | `hosts/ac-box/hardware-configuration.nix` — byte-identical copy already exists in this repo (gitignored, per README's rule). **Not yet imported by anything**: `boot.nix`'s own header explains why the conditional import can't live in a platform module (would be `imports` depending on `config`, genuine infinite recursion) and must go in the per-host `configuration.nix`/`flake.nix` — which is what the coordinator is writing right now. Tracked here as *pending*, not a gap. |
+| `fileSystems."/"`, `fileSystems."/boot"`, `swapDevices = []`, `nixpkgs.hostPlatform`, `hardware.cpu.intel.updateMicrocode` (all from `hardware-configuration.nix`) | ext4 root (`5ae5d017-…`), vfat `/boot` (`F5F3-902E`, `fmask=0022,dmask=0022`), no swap (`/proc/swaps` empty), `x86_64-linux` | `hosts/ac-box/hardware-configuration.nix` — byte-identical copy already exists in this repo (gitignored at the time; tracked since `daac96f` — see the correction above). **Not yet imported by anything**: `boot.nix`'s own header explains why the conditional import can't live in a platform module (would be `imports` depending on `config`, genuine infinite recursion) and must go in the per-host `configuration.nix`/`flake.nix` — which is what the coordinator is writing right now. Tracked here as *pending*, not a gap. |
 | `boot.kernelPackages` | unset (nixpkgs default for `nixos-26.05`) | unset on both sides — reproduced by omission, contingent on the pinned-`nixpkgs` rule in README holding |
 | `system.stateVersion` | `"26.05"` (from `hosts/ac-box/configuration.nix`) | **GAP** — not set in any of `modules/platform/*.nix`, `hosts/ac-box/host.nix`, or `hosts/ac-box/tenants.nix`. This almost certainly belongs in the in-progress `hosts/ac-box/configuration.nix`, but as of the files this document was scoped to read, it has no home. `system.stateVersion` drives default-value selection across many NixOS modules (not just an activation label) — confirm it lands as the literal string `"26.05"`, not a re-derivation, before Gate 1. |
 
@@ -199,7 +209,7 @@ exists to catch.
 
 2. **`hardware-configuration.nix` is not imported anywhere yet.** The file
    itself is byte-identical and already sitting at
-   `hosts/ac-box/hardware-configuration.nix` (gitignored, per README), but
+   `hosts/ac-box/hardware-configuration.nix` (gitignored at the time; tracked since `daac96f` — see the correction above), but
    nothing in `modules/platform/` imports it — by design, per `boot.nix`'s
    own header comment (importing it there would make `imports` depend on
    `config`, a genuine infinite recursion). The conditional

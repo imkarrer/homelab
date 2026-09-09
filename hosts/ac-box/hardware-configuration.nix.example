@@ -1,11 +1,15 @@
-# Tracked fallback so the flake evaluates for anyone who hasn't fetched the
-# real hardware-configuration.nix from the box yet. It will not boot a real
-# machine. On (or for) the actual box:
+# NOT a fallback, and nothing imports it. It will not boot a real machine.
 #
-#   nixos-generate-config --show-hardware-config > hosts/ac-box/hardware-configuration.nix
+# It was the fallback while hosts/ac-box/hardware-configuration.nix was
+# gitignored, and that is exactly the problem: a flake copies only git-tracked
+# files, so builds from github:imkarrer/homelab took this branch silently and
+# green. The real file is tracked now and hosts/ac-box/configuration.nix throws
+# rather than reaching here. See .gitignore's NOTE and commit daac96f.
 #
-# hosts/ac-box/hardware-configuration.nix is gitignored; this .example is the
-# only copy tracked in git, mirroring the same stub used in the ac-host repo.
+# Kept only as the shape a new host's file takes. For a new host, generate its
+# own on that machine — never copy this one:
+#
+#   nixos-generate-config --show-hardware-config > hosts/<name>/hardware-configuration.nix
 { modulesPath, ... }:
 
 {

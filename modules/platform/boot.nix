@@ -11,17 +11,16 @@
 # `config.homelab.host.name` there is a genuine infinite recursion, not a
 # style nit (confirmed: `nix eval` on this exact pattern fails with
 # "infinite recursion encountered ... if you reference config in imports").
-# ac-box's own configuration.nix sidesteps this by hardcoding the conditional
-# `./hardware-configuration.nix` vs `./hardware-configuration.nix.example`
-# import at its own top level, next to the file. The same thing belongs in
-# this repo's per-host composition (hosts/ac-box/configuration.nix or
-# flake.nix — not part of this ticket), which already knows its own host
-# name and can import
-#   hosts/ac-box/hardware-configuration.nix   (fetched read-only, gitignored)
-# falling back to
-#   hosts/ac-box/hardware-configuration.nix.example   (tracked stub)
-# exactly as ac-host's configuration.nix does today. Both files already exist
-# at hosts/ac-box/ for that composition to pick up.
+# ac-host's own configuration.nix sidesteps this by hardcoding the import at
+# its own top level, next to the file. The same thing lives in this repo's
+# per-host composition, hosts/ac-box/configuration.nix, which already knows its
+# own host name and imports
+#   hosts/ac-box/hardware-configuration.nix   (fetched read-only, TRACKED)
+# — tracked, not gitignored, because a flake copies only git-tracked files into
+# the store; see .gitignore's NOTE. It does NOT fall back to
+# hosts/ac-box/hardware-configuration.nix.example the way ac-host's does: that
+# fallback is silent, and a silent substitution of a stub that will not boot a
+# real machine is what gate 1 caught. A missing hardware file throws there.
 #
 # hardware.graphics / hardware.nvidia are gated on homelab.host.gpu rather
 # than left unconditional, so a future non-nvidia host doesn't inherit a

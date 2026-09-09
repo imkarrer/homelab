@@ -2,13 +2,19 @@
 # ac-box's configuration.nix: same two interactive users, same groups, same
 # wheelNeedsPassword, same systemPackages list.
 #
-# SSH keys: configuration.nix reads a gitignored, host-local
-# `ssh-keys.local.nix` next to itself (falling back to `[]`), because public
-# keys are per-box operational data, not a secret, but also not something a
-# generic platform module should hardcode. We keep that exact convention —
-# hosts/<name>/ssh-keys.local.nix, matching the .gitignore pattern that
-# already existed for it — but resolve `<name>` from homelab.host.name
-# instead of writing "ac-box" here, so this module stays host-agnostic.
+# SSH keys: configuration.nix reads a host-local `ssh-keys.local.nix` next to
+# itself (falling back to `[]`), because public keys are per-box operational
+# data, not a secret, but also not something a generic platform module should
+# hardcode. We keep that exact convention — hosts/<name>/ssh-keys.local.nix —
+# but resolve `<name>` from homelab.host.name instead of writing "ac-box" here,
+# so this module stays host-agnostic.
+#
+# That file is TRACKED, not gitignored. The .gitignore pattern was inherited
+# from ac-host and gate 1 proved it wrong here: a flake copies only git-tracked
+# files, so the ignored file was absent from the source fetched by revision and
+# the `[]` below silently emptied authorizedKeys for root, nixosuser and ac.
+# See .gitignore's NOTE and commit daac96f. `[]` is still a quiet fallback and
+# is only safe because the file is tracked — do not re-ignore it.
 { config, lib, pkgs, ... }:
 
 let
