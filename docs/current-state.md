@@ -6,6 +6,8 @@ frozen as a historical record of that migration step; this file is the one
 that must be true today.
 
 **Last reconciled:** 9 Sep 2026, read-only over `ssh ac-box`.
+**Last updated:** 9 Sep 2026, after the first round of supervised work landed
+(`45db9dc`, `6e18170`, `1c6827f`, `37e6927`, and `home-arcade` `92c1c68`).
 **Method:** see [Keeping this current](#keeping-this-current) at the bottom.
 **Nothing on ac-box was modified to produce this document.**
 
@@ -228,7 +230,7 @@ a warm store and the MinIO substituter. That is true today and worth
 re-examining if CI ever moves off ac-box, because it would then be a
 from-source system build on every push.
 
-**F6 — the UniFi router address is hardcoded in an L2 module.**
+**F6 — the UniFi router address was hardcoded in an L2 module. Fixed.**
 `modules/observability/default.nix` reads `config.homelab.host.networks.lan
 .address` for Grafana's bind (correct, and its comment says why), then
 hardcodes `https://192.168.1.1` twice for `UNIFI_HOST` — once in the unpoller
@@ -241,7 +243,13 @@ where a machine literal appears in code rather than in a comment. Everything
 else surveyed is clean on this point: `grep` for `192.168.`, `enp8s0`, `eno1`
 and `/var/lib/ac-host` across `modules/` returns comments only. The fix is a
 schema addition (a gateway or `unifi.address` field on `homelab.host`), which
-makes it a contract change rather than a drive-by edit.
+makes it a contract change rather than a drive-by edit. Landed in `6e18170`
+as `homelab.host.unifi.address` — deliberately not `networks.lan.gateway`,
+since the consumers speak the UniFi controller API and do not care what the
+default route is; on ac-box those are one Dream Router wearing both hats, and a
+`gateway` field would record the coincidence and go quietly wrong the day the
+controller moves. Proven a no-op: the toplevel drvPath is byte-identical with
+and without the change.
 
 **F7 — the eval harnesses depend on `<nixpkgs>`, not on the flake.**
 `modules/tenant/tests/*.nix`, `modules/ci/tests/eval.nix` and
@@ -278,7 +286,7 @@ Verified after the change — `samba-smbd`, `samba-winbindd`, `rsync`,
 `interactive.slice`, while `ac-host-static` correctly resolves to no slice at
 all.
 
-**F9 — `home-arcade` has no evaluation gate at all.**
+**F9 — module-only flakes had no evaluation gate at all. Fixed.**
 `hub-gates.sh` gates a Nix tree by enumerating its `nixosConfigurations` and
 evaluating each. `home-arcade` is a module-only flake and has none, so the Nix
 gate is *silently skipped* and the script falls through to a flox test that
@@ -288,7 +296,20 @@ rules on ac-box and nothing evaluates it before a push. The correct gate is to
 evaluate it through the host that consumes it —
 `nix eval --override-input home-arcade <local tree> .#nixosConfigurations
 .ac-box…toplevel.drvPath` — which is how this round's arcade change was
-actually verified. **In progress.**
+actually verified. Fixed in `1c6827f`, and the gap was wider than F9 first
+stated: `ac-host` and `agent-hub` are module-only too, and `agent-hub` ran
+*zero* gates while printing a bare `GATES PASS`. The fix needed a guard worth
+knowing about — `nix eval --override-input` with a name no input has exits 0,
+warns nothing, and returns the unmodified drvPath, so a renamed input would
+have turned the new gate back into a green no-op proving the pinned copy.
+Input names are now checked against `nix flake metadata` first.
+
+**Coverage caveat.** A composed eval proves what is *reachable* from ac-box's
+config, not the whole module. `agent-hub` is imported but
+`services.agent-hub.enable` defaults false, so its gate proves its option
+declarations compose and little of its config body. Strictly better than zero,
+and not the same as full coverage — which matters, because ADR 0006 makes these
+gates the only thing between a merge and a switch.
 
 **Minor — `nixpkgs.config.allowUnfree = true`** in `modules/platform/nix.nix`
 is global. `allowUnfreePredicate` scoped to the packages that actually need it
@@ -308,16 +329,16 @@ Ordered by risk carried per unit of effort.
 
 | # | Item | Status |
 | --- | --- | --- |
-| 1 | Remove the stale `/etc/nixos` host config from the box | **Human action.** Writing to ac-box is a human action under `AGENTS.md`; needs a runbook line. Zero coupling — nothing imports it. |
-| 2 | Teach `hub-status.sh` to report closure drift (F3) | In progress |
-| 3 | Correct the stale `hardware-configuration.nix` documentation (F1) | In progress |
+| 1 | Remove the stale `/etc/nixos` host config from the box | **Human action, runbook not yet written.** Writing to ac-box is a human action under `AGENTS.md`. Zero coupling — nothing imports it. Drafting `docs/runbook-decommission.md` was attempted and lost to a rate limit. Check whether `/etc/nixos/hardware-configuration.nix` matches the tracked copy *before* removing either. |
+| 2 | Teach `hub-status.sh` to report closure drift (F3) | **Done** — `1c6827f`. Three-tier cascade; `HUB_STATUS_EXACT=1` is the exact check. Also reports the owed reboot. |
+| 3 | Correct the stale `hardware-configuration.nix` documentation (F1) | **Done** — `37e6927`. Nine sites, not three; the silent `.example` fallback is now a `throw`. |
 | 4 | Register `udp 11300–11302`; adjudicate `udp 20151` | **Done.** Both registered; 20151 turned out to be a live LAN-discovery outage, fixed in `home-arcade`. |
 | 5 | Run the CI adoption sequence, then switch once | **Human action, in a window.** `modules/ci/default.nix` documents the order and both hazards. The switch must not be run *by* the Buildkite agent it bounces. Lands all 15 commits together. |
 | 6 | Add samba/winbindd/rsync to arcade's `units` | **Done**, on explicit instruction that an arcade bounce is acceptable. Uncovered and fixed F8. The three still restart on the next switch — that is the intended, accepted cost. |
 | 7 | Split the Discord bot into its own tenant | Deferral expired at phase 6. Needs a decision on tenant name and port/unit ownership. |
 | 8 | Drop the `inquire-platform` registry row | Trivial, but it is a decision about the user's tree layout, not a defect. |
-| 9 | Give the UniFi router address a home on `homelab.host` (F6) | Contract change — a new field on the host schema, not a drive-by edit. |
-| 10 | Pin the eval harnesses to the flake's `lib` (F7) | Test-only, no closure impact. |
+| 9 | Give the UniFi router address a home on `homelab.host` (F6) | **Done** — `6e18170`. `homelab.host.unifi.address`, not `networks.lan.gateway`. Proven a no-op: drvPath unchanged. |
+| 10 | Pin the eval harnesses to the flake's `lib` (F7) | **Still open.** Attempted; the agent was lost to a rate limit before editing anything. |
 | 11 | Decide: does homelab get a pipeline, or a documented hand-off? | **Decision, not code.** Either is defensible — a switch that can bounce the CI agent may genuinely belong to a human. What is not defensible is the current state, where the registry says `deploy=none`, no runbook step names the switch, and drift accrues silently. |
 
 ---
