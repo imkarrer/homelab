@@ -20,11 +20,16 @@ that must be true today.
 > `8f17486` does not. Corrected throughout. The finding is unchanged; only its
 > magnitude was wrong.
 
-> **Reboot owed.** `/run/booted-system` (`9ick7piz…`) differs from
-> `/run/current-system` (`2a6qm0b…`): the box was switched after boot, so
-> `systemctl` reflects the new closure while the kernel, initrd and modules are
-> still the booted ones. A kernel or boot-parameter change would look applied
-> and not be. `hub-status.sh` now reports this as its own numbered problem.
+> **Reboot owed — but narrower than first recorded.** `/run/booted-system`
+> (`9ick7piz…`) differs from `/run/current-system` (`2a6qm0b…`), so the box was
+> switched after boot. But `kernel`, `initrd`, `kernel-modules` and
+> `kernel-params` are **identical** between the two; only `init` and
+> `system-path` differ (gen 28→29: samba, freeciv, the four slices). **No
+> kernel change is pending.** The general hazard stands — a future kernel or
+> boot-parameter change would look applied and not be — and `hub-status.sh`
+> reports the condition. Order the reboot last: HAZARD 1 step 2 removes the CI
+> containers, and nothing restarts them until the switch creates
+> `ac-host-ci.service`, so rebooting in that window leaves no Buildkite agent.
 
 Visual companion (same survey, diagrammed):
 <https://claude.ai/code/artifact/49abb0ae-3374-4ba4-921f-8e87fba0c52d>
@@ -119,9 +124,10 @@ no service behind it fails just as surely as a service with no declaration.
 
 | Item | Why |
 | --- | --- |
-| `/etc/nixos/configuration.nix` + `hardware-configuration.nix` | A stock, pre-refactor NixOS host config dated 31 Aug, still at the path `nixos-rebuild` reads when `--flake` is omitted. Nothing builds from it. But one `nixos-rebuild switch` without the flag builds *that* — no platform layer, no contract, no slices — and exits 0. This is the trap `ac-host`'s flake closed by deleting its own `nixosConfigurations.ac-box`; the other half is still here. **Highest-risk item on the box, and the cheapest to remove.** |
+| `/etc/nixos/configuration.nix` | A stock, pre-refactor NixOS host config dated 31 Aug, at the path `nixos-rebuild` reads when `--flake` is omitted. **Correction:** this was first recorded here as building silently and exiting 0. It does not — a bare `nixos-rebuild switch` fails at evaluation, because the box's `NIX_PATH` carries no `nixos-config` entry (`nix-instantiate --find-file nixos-config` → not found). The danger is real but narrower: that protection is an accidental nixpkgs default that nothing in this repo asserts, and four ordinary actions re-arm it (`-I nixos-config=`, `NIXOS_CONFIG=`, anyone setting `nix.nixPath`, a nixpkgs bump) — plus the reader who opens `/etc/nixos` to learn what the box runs and believes it. If it *did* apply: no `virtualisation.docker`, so `docker.service` stops and all nine containers with it, and `PermitRootLogin = "yes"` against the platform's `"prohibit-password"`. Remedy is a `throw`, not deletion — `nixos-generate-config` writes `configuration.nix` only when the path is *absent*, so an empty `/etc/nixos` is one accidental invocation away from a fresh stock config. See `docs/runbook-decommission.md`. |
+| ~~`/etc/nixos/hardware-configuration.nix`~~ | **Keep.** Verified AST-identical to the tracked copy and to the one at `5fc6c90` (the commit that built the running closure) — `nix-instantiate --parse` sha256 `0f0e8b723682cbe8` for all three, despite three different formattings. It declares no services and reverts nothing. Do **not** verify by regenerating: `nixos-generate-config` on the box today emits a *worse* file — nine `fileSystems."/var/lib/docker/rootfs/overlayfs/<hash>"` entries, one per running container, and drops `usbhid`, `usb_storage` and `sd_mod` from the initrd modules. |
 | `wpa_supplicant.service` | Running on a machine with no wireless interface — `/sys/class/net` lists `eno1`, `enp8s0`, docker bridges and veths, nothing else. A NetworkManager default nobody turned off. |
-| `ac-host-ci-minio-init-1` | Exited one-shot left behind by the hand-started stack. Disappears when the CI stack is adopted under systemd. |
+| ~~`ac-host-ci-minio-init-1`~~ | **Not a leftover — this entry was wrong.** The `agent` service declares `depends_on: minio-init: service_completed_successfully`, so the exited container *is* the record that the condition was met. Compose needs it, and it reappears after adoption. No action. |
 | `inquire-platform` (registry row) | `hub/repos.psv` carries it as `remote=none deploy=none` on branch `local-dev-environment`. Nothing on ac-box runs it, and with no remote it cannot be gated, pushed or deployed. It is a WSL working tree, not a home-lab service. |
 
 ---
@@ -353,7 +359,7 @@ Ordered by risk carried per unit of effort.
 
 | # | Item | Status |
 | --- | --- | --- |
-| 1 | Remove the stale `/etc/nixos` host config from the box | **Human action, runbook not yet written.** Writing to ac-box is a human action under `AGENTS.md`. Zero coupling — nothing imports it. Drafting `docs/runbook-decommission.md` was attempted and lost to a rate limit. Check whether `/etc/nixos/hardware-configuration.nix` matches the tracked copy *before* removing either. |
+| 1 | Neutralise the stale `/etc/nixos/configuration.nix` on the box | **Human action, runbook written** — `docs/runbook-decommission.md`. Gate 0 passes: the hardware files are proven AST-identical, so nothing blocks it. Replace with a `throw`; keep the hardware file. |
 | 2 | Teach `hub-status.sh` to report closure drift (F3) | **Done** — `1c6827f`. Three-tier cascade; `HUB_STATUS_EXACT=1` is the exact check. Also reports the owed reboot. |
 | 3 | Correct the stale `hardware-configuration.nix` documentation (F1) | **Done** — `37e6927`. Nine sites, not three; the silent `.example` fallback is now a `throw`. |
 | 4 | Register `udp 11300–11302`; adjudicate `udp 20151` | **Done.** Both registered; 20151 turned out to be a live LAN-discovery outage, fixed in `home-arcade`. |
@@ -423,6 +429,25 @@ before it passed.
 **Step 4 — update this file.** Move the date at the top, correct the tables,
 and add a row to §5 rather than deleting one — an item that turned out to be a
 human decision is more useful recorded as such than silently dropped.
+
+### Open questions this round raised but did not settle
+
+- **Thirteen containers became nine.** `docker ps` and `hub-status.sh` both
+  report nine running; `docs/runbook-cutover.md`'s baseline and its success
+  criterion 4 both say thirteen. Whether four were retired deliberately is
+  unestablished — and until it is, the cutover runbook's success criterion
+  cannot be evaluated.
+- **`ci.units` is still `[]`**, in `tenants.nix` and in the live
+  `/etc/homelab/tenants.json`. So even after the CI adoption switch,
+  `ac-host-ci.service` is claimed by no tenant and lands in no slice —
+  `batch.slice` will still be empty of the unit it exists for.
+  `modules/ci/default.nix`'s header names this follow-up; it has not been made.
+- **`modules/ci/default.nix`'s header is stale.** It says the module is "NOT
+  imported by flake.nix or by hosts/ac-box/configuration.nix". Both import it
+  now, and `configuration.nix` sets `homelab.ci.enable = true`.
+- **`/var/lib/ac-host/src/hosts/ac-box/hardware-configuration.nix` is mode
+  0666**, and `README.md` points operators at that path to fetch the hardware
+  config.
 
 **Standing rules while doing any of this.** ac-box is read-only: inspect over
 ssh, change it by landing in git and letting the pipeline deploy. A hand-edit
