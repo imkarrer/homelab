@@ -15,9 +15,18 @@
 # No fixture here contains, or needs, a real secret: homelab.ci.envFile is
 # checked as a STRING PATH only (it must equal the fixture's chosen path),
 # never opened or interpolated into an expected value.
+#
+# `lib`/`pkgs` come from the revision flake.lock pins, not from
+# <nixpkgs>/NIX_PATH -- finding F7, closed 9 Sep 2026. The helper lives under
+# modules/tenant/tests/ because that is where the other four harnesses are and
+# a pin must have exactly one home; L2 reaching into L1 is the permitted
+# direction (README's "Layers"), and the file's own header says where it
+# should move if this repo ever grows a neutral lib/ or a flake `checks`
+# output. There is deliberately no <nixpkgs> fallback: an unpinned run must
+# fail loudly rather than quietly succeed against the wrong lib.
 {
-  lib ? (import <nixpkgs> { }).lib,
-  pkgs ? import <nixpkgs> { },
+  lib ? (import ../../tenant/tests/pinned-nixpkgs.nix).lib,
+  pkgs ? (import ../../tenant/tests/pinned-nixpkgs.nix).pkgs,
 }:
 
 let

@@ -1,8 +1,14 @@
 # Eval harness for modules/tenant/resources.nix.
 #
-# Not a flake -- this repo doesn't have one yet -- so this runs against
-# whatever <nixpkgs> resolves to on the machine, same as tests/eval.nix
-# (ports.nix's harness). Uses the REAL modules/platform/host-options.nix and
+# Not a flake target -- a plain lib.evalModules fixture invoked with
+# `nix eval -f`, same as tests/eval.nix (ports.nix's harness) -- but `lib`
+# and `pkgs` come from ./pinned-nixpkgs.nix (flake.lock's revision) rather
+# than from <nixpkgs>/NIX_PATH, as of 9 Sep 2026; see that file for why, and
+# for the finding (F7) it closes. That matters more here than anywhere else
+# in this directory: the numbers checked below (AllowedCPUs fences, tier
+# shares) are hand-computed against ac-box's real facts, so they are only
+# evidence about ac-box if the lib doing the computing is ac-box's.
+# Uses the REAL modules/platform/host-options.nix and
 # the REAL hosts/ac-box/host.nix (56 threads / 251 GiB) rather than a capacity
 # stub, since both now exist in this repo -- only the systemd-shaped options
 # resources.nix writes to (systemd.slices, systemd.services.*.serviceConfig,
@@ -23,9 +29,13 @@
 # `good.checked` and `brokenBudget.checked` are the ones that behave the way
 # a real NixOS build does: throw (evaluation FAILS) if any assertion or extra
 # check failed, clean return otherwise.
+# No <nixpkgs> fallback, deliberately: an unpinned run must fail loudly.
+# `pkgs` is only threaded into specialArgs for stub-systemd.nix's option
+# types; it is the same default-config, no-overlay package set as before,
+# read out of the pinned tree instead of the channel.
 {
-  lib ? (import <nixpkgs> { }).lib,
-  pkgs ? import <nixpkgs> { },
+  lib ? (import ./pinned-nixpkgs.nix).lib,
+  pkgs ? (import ./pinned-nixpkgs.nix).pkgs,
 }:
 
 let

@@ -1,8 +1,10 @@
 # Eval harness for modules/tenant/metrics.nix.
 #
-# Not a flake -- this repo doesn't have one yet -- so this runs against
-# whatever <nixpkgs> resolves to on the machine, same as tests/eval.nix
-# (ports.nix's harness). metrics.nix is pure over homelab.tenants (no host
+# Not a flake target -- a plain lib.evalModules fixture invoked with
+# `nix eval -f`, same as tests/eval.nix (ports.nix's harness) -- but `lib`
+# comes from ./pinned-nixpkgs.nix (flake.lock's revision) rather than from
+# <nixpkgs>/NIX_PATH, as of 9 Sep 2026; see that file for why, and for the
+# finding (F7) it closes. metrics.nix is pure over homelab.tenants (no host
 # facts), so only the one leaf it writes to is stubbed:
 # services.prometheus.scrapeConfigs (tests/stub-prometheus.nix).
 #
@@ -25,7 +27,8 @@
 #     -f modules/tenant/tests/eval-metrics.nix allTrue.scrapeConfigs
 #   nix --extra-experimental-features "nix-command flakes" eval \
 #     -f modules/tenant/tests/eval-metrics.nix allFalse.checked
-{ lib ? (import <nixpkgs> { }).lib }:
+# No <nixpkgs> fallback, deliberately: an unpinned run must fail loudly.
+{ lib ? (import ./pinned-nixpkgs.nix).lib }:
 
 let
   schema = ../schema.nix;

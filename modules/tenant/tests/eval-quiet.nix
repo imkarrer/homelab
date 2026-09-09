@@ -1,8 +1,10 @@
 # Eval harness for modules/tenant/quiet.nix.
 #
-# Not a flake -- this repo doesn't have one yet -- so this runs against
-# whatever <nixpkgs> resolves to on the machine, same as tests/eval.nix
-# (ports.nix's harness). quiet.nix is pure over homelab.tenants (no host
+# Not a flake target -- a plain lib.evalModules fixture invoked with
+# `nix eval -f`, same as tests/eval.nix (ports.nix's harness) -- but `lib`
+# comes from ./pinned-nixpkgs.nix (flake.lock's revision) rather than from
+# <nixpkgs>/NIX_PATH, as of 9 Sep 2026; see that file for why, and for the
+# finding (F7) it closes. quiet.nix is pure over homelab.tenants (no host
 # facts -- see quiet.nix's own header for why it deliberately does not read
 # homelab.host.maintenance.window even though modules/platform/host-options.nix
 # now declares it), so only the one leaf it writes to is stubbed:
@@ -19,7 +21,8 @@
 #     -f modules/tenant/tests/eval-quiet.nix allTrue.tenantsJson
 #   nix --extra-experimental-features "nix-command flakes" eval \
 #     -f modules/tenant/tests/eval-quiet.nix allFalse.checked
-{ lib ? (import <nixpkgs> { }).lib }:
+# No <nixpkgs> fallback, deliberately: an unpinned run must fail loudly.
+{ lib ? (import ./pinned-nixpkgs.nix).lib }:
 
 let
   schema = ../schema.nix;

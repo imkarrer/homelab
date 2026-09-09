@@ -1,8 +1,15 @@
 # Eval harness for modules/tenant/ports.nix.
 #
-# Not a flake -- this repo doesn't have one yet -- so this runs against
-# whatever <nixpkgs> resolves to on the machine. On ac-box's dev channel that
-# is nixos-26.05, matching the README's pinned host channel.
+# Not a flake target -- this is a plain lib.evalModules fixture, invoked with
+# `nix eval -f` -- but it is no longer *unpinned* for that reason. The header
+# here used to say it ran against "whatever <nixpkgs> resolves to on the
+# machine"; as of 9 Sep 2026 `lib` comes from ./pinned-nixpkgs.nix, which
+# reads flake.lock and fetches the exact revision flake.nix pins. That
+# closes finding F7 (docs/current-state.md): these assertions are the only
+# proof a colliding fixture is still rejected, and proving it against a
+# different lib than ac-box is built with proves nothing about ac-box. See
+# pinned-nixpkgs.nix for the measurement showing the channel and the pin are
+# genuinely two different trees on this machine.
 #
 # Usage:
 #   nix --extra-experimental-features "nix-command flakes" eval \
@@ -27,7 +34,11 @@
 # per-interface entry -- even on a fixture with real port claims and even on
 # one with a real collision, and (b) with it flipped on, the firewall content
 # is exactly what this module has always produced.
-{ lib ? (import <nixpkgs> { }).lib }:
+# `lib` stays an argument so a caller can still inject one (the runner script
+# does not, and does not need to), but the DEFAULT is now the pin rather than
+# NIX_PATH. There is deliberately no <nixpkgs> fallback: an unpinned run must
+# fail loudly, never quietly succeed against the wrong lib.
+{ lib ? (import ./pinned-nixpkgs.nix).lib }:
 
 let
   schema = ../schema.nix;
