@@ -107,6 +107,21 @@
           # itself is -- see modules/ci/default.nix's "HAZARD 2" comment.
           ./modules/ci
 
+          # modules/deploy: imported but inert (ADR 0006's applying half).
+          # homelab.deploy.enable defaults false and nothing sets it, so this
+          # contributes nothing to the composed config -- same discipline, and
+          # same proof, as modules/ci above and agent-hub below.
+          #
+          # Flipping it makes ac-box self-switching, which is ADR 0006's
+          # deliberate choice and NOT a side effect of importing the module.
+          # Do not flip it from an agent-authored change: the module's header
+          # documents the gate it is waiting on (every tree reaching the box
+          # needs a real evaluation gate, and agent-hub's composed eval is
+          # still thin because its enable flag defaults false), and it must
+          # not go true before the CI adoption sequence has been run by a
+          # human -- the same ordering modules/ci's HAZARD 1 describes.
+          ./modules/deploy
+
           # L3: the tenants, as inputs rather than vendored copies. arcade-hub
           # comes from home-arcade's canonical module -- not the drifted,
           # mojibake copy that used to live in the ac-host tree.

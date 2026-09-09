@@ -90,7 +90,26 @@ half that only systemd on the box may run.
 ```
 
 It writes a file and bounces nothing, so it is immune to HAZARD 2. It must
-never call `nixos-rebuild`. Deliberately it does **not** pre-build the closure:
+never call `nixos-rebuild`.
+
+> **Blocker, found 9 Sep 2026 by checking rather than assuming: the agent
+> cannot write this path.** `docker-compose.buildkite.yml` mounts exactly
+> `/var/lib/ac-host`, `/var/run/docker.sock`, and the `buildkite-builds` and
+> `buildkite-nix` named volumes. `/var/lib/homelab` is not among them, so a
+> `queue-closure` step as described would fail on its first write.
+>
+> The fix is a bind mount, and it has to land in **two** places or they drift:
+> `compose/docker-compose.buildkite.yml` in the `ac-host` repo, which is what
+> the hand-started stack runs today, and `modules/ci/default.nix`, which is
+> what runs it once adopted. That makes the staging half depend on the CI
+> adoption sequence (HAZARD 1) rather than being independent of it.
+>
+> The tempting shortcut — putting `pending-closure.json` under
+> `/var/lib/ac-host`, which is already mounted — is rejected. That directory is
+> the racing tenant's state, and the closure's deploy record is a platform
+> fact. Borrowing a tenant's state directory for a platform record is precisely
+> the coupling this whole repo exists to undo, and it would be load-bearing the
+> moment anyone tried to give a second host the same pipeline. Deliberately it does **not** pre-build the closure:
 building is what the applying half does, so a build failure surfaces on the box
 against the box's own store rather than passing a green CI badge to a machine
 that cannot realise it.
@@ -119,6 +138,23 @@ Two properties this unit must have, both easy to get wrong:
 - The timer fires inside `homelab.host.maintenance.window`, not on a bare
   interval, so the default case is a switch at 03:00 rather than a switch
   whenever a build happened to go green.
+
+**Implementation status, 9 Sep 2026.** The applying half exists:
+`modules/deploy/default.nix`, imported into the ac-box module list and inert
+(`homelab.deploy.enable` defaults false; the import is proven a no-op by an
+unchanged toplevel drvPath). Its safety branches are exercised against
+fixtures rather than asserted:
+
+| Case | Behaviour |
+| --- | --- |
+| nothing staged | exits 0, no switch |
+| staged but inventory unreadable | **fails closed**, exit 1 |
+| staged rev already applied | exits 0, no switch |
+| staged file has no `.rev` | refuses rather than guessing, exit 1 |
+| `assetto` busy (real `/etc/homelab/tenants.json`) | **defers**, exit 0, no switch |
+| `assetto` drained | passes the quiet gate |
+
+The staging half is **not** implemented, blocked on the bind mount above.
 
 **Reporting.** `hub-status.sh` gains the closure pending/applied comparison
 alongside the tenant tree's, so one call still answers the whole three-way
