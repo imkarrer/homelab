@@ -37,6 +37,36 @@ let
   grafanaAddr = config.homelab.host.networks.lan.address;
   grafanaPort = 3000;
 
+  # The UniFi controller the two exporters below poll -- read from the host for
+  # the same reason grafanaAddr is, three lines up. Until 9 Sep 2026 this module
+  # did both at once: it derived the Grafana bind correctly and then hardcoded
+  # "https://192.168.1.1" twice, in unpoller's controller url and in
+  # udr-fw-exporter's UNIFI_HOST. That was finding F6 in docs/current-state.md,
+  # and the last machine literal left in code anywhere under modules/.
+  #
+  # An ASSERTION, not a silent skip, and the distinction was thought about.
+  # A gate ("null means this host has no UniFi gear, so build no poller") is
+  # the nicer shape and is what a second host will eventually want -- but this
+  # module enables unpoller and udr-fw-exporter UNCONDITIONALLY today, and
+  # ships Prometheus alert rules that page when `up{job="unpoller"} == 0`. It
+  # already assumes the gear exists. Making that conditional is a real change
+  # to what the module builds; F6 was only ever about where the address comes
+  # from. Widening the one into the other is how a provable no-op stops being
+  # provable.
+  #
+  # So: assert, following the precedent in ports.nix's mgmt check, and leave
+  # the gate to whoever adds the second host. Without the assertion the failure
+  # is `"https://${null}"`, which throws deep inside string interpolation with
+  # no mention of the option that is actually unset.
+  #
+  # The scheme stays here rather than in the host fact: "https" plus
+  # verify_ssl = false is how one talks to a UniFi controller (self-signed cert
+  # on a private LAN), not a fact about this network. See the option's
+  # description in modules/platform/host-options.nix.
+  unifiAddr = config.homelab.host.unifi.address;
+  unifiPolled = unifiAddr != null;
+  unifiUrl = "https://${unifiAddr}";
+
   secretsDir = "/var/lib/monitoring/secrets";
   grafanaAdminFile = "${secretsDir}/grafana-admin";
   grafanaSecretFile = "${secretsDir}/grafana-secret-key";
@@ -102,6 +132,20 @@ in
     ];
   };
 
+  # See unifiUrl's comment above for why this is an assertion rather than a
+  # gate that builds nothing.
+  assertions = [
+    {
+      assertion = unifiPolled;
+      message = ''
+        modules/observability enables unpoller and udr-fw-exporter, and ships
+        alert rules that page on up{job="unpoller"} == 0, but
+        homelab.host.unifi.address is null. Set it in hosts/<name>/host.nix,
+        or make this module's UniFi half conditional -- it is not today.
+      '';
+    }
+  ];
+
   systemd.services.cadvisor.serviceConfig.SupplementaryGroups = [ "docker" ];
 
   services.unpoller = {
@@ -111,7 +155,7 @@ in
     unifi = {
       controllers = [
         {
-          url = "https://192.168.1.1";
+          url = unifiUrl;
           user = "unpoller";
           pass = unpollerPassFile;
           verify_ssl = false;
@@ -159,7 +203,7 @@ in
       User = "unifi-poller";
       Group = "monitoring";
       Environment = [
-        "UNIFI_HOST=https://192.168.1.1"
+        "UNIFI_HOST=${unifiUrl}"
         "UNIFI_USER=unpoller"
         "UNIFI_PASS_FILE=${unpollerPassFile}"
         "UDR_FW_BIND=127.0.0.1:9131"

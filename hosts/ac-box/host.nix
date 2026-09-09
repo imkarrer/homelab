@@ -22,6 +22,14 @@
       };
     };
 
+    # The UniFi Dream Router. It is this LAN's default route AND its controller
+    # API, but only the second is what reads this field -- see the option's
+    # description for why it is not networks.lan.gateway. Surveyed live on
+    # ac-box 9 Sep 2026: `ip route` -> "default via 192.168.1.1 dev enp8s0",
+    # and the running unpoller.json -> controller url "https://192.168.1.1".
+    # Until today both observability consumers carried this literal themselves.
+    unifi.address = "192.168.1.1";
+
     # HP Z840. Verified against /proc at activation — copying this file to a
     # smaller machine without editing it is the classic portability bug, so the
     # platform warns rather than silently overcommitting.

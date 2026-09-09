@@ -1,7 +1,8 @@
 # The `homelab.host` option contract. Every literal fact about the physical
 # machine — name, timezone, NIC/address, declared capacity, base paths,
-# maintenance window, GPU — is declared here and set exactly once, in
-# hosts/<name>/host.nix. No other module may hardcode any of it.
+# maintenance window, GPU, the UniFi controller it polls — is declared here and
+# set exactly once, in hosts/<name>/host.nix. No other module may hardcode any
+# of it.
 #
 # Shape is pinned against hosts/ac-box/host.nix (the only host that exists
 # today) — do not add fields that file does not set, and do not change the
@@ -46,9 +47,11 @@ in
       type = types.str;
       description = ''
         networking.hostName. Also the key used to locate this host's
-        gitignored, machine-specific files — hosts/<name>/hardware-configuration.nix
+        machine-specific files — hosts/<name>/hardware-configuration.nix
         and hosts/<name>/ssh-keys.local.nix — so platform modules can find
-        them without hardcoding a host name.
+        them without hardcoding a host name. Both are tracked in git, not
+        gitignored: a flake copies only tracked files into the store. See
+        .gitignore's NOTE.
       '';
     };
 
@@ -66,6 +69,55 @@ in
         on host.networks.<name>.interface; "forwarded" is lan plus a router
         forward). This is the only place NIC names and addresses are literal —
         every other module, including tenants, must read them from here.
+      '';
+    };
+
+    unifi = mkOption {
+      type = types.submodule {
+        options = {
+          address = mkOption {
+            type = types.nullOr types.str;
+            default = null;
+            description = ''
+              IPv4 address of the UniFi controller API this network's gear is
+              polled through, or null when the host has no UniFi gear -- in
+              which case modules/observability/default.nix runs no unpoller, no
+              udr-fw-exporter, and no scrape jobs for either, the same way
+              gpu = null below leaves boot.nix's nvidia block unbuilt.
+
+              No scheme. This is an address, exactly like networks.<name>
+              .address is. "https://" and verify_ssl = false are facts about
+              how one talks to a UniFi controller (self-signed cert on a
+              private LAN), not facts about this network, so they stay at the
+              use site.
+
+              Deliberately NOT networks.lan.gateway, even though on ac-box the
+              two are the same box at the same address. The consumers --
+              unpoller and udr_fw_exporter.py -- speak the UniFi controller
+              API; neither cares what the default route is. Surveyed live
+              9 Sep 2026: `ip route` gives "default via 192.168.1.1 dev
+              enp8s0", and the generated unpoller.json carries controller url
+              "https://192.168.1.1" -- one Dream Router wearing both hats. A
+              "gateway" field would record that coincidence and go quietly
+              wrong the day the controller moves to a Cloud Key or a
+              self-hosted container while the route stays put; the polling
+              would break and the field would still be telling the truth.
+              Add a gateway field when something actually needs the route.
+            '';
+          };
+        };
+      };
+      default = { };
+      description = ''
+        The UniFi controller this network's gear is polled through. Read by
+        modules/observability/default.nix, which until 9 Sep 2026 hardcoded
+        "https://192.168.1.1" twice -- unpoller's controller url and
+        udr-fw-exporter's UNIFI_HOST. That was the last machine literal
+        standing in the module layer (finding F6 in docs/current-state.md);
+        `grep -rnE "192\.168\.|enp8s0|eno1" modules/` returned comments plus
+        those two lines and, re-run after this change, returns comments plus
+        only the exporter script's own env fallback. Same rule as networks
+        above: a module reads host facts from here, it does not guess them.
       '';
     };
 
