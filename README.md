@@ -7,7 +7,14 @@ bot, the kid arcade hub, a CPU-only LLM server, the Prometheus/Grafana stack,
 and a self-hosted Buildkite runner. Until this repo existed, the host
 configuration lived inside the oldest of them.
 
-Design rationale and the full migration plan:
+Diagrams — layers, the two delivery paths, where work actually runs, and what
+gates a change: [`docs/architecture.md`](docs/architecture.md). Tracked in git
+so they can be corrected in the same diff as the code that invalidates them.
+
+What is deployed right now, and every service classified:
+[`docs/current-state.md`](docs/current-state.md).
+
+Design rationale and the full migration plan (hosted, outside version control):
 <https://claude.ai/code/artifact/61c15556-ccc7-4cc5-994d-a213c669556c>
 
 ## Layers

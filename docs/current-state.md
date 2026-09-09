@@ -31,7 +31,10 @@ that must be true today.
 > containers, and nothing restarts them until the switch creates
 > `ac-host-ci.service`, so rebooting in that window leaves no Buildkite agent.
 
-Visual companion (same survey, diagrammed):
+Diagrams of the structures this document reports on —
+[`docs/architecture.md`](architecture.md), tracked in git.
+
+Visual companion to this survey (hosted, outside version control):
 <https://claude.ai/code/artifact/49abb0ae-3374-4ba4-921f-8e87fba0c52d>
 
 ---
