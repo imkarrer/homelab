@@ -126,6 +126,49 @@ in
   systemd.services.ac-host-ci.wantedBy = [ "multi-user.target" ];
 
   # ---------------------------------------------------------------------------
+  # The closure deploys itself (ADR 0006). This is the flag that makes ac-box
+  # self-switching: homelab's Buildkite pipeline stages a green revision into
+  # /var/lib/homelab/pending-closure.json (scripts/hub-queue-closure.sh), and
+  # homelab-deploy.timer applies it at homelab.host.maintenance.window --
+  # 03:00 -- with nobody present. Chosen deliberately over stage-and-wait-for-
+  # a-human, because that is what queue-prod already does for the tenant tree
+  # and it is reconciled only because someone remembers; 25 commits of
+  # undeployed closure was what "someone remembers" looked like.
+  #
+  # What stands between a merge and the running system, once this is live:
+  #
+  #   1. Every gate in .buildkite/pipeline.yml, behind `wait: ~`. flake check
+  #      builds the full toplevel; the harnesses prove the contract still
+  #      rejects what it should. A red gate stages nothing.
+  #   2. The quiet policy, consulted at run time from /etc/homelab/tenants.json.
+  #      assetto is drainable = false; its busyCheck says BUSY whenever
+  #      maintenance.json is absent, i.e. whenever nobody has drained it. The
+  #      unit DEFERS to the next window in that case -- it never drains, and it
+  #      fails closed if the inventory is unreadable. Exercised against the
+  #      box's real inventory before this was written (modules/deploy header).
+  #   3. The window itself. Persistent = false on the timer, so a missed night
+  #      waits for the next one rather than firing at boot.
+  #
+  # Two things this flag does NOT change, said out loud:
+  #
+  #   - The FIRST switch after this commit is still a human one. The unit is
+  #     not on the box until something applies this closure, and that
+  #     something cannot be the unit. Run it with --refresh (see the runbooks
+  #     for why); after it, `systemctl list-timers homelab-deploy` on the box
+  #     is the proof it is armed.
+  #   - hub/repos.psv's agent-push flag for homelab. Once this is live, "yes"
+  #     means an agent pushing green is, indirectly, scheduling a system
+  #     switch. ADR 0006 asks for that to be reconsidered AT THE SAME TIME as
+  #     enabling this. Left as the operator's call, made before the enabling
+  #     switch, not baked in here. AGENTS.md's migration exception (agents
+  #     may switch the box) lapses when this lands; that part is written.
+  #
+  # Rollback is a generation: `nixos-rebuild switch --rollback` on the box, or
+  # `systemctl disable --now homelab-deploy.timer` to stop the next firing
+  # without undoing the switch.
+  homelab.deploy.enable = true;
+
+  # ---------------------------------------------------------------------------
   # Tenants, reproducing ac-box's live configuration exactly.
   # ---------------------------------------------------------------------------
 
