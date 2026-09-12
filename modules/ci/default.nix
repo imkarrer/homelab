@@ -1,8 +1,11 @@
-# DRAFT -- belongs to a post-cutover phase. NOT imported by flake.nix or by
-# hosts/ac-box/configuration.nix, and must not be until the adoption sequence
-# below has been run by hand. Its only purpose right now is to exist as a
-# reviewable, `nix eval`-able sketch of what "the CI stack has systemd units"
-# looks like (beads homelab-bqo.19).
+# LIVE on ac-box since generation 31, 12 Sep 2026. Imported by flake.nix
+# (f461509, proven a no-op while inert) and enabled by
+# hosts/ac-box/configuration.nix (4257aea), after a human ran the HAZARD 1
+# adoption sequence below from a plain SSH session. It was drafted as a
+# post-cutover sketch (beads homelab-bqo.19); it is not a sketch any more.
+# The two HAZARD sections are permanent, not migration notes: HAZARD 2 is
+# the structural reason the closure's deploy path is a systemd unit
+# (modules/deploy, ADR 0006) and not a pipeline step.
 #
 # --------------------------------------------------------------------------
 # WHY THIS EXISTS
@@ -81,9 +84,10 @@
 #        docker volume ls | grep ac-host-ci
 #   4. Verify the ports are actually free:
 #        ss -tulnp | grep -E ':(9000|9001)\b'
-#   5. Only then flip homelab.ci.enable = true for this host (a separate,
-#      coordinator-owned change to hosts/ac-box/configuration.nix -- this
-#      module is not imported by that file yet) and run the switch.
+#   5. Only then flip homelab.ci.enable = true for this host in
+#      hosts/ac-box/configuration.nix and run the switch. (Done, 12 Sep
+#      2026, generation 31. Kept as the record of the order it had to
+#      happen in, and because a second host would repeat it.)
 #   6. After the switch, confirm `systemctl status ac-host-ci.service` is
 #      active, `docker ps` shows the same container names attached to the
 #      SAME volumes (`docker inspect --format '{{json .Mounts}}'` should

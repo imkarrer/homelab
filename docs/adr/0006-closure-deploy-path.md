@@ -157,7 +157,40 @@ fixtures rather than asserted:
 | `assetto` busy (real `/etc/homelab/tenants.json`) | **defers**, exit 0, no switch |
 | `assetto` drained | passes the quiet gate |
 
-The staging half is **not** implemented, blocked on the bind mount above.
+**Update, 12 Sep evening.** The staging half now exists too:
+`scripts/hub-queue-closure.sh`, run by `.buildkite/pipeline.yml` behind
+`wait: ~` (`f49a3ba`). The bind mount is in `ac-host` `2c5e9a0` and lands on
+the box through that repo's own pipeline; the running agent container picks
+it up when recreated (`ac-host-ci.service` restart, or a reboot). Until then
+the step skips with a message and a green build stays green.
+`hub-status.sh` reports the closure's pending/applied pair beside the tenant
+tree's and treats "staged with no timer" as a problem, "staged with the
+timer" as a state.
+
+`system.configurationRevision` is set (`0a58999`), forced by the incident
+below, so once the next switch lands the running closure names its own
+commit.
+
+**What remains is one line and one decision**, and both are the operator's:
+`homelab.deploy.enable = true` in `hosts/ac-box/configuration.nix`, and the
+`agent-push` flag in `hub/repos.psv` — an agent attempted the former and the
+harness classifier stopped it, correctly, as an agent enabling unattended
+deployment of the system it operates. The enabling switch is the last
+operator-run one; `AGENTS.md`'s migration exception lapses with it.
+
+### The incident that changed the reporting design
+
+The same afternoon, a `nixos-rebuild switch --flake github:imkarrer/homelab
+#ac-box` resolved to a rev nix had **cached** an hour earlier
+(`tarball-ttl = 3600`), built the identical closure, applied a no-op, and
+reported success with a fresh generation timestamp. `hub-status.sh`'s
+timestamp heuristic read that as "consistent with current"; only the exact
+store-path comparison saw two different closures. Three consequences landed
+in this ADR's design: the deploy unit stages a **full sha** and switches to
+`github:imkarrer/homelab/<sha>` — immune by construction; `queue-closure`
+refuses anything shorter than 40 hex; and `configurationRevision` is set so
+the comparison is a stamp, not a heuristic. Every runbook switch now carries
+`--refresh`.
 
 **Reporting.** `hub-status.sh` gains the closure pending/applied comparison
 alongside the tenant tree's, so one call still answers the whole three-way

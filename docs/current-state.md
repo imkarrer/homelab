@@ -5,8 +5,10 @@ not archived. `docs/noop-reconciliation.md` is the *phase 1* survey and is
 frozen as a historical record of that migration step; this file is the one
 that must be true today.
 
-**Last reconciled:** 12 Sep 2026, read-only over `ssh ac-box`, after
-generations 30 and 31 were switched. The box runs HEAD.
+**Last reconciled:** 12 Sep 2026 evening, generation 32. The box runs
+`0f87e07`; HEAD has moved past it by the evening's commits (metrics schema,
+configurationRevision, the deploy staging half, docs), all gated, none
+service-affecting until applied. `hub-status.sh` reports the exact count.
 **Method:** see [Keeping this current](#keeping-this-current) at the bottom.
 
 > **History of this document, kept because the corrections are the useful
