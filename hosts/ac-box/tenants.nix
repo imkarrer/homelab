@@ -175,10 +175,26 @@
 
       quiet = {
         drainable = false;
-        # server_health.py's read_flag() treats a MISSING maintenance.json as
-        # "up" (potentially serving real drivers) and a present one as
-        # "down"/"maintenance". Exit 0 = BUSY, so: busy iff not drained yet.
-        busyCheck = "test ! -e /var/lib/ac-host/maintenance.json";
+        # Exit 0 = BUSY. Asks acServer itself: scripts/drivers_online.py (in
+        # the tenant tree, ac-host 501d7e9) GETs every running lobby's
+        # /api/details and sums `clients`, the live connected-driver count.
+        # Exit 1 = nobody racing; 0 = someone is, or a lobby is listening and
+        # will not answer (fail closed).
+        #
+        # `test $? -ne 1` and not the bare script, so that a MISSING or
+        # broken script (exit 2, 127) also reads as BUSY. The one exit code
+        # that means "go" is the script saying so.
+        #
+        # This replaces `test ! -e /var/lib/ac-host/maintenance.json` --
+        # "busy unless explicitly drained", which was an interpretation of
+        # server_health.py's flag, not a check of race state (bead .34). It
+        # was merely conservative until modules/deploy existed; then it became
+        # a defect with a schedule. The deploy timer fired at 03:00, the bot's
+        # DOWNTIME=1 build that performs the drain is picked up seconds to
+        # minutes later, so the unit lost that race and would have deferred
+        # every night. Found 12 Sep 2026 while closing the bead, before the
+        # first automatic firing.
+        busyCheck = "python3 /var/lib/ac-host/src/scripts/drivers_online.py; test $? -ne 1";
         drain = "python3 /var/lib/ac-host/src/scripts/acctl.py --env prod drain";
         resume = "python3 /var/lib/ac-host/src/scripts/acctl.py --env prod resume";
       };

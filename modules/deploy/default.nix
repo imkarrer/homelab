@@ -186,6 +186,23 @@ in
       '';
     };
 
+    windowOffsetMinutes = mkOption {
+      type = types.ints.between 0 120;
+      default = 30;
+      description = ''
+        Minutes after homelab.host.maintenance.window at which the timer
+        fires. Default 30, and not 0, because the window is already taken:
+        at 03:00 sharp the Discord bot queues DOWNTIME=1, and that build
+        drains the lobbies, applies the tenant tree, recycles the lobbies
+        once and resumes -- a few minutes of docker work. Firing the
+        closure switch into the middle of that is not dangerous (the switch
+        never touches ac-host-static; the two do not share units) but it is
+        two operators in one room. Thirty minutes later the recycle is done,
+        the lobbies are empty, and drivers_online.py says so. Set to 0 only
+        on a host with no tenant-tree downtime job of its own.
+      '';
+    };
+
     stateDir = mkOption {
       type = types.path;
       default = "/var/lib/homelab";
@@ -226,7 +243,18 @@ in
       description = "Apply the staged homelab system closure, in the window";
       wantedBy = [ "timers.target" ];
       timerConfig = {
-        OnCalendar = "*-*-* ${host.maintenance.window}:00";
+        # window + offset, computed rather than a second literal. "03:00" and
+        # 30 give "*-*-* 03:30:00"; the arithmetic carries past the hour.
+        OnCalendar =
+          let
+            parts = lib.splitString ":" host.maintenance.window;
+            h = lib.toIntBase10 (builtins.elemAt parts 0);
+            m = lib.toIntBase10 (builtins.elemAt parts 1);
+            total = h * 60 + m + cfg.windowOffsetMinutes;
+            hh = lib.fixedWidthNumber 2 ((total / 60) - 24 * (total / 1440));
+            mm = lib.fixedWidthNumber 2 (total - 60 * (total / 60));
+          in
+          "*-*-* ${hh}:${mm}:00";
 
         # Persistent = false, deliberately. Persistent fires a missed timer at
         # boot, which is the one moment guaranteed NOT to be inside the
