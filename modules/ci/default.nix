@@ -232,7 +232,13 @@ in
       wants = [ "network-online.target" ];
       requires = [ "docker.service" ];
 
-      path = [ pkgs.docker-compose pkgs.docker pkgs.coreutils ];
+      # git: the agent image's build context in docker-compose.buildkite.yml
+      # is a git URL (flox-buildkite-plugin.git#main), which compose fetches
+      # by shelling out to git. `path` replaces PATH wholesale, so the system
+      # profile's git is invisible here; the first switch that actually ran
+      # this unit (12 Sep 2026) died with "unable to find 'git'" at the build
+      # step, leaving the already-running containers untouched.
+      path = [ pkgs.docker-compose pkgs.docker pkgs.git pkgs.coreutils ];
 
       serviceConfig = {
         Type = "oneshot";
