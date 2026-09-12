@@ -71,6 +71,13 @@ BOXTXT=$("${SSH[@]}" '
   echo "SYSTIME=$(stat -c %Y $p 2>/dev/null)"
   echo "SYSREV=$(nixos-version --configuration-revision 2>/dev/null)"
   echo "BOXCLOCK=$(date +%s)"
+  # The CLOSURE deploy pair (ADR 0006), distinct from the tenant tree pair
+  # above. queue-closure (Buildkite) writes pending; modules/deploy writes
+  # applied after a successful switch. Same grep shape as the tenant tree.
+  h=/var/lib/homelab
+  echo "CLPENDING=$(grep -oE "[0-9a-f]{40}" $h/pending-closure.json 2>/dev/null | head -1)"
+  echo "CLAPPLIED=$(grep -oE "[0-9a-f]{40}" $h/last-applied-closure.json 2>/dev/null | head -1)"
+  echo "CLTIMER=$(systemctl is-enabled homelab-deploy.timer 2>/dev/null)"
 ' 2>/dev/null)
 
 get() { echo "$BOXTXT" | grep "^$1=" | head -1 | cut -d= -f2-; }
@@ -195,6 +202,28 @@ else
     note "box switched since boot - kernel/initrd are still generation-at-boot, a reboot is owed"
   fi
   echo "config rev : ${SYSREV:-(unstamped - system.configurationRevision is not set)}"
+  CLPENDING=$(get CLPENDING); CLAPPLIED=$(get CLAPPLIED); CLTIMER=$(get CLTIMER)
+  case "$CLTIMER" in
+    enabled) echo "deploy     : homelab-deploy.timer enabled (ADR 0006 live) - queued ${CLPENDING:-none}, applied ${CLAPPLIED:-none}" ;;
+    *)       echo "deploy     : homelab-deploy.timer ${CLTIMER:-absent} - queued ${CLPENDING:-none}, applied ${CLAPPLIED:-none}" ;;
+  esac
+  # Queued-but-not-applied is a state, not a failure, while the timer exists:
+  # it means "will land at the next window". It IS a problem when the timer is
+  # not enabled, because then nothing will ever apply it -- the closure's
+  # version of "deploy queued but not applied - needs DOWNTIME=1" above.
+  if [ -n "$CLPENDING" ] && [ "$CLPENDING" != "$CLAPPLIED" ]; then
+    if [ "$CLTIMER" = "enabled" ]; then
+      echo "             closure ${CLPENDING:0:7} is staged; homelab-deploy.timer applies it at the next window"
+    else
+      note "closure ${CLPENDING:0:7} is staged but homelab-deploy.timer is ${CLTIMER:-absent} - nothing will apply it"
+    fi
+  fi
+  # A stamped running rev that disagrees with what was last APPLIED by the
+  # deploy unit means someone switched by hand since. Not wrong, but worth a
+  # line: the applied record no longer describes the running system.
+  if [ -n "$SYSREV" ] && [ -n "$CLAPPLIED" ] && [ "${SYSREV%-dirty}" != "$CLAPPLIED" ]; then
+    echo "             running rev ${SYSREV:0:7} != last deploy-unit apply ${CLAPPLIED:0:7} - a hand switch happened since"
+  fi
   echo "homelab    : HEAD ${HEADSHA:0:7}$([ "$(git -C "$HL" status --porcelain 2>/dev/null | wc -l)" != 0 ] && echo ' (+ uncommitted changes)')"
 
   if [ -n "$SYSREV" ]; then

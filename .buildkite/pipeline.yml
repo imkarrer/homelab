@@ -28,3 +28,21 @@ steps:
     # flake-check step above can't exercise since the real ac-box config
     # has no such fixture to reject. See that script's header for how a
     # case's expected pass/throw outcome is read.
+
+  # Every gate above must be green before anything is staged. `wait: ~` is
+  # what ac-host's pipeline does before queue-prod, and for the same reason:
+  # a red gate must block the deploy candidate, not merely annotate it.
+  - wait: ~
+
+  # The staging half of ADR 0006. Writes /var/lib/homelab/pending-closure.json
+  # and nothing else; the box's homelab-deploy.timer (modules/deploy) applies
+  # it in the maintenance window. This step must NEVER run nixos-rebuild --
+  # this agent is a unit of the closure being deployed (modules/ci HAZARD 2).
+  #
+  # Skips, with a message, when /var/lib/homelab is not writable: the agent
+  # mounts it as of ac-host 2c5e9a0 but only picks the mount up when its
+  # container is recreated. A green build stays green; the skip line is how
+  # you know staging did not happen. Only main is staged (the script checks).
+  - label: ":inbox_tray: queue-closure (stage rev for the 03:00 window)"
+    command: |
+      bash scripts/hub-queue-closure.sh
