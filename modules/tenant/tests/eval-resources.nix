@@ -210,7 +210,8 @@ in
 
   # Case name -> whether `<case>.checked` must evaluate cleanly (false for
   # brokenBudget, which exists to prove the 0.9 memoryShare budget assertion
-  # fires). Read by modules/ci/scripts/run-eval-tests.sh.
+  # fires). Read by modules/tenant/tests/check.nix, which is what makes
+  # this harness a flake check (and what run-eval-tests.sh prints).
   expected = {
     good = true;
     allFalseNoSlicesEmitted = true;

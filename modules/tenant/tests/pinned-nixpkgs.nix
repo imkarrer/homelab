@@ -56,15 +56,21 @@
 #
 # WHY IT LIVES UNDER modules/tenant/tests/. modules/ci/tests/eval.nix imports
 # it from here, which is L2 depending on L1 -- the direction README's "Layers"
-# table permits. The neutral home would be a repo-level lib/ or a flake
-# `checks` output; neither exists yet, and adding one is a flake change with
-# its own review. If this repo ever grows either, move the file and leave a
-# stub -- do not add a second copy, because two copies of a pin is the bug
-# this file was written to remove.
+# table permits. The flake `checks` output this paragraph once anticipated
+# exists as of 12 Sep 2026 (./check.nix, delta row 14), and it did NOT make
+# this file redundant: the flake route hands each harness the flake's own
+# `nixpkgs.lib` directly, while the manual `nix eval -f <harness>` route in
+# every Usage block still resolves through here. check.nix asserts, at every
+# evaluation, that the two resolve to the same store path -- so there are
+# two READERS of flake.lock and still one pin. Do not add a second copy of
+# this file, because two copies of a pin is the bug it was written to remove.
 #
-# NOTE for whoever adds a harness: name it eval*.nix (that glob is what
-# modules/ci/scripts/run-eval-tests.sh enumerates) and take `lib`/`pkgs` from
-# here, never from <nixpkgs>.
+# NOTE for whoever adds a harness: name it eval*.nix -- that glob is what
+# ./check.nix's `harnesses` enumerates, so it is what becomes a flake check
+# and what modules/ci/scripts/run-eval-tests.sh lists -- give every case a
+# `.checked` and a `.messages` plus an entry in `expected` (check.nix's
+# header spells the contract out), `git add` it (a flake sees only tracked
+# files), and take `lib`/`pkgs` from here, never from <nixpkgs>.
 let
   lock = builtins.fromJSON (builtins.readFile ../../../flake.lock);
 

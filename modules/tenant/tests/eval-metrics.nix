@@ -175,6 +175,20 @@ in
   };
 
   # --- metricsEndpoint.address coverage (12 Sep 2026, delta row 12) ---
+  #
+  # The three agent-hub overrides below are `lib.mkForce`d, and that is
+  # load-bearing, not style. fixtures/metrics-quiet-tenants.nix already sets
+  # agent-hub.metrics.address = "192.168.1.50" at plain priority; a second
+  # plain definition TIES with it, and the module system rejects a tie with
+  # "has conflicting definition values" -- a throw, so the case "failed" as
+  # expected, but before metrics.nix's assertion was ever evaluated. Found
+  # 12 Sep 2026 while turning these harnesses into flake checks
+  # (tests/check.nix): `<case>.messages` on all three returned the merge
+  # error, not the address message. A negative case that throws for the
+  # wrong reason proves nothing about the module; with mkForce the override
+  # wins the merge and the assertion is what rejects it. (The ci override
+  # in disabledTenantStillAsserted needs no mkForce: the fixture's ci entry
+  # sets no address, so there is nothing to tie with.)
 
   # The bind wildcard. It is the most likely wrong answer -- it is what a
   # service that "listens on all interfaces" says about itself -- and it is
@@ -185,7 +199,7 @@ in
     extraModules = [
       {
         homelab.enforce.scrape = true;
-        homelab.tenants.agent-hub.metrics.address = "0.0.0.0";
+        homelab.tenants.agent-hub.metrics.address = lib.mkForce "0.0.0.0";
       }
     ];
   };
@@ -198,7 +212,7 @@ in
     extraModules = [
       {
         homelab.enforce.scrape = true;
-        homelab.tenants.agent-hub.metrics.address = "10.0.0.2";
+        homelab.tenants.agent-hub.metrics.address = lib.mkForce "10.0.0.2";
       }
     ];
   };
@@ -208,7 +222,7 @@ in
   # even though the scrape effect contributes nothing. Mirrors eval.nix's
   # allFalseCollisionStillFails.
   allFalseAddressStillAsserted = mkCase {
-    extraModules = [ { homelab.tenants.agent-hub.metrics.address = "0.0.0.0"; } ];
+    extraModules = [ { homelab.tenants.agent-hub.metrics.address = lib.mkForce "0.0.0.0"; } ];
     checks = cfg: scrapeConfigs: [
       {
         assertion = scrapeConfigs == [ ];
@@ -232,7 +246,8 @@ in
 
   # Case name -> whether `<case>.checked` must evaluate cleanly. The on/off
   # cases are positive; the four address cases exist to prove a bad address
-  # is rejected. Read by modules/ci/scripts/run-eval-tests.sh.
+  # is rejected. Read by modules/tenant/tests/check.nix, which is what makes
+  # this harness a flake check (and what run-eval-tests.sh prints).
   expected = {
     allTrue = true;
     allFalse = true;

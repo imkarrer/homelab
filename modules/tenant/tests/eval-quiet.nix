@@ -154,7 +154,8 @@ in
 
   # Case name -> whether `<case>.checked` must evaluate cleanly. Both cases
   # here are positive (on/off behaviour), neither is a rejected-bad-config
-  # fixture. Read by modules/ci/scripts/run-eval-tests.sh.
+  # fixture. Read by modules/tenant/tests/check.nix, which is what makes
+  # this harness a flake check (and what run-eval-tests.sh prints).
   expected = {
     allTrue = true;
     allFalse = true;

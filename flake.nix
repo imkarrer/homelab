@@ -190,6 +190,25 @@
       # `nix flake check` evaluates the host configuration, which is the cheap
       # gate that catches a port collision or a budget overrun before anyone
       # opens a maintenance window.
-      checks.${system}.ac-box = self.nixosConfigurations.ac-box.config.system.build.toplevel;
+      #
+      # It cannot, on its own, prove the contract still REJECTS a bad config:
+      # ac-box has no collision and no overrun to reject. That proof is the
+      # eval harnesses (modules/*/tests/eval*.nix), which since 12 Sep 2026
+      # are checks here too -- one derivation per harness, evaluated against
+      # this flake's own nixpkgs rather than a re-read of flake.lock. Each is
+      # eval-only (seconds, not the toplevel's minutes): the verdicts are
+      # computed while `nix flake check` evaluates and the build merely
+      # records them. modules/tenant/tests/check.nix owns the inversion that
+      # lets a fixture expected to THROW be a check that must SUCCEED, and
+      # discovers the harnesses by the same eval*.nix glob the runner used to
+      # walk. run-eval-tests.sh is now a front-end that builds these same
+      # checks and prints their per-case reports.
+      checks.${system} = {
+        ac-box = self.nixosConfigurations.ac-box.config.system.build.toplevel;
+      }
+      // (import ./modules/tenant/tests/check.nix {
+        inherit pkgs;
+        lib = nixpkgs.lib;
+      }).checks;
     };
 }

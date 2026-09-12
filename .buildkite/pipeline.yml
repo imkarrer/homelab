@@ -11,7 +11,7 @@ agents:
   queue: "self"
 
 steps:
-  - label: ":nix: flake check (nixosConfigurations.ac-box)"
+  - label: ":nix: flake check (ac-box + module eval harnesses)"
     command: |
       nix --extra-experimental-features "nix-command flakes" flake check -L
     # checks.${system}.ac-box (flake.nix) IS
@@ -19,15 +19,17 @@ steps:
     # cheap gate flake.nix's own comment describes: catches a port
     # collision, a broken tenant module, or a bad lock bump before a human
     # opens a maintenance window.
-
-  - label: ":nix: module eval harnesses"
-    command: |
-      ./modules/ci/scripts/run-eval-tests.sh
-    # Unit-level coverage for modules/tenant/ and modules/ci/ themselves --
-    # e.g. that ports.nix still REJECTS a colliding fixture -- which the
-    # flake-check step above can't exercise since the real ac-box config
-    # has no such fixture to reject. See that script's header for how a
-    # case's expected pass/throw outcome is read.
+    #
+    # checks.${system}.eval-* are the module eval harnesses
+    # (modules/*/tests/eval*.nix, via modules/tenant/tests/check.nix): the
+    # unit-level coverage proving ports.nix still REJECTS a colliding
+    # fixture, which the host config alone cannot exercise since ac-box has
+    # no such fixture to reject. Until 12 Sep 2026 that ran as its own step
+    # (./modules/ci/scripts/run-eval-tests.sh); now that every case is a
+    # flake check, the step would have evaluated the same table twice. A
+    # failing case is an evaluation error naming the case, so it surfaces
+    # here before anything builds. The script survives as the way a human
+    # gets the per-case report on demand.
 
   # Every gate above must be green before anything is staged. `wait: ~` is
   # what ac-host's pipeline does before queue-prod, and for the same reason:

@@ -162,9 +162,10 @@ in
 
   # Case name -> whether `<case>.checked` must evaluate cleanly (true) or
   # throw (false, for the fixtures above that exist to prove a bad config is
-  # rejected). Read by modules/ci/scripts/run-eval-tests.sh; every case above
-  # still supports the three manual `nix eval` invocations documented at the
-  # top of this file, unchanged.
+  # rejected). Read by modules/tenant/tests/check.nix, which is what makes
+  # this harness a flake check (and what run-eval-tests.sh prints); every
+  # case above still supports the three manual `nix eval` invocations
+  # documented at the top of this file, unchanged.
   expected = {
     collision = false;
     clean = true;
