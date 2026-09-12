@@ -326,10 +326,18 @@ compose file is the fix, and it is applied. This is handled correctly.
 
 ## 5. Open work
 
-Ordered by risk carried per unit of effort.
+Tracked in **one** place: `docs/architecture.md` Part III, the delta between
+current and target, one row per gap with what closes it and where that
+stands. This section used to carry its own eleven-row list; by 12 Sep nine
+were done and the two lists had started to disagree, which is the failure
+README's "no second spelling" rule exists to prevent. Read Part III.
 
-| # | Item | Status |
-| --- | --- | --- |
+The short version as of 12 Sep evening: the box runs `0f87e07` (generation 32),
+everything committed since is gated and waiting on the next switch, and the
+one line that makes future switches automatic — `homelab.deploy.enable` — is
+the operator's to apply (ADR 0006, "Implementation status").
+
+--- | --- | --- |
 | 1 | Neutralise the stale `/etc/nixos/configuration.nix` on the box | **Done 12 Sep** — a `throw`, hardware file kept. |
 | 2 | Teach `hub-status.sh` to report closure drift (F3) | **Done** — `1c6827f`. Three-tier cascade; `HUB_STATUS_EXACT=1` is the exact check. Also reports the owed reboot. |
 | 3 | Correct the stale `hardware-configuration.nix` documentation (F1) | **Done** — `37e6927`. Nine sites, not three; the silent `.example` fallback is now a `throw`. |

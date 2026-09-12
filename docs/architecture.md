@@ -74,19 +74,18 @@ flowchart LR
         direction LR
         B1["homelab<br/>+ 3 tenant inputs"] --> B2["origin"]
         B2 --> B3["Buildkite<br/>flake check · module eval"]
-        B3 -.-> B4["<b>queue-closure</b><br/><i>not built — needs a<br/>/var/lib/homelab bind mount</i>"]
-        B4 -.-> B5["modules/deploy<br/><i>on the box, inert</i>"]
-        B5 -.-> B6["/run/current-system<br/><b>== HEAD, gen 31</b>"]
-        B3 -- "the live edge today:<br/>an operator or agent,<br/>per AGENTS.md" --> B6
+        B3 -- "wait: ~" --> B4["queue-closure<br/><i>built; skips until the agent<br/>is recreated with its mount</i>"]
+        B4 -.-> B5["modules/deploy<br/><i>on the box, inert —<br/>enable is the operator's</i>"]
+        B5 -.-> B6["/run/current-system<br/><b>gen 32 = 0f87e07</b>"]
+        B3 -- "the live edge today:<br/>an operator, --refresh,<br/>per AGENTS.md" --> B6
     end
 
     classDef ok fill:#dae8df,stroke:#2c6b4b,color:#101819;
     classDef gap fill:#f0dcda,stroke:#8f2f29,color:#101819;
     classDef pend fill:#f0e6d0,stroke:#8d5c0c,color:#101819;
     class A6 ok;
-    class B4 gap;
+    class B4,B5 pend;
     class B6 ok;
-    class B5 pend;
 ```
 
 Both paths still end at an operator. The top one ends at a human **who is prompted** —
@@ -97,10 +96,22 @@ would have noticed if they had not.
 `home-arcade` and `agent-hub` are flake inputs, not deploy targets: they reach
 the box only through homelab's closure and inherit the same stall.
 
-**Why the missing edge is not simply a Buildkite step** (ADR 0006): the agent
-that would run it is a container *on ac-box*, and once `homelab.ci.enable`
-lands it is a systemd unit owned by the very closure being switched. A switch
-running on it kills the job midway — a circularity, not a risk to be managed.
+**Why the applying edge is not simply a Buildkite step** (ADR 0006): the agent
+that would run it is a container *on ac-box* and, since generation 31, a
+systemd unit owned by the very closure being switched. A switch running on it
+kills the job midway — a circularity, not a risk to be managed. So CI only
+*stages* (`queue-closure`, one file, nothing bounced) and a systemd unit on the
+box applies. Both halves are in git as of 12 Sep evening; the unit is on the
+box and inert. What turns the dotted edges solid is `homelab.deploy.enable`,
+one line, and it is deliberately the operator's — an agent's attempt to commit
+it was stopped by the harness classifier, correctly.
+
+**And a hazard the diagram cannot show:** a bare `github:imkarrer/homelab` ref
+is cached by nix for an hour. A switch at 12:51 today resolved to the rev cached
+at 12:00, built the identical closure, and applied a no-op while reporting
+success. The deploy unit is immune (it stages a full sha); a human switch is not
+— always `--refresh`. `hub-status.sh`'s cheap check could not see this; only
+`HUB_STATUS_EXACT=1` could, which is why `configurationRevision` is now set.
 
 ## I.3 Where work runs today
 
