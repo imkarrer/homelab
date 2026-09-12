@@ -59,7 +59,7 @@ bd show <id>          # detail
 
 ## Hub
 
-This repo is the hub for all five source trees. `hub/repos.psv` is the
+This repo is the hub for all four source trees. `hub/repos.psv` is the
 registry: where each tree lives, whether it reaches ac-box, and whether an
 agent may push it unattended.
 

@@ -198,7 +198,7 @@ if [ -f flake.nix ]; then
     fi
   fi
 else
-  # Not a Nix tree at all (inquire-platform). Nothing here reaches ac-box
+  # Not a Nix tree at all. Nothing here reaches ac-box
   # through a system closure, so there is no eval to run -- but it is still a
   # gate that did not happen, and it says so rather than passing quietly.
   SKIPPED+=("nix eval: $REPO has no flake.nix, so nothing was evaluated")

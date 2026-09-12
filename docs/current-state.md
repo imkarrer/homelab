@@ -104,7 +104,7 @@ matching the declaration on ports, slice and state path.
 | --- | --- |
 | ~~`/etc/nixos/configuration.nix`~~ | **Done** — a `throw` since 12 Sep. Hardware file kept; proven AST-identical to git. |
 | ~~`wpa_supplicant.service`~~ | **Done** — `mkForce false` in `network.nix`, gone at gen 31. |
-| `inquire-platform` (registry row) | Still in `hub/repos.psv` with no remote and nothing on the box. Your call. |
+| ~~`inquire-platform`~~ | **Removed from the registry 12 Sep** — a personal project, never part of the homelab. |
 
 ---
 
@@ -335,7 +335,7 @@ Ordered by risk carried per unit of effort.
 | 5 | Run the CI adoption sequence, then switch | **Done 12 Sep** — generations 30 (`3fef4fe`) and 31 (HEAD). One defect found and fixed in the doing (`c97cbbe`, git on `ac-host-ci`'s PATH). |
 | 6 | Add samba/winbindd/rsync to arcade's `units` | **Done, and live** since gen 31 — all three in `interactive.slice`. Uncovered and fixed F8. |
 | 7 | Split the Discord bot into its own tenant | Deferral expired at phase 6. Needs a decision on tenant name and port/unit ownership. |
-| 8 | Drop the `inquire-platform` registry row | Trivial, but it is a decision about the user's tree layout, not a defect. |
+| 8 | Drop the `inquire-platform` registry row | **Done 12 Sep** — the operator confirmed it is a personal project outside the homelab. |
 | 9 | Give the UniFi router address a home on `homelab.host` (F6) | **Done** — `6e18170`. `homelab.host.unifi.address`, not `networks.lan.gateway`. Proven a no-op: drvPath unchanged. |
 | 10 | Pin the eval harnesses to the flake's `lib` (F7) | **Done** — `365e1d5`. The runner was already pinned; the harnesses were not. |
 | 11 | Decide: does homelab get a pipeline, or a documented hand-off? | **Decision, not code.** Either is defensible — a switch that can bounce the CI agent may genuinely belong to a human. What is not defensible is the current state, where the registry says `deploy=none`, no runbook step names the switch, and drift accrues silently. |
