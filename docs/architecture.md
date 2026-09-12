@@ -3,8 +3,10 @@
 Two architectures, and the distance between them.
 
 **Part I** is what ac-box enforces *today*, read off the box rather than off the
-config — because the config is 25 commits ahead of the box and drawing the
-config as the current state is how this repo's stale comments got written.
+config. As of 12 Sep 2026 those are the same thing — generation 31 is HEAD,
+store-path exact — but the rule stands, because the three days before that
+they were 25 commits apart and drawing the config as the current state is how
+this repo's stale comments got written.
 **Part II** is the target: not a wish list, but the design the repo already
 commits to in `README.md`, the ADRs and the module headers, drawn as one
 picture. **Part III** is the delta — every gap between the two, what closes it,
@@ -13,8 +15,8 @@ and where that stands.
 Mermaid rather than an image or a hosted link, so a diagram is reviewed in the
 same diff as the change it describes and corrected when the code moves. Facts
 here are load-bearing and dated; when one stops being true, fix it in the same
-commit that made it false. Part I last verified against the box **12 Sep 2026**
-(generation 29, unchanged since 7 Sep).
+commit that made it false. Part I last verified against the box **12 Sep 2026, after the switch to
+generation 31** (HEAD `c97cbbe`).
 
 ---
 
@@ -72,23 +74,26 @@ flowchart LR
         direction LR
         B1["homelab<br/>+ 3 tenant inputs"] --> B2["origin"]
         B2 --> B3["Buildkite<br/>flake check · module eval"]
-        B3 -.-> B4["<b>queue-closure</b><br/><i>not built — the agent<br/>cannot write /var/lib/homelab</i>"]
-        B4 -.-> B5["modules/deploy<br/><i>built, inert</i>"]
-        B5 -.-> B6["/run/current-system<br/><b>25 commits behind</b>"]
-        B3 -- "the only live edge:<br/>a human, unprompted" --> B6
+        B3 -.-> B4["<b>queue-closure</b><br/><i>not built — needs a<br/>/var/lib/homelab bind mount</i>"]
+        B4 -.-> B5["modules/deploy<br/><i>on the box, inert</i>"]
+        B5 -.-> B6["/run/current-system<br/><b>== HEAD, gen 31</b>"]
+        B3 -- "the live edge today:<br/>an operator or agent,<br/>per AGENTS.md" --> B6
     end
 
     classDef ok fill:#dae8df,stroke:#2c6b4b,color:#101819;
     classDef gap fill:#f0dcda,stroke:#8f2f29,color:#101819;
     classDef pend fill:#f0e6d0,stroke:#8d5c0c,color:#101819;
     class A6 ok;
-    class B4,B6 gap;
+    class B4 gap;
+    class B6 ok;
     class B5 pend;
 ```
 
-Both paths end at a human. The top one ends at a human **who is prompted** —
+Both paths still end at an operator. The top one ends at a human **who is prompted** —
 `queue-prod` stages a sha and `hub-status.sh` reports it pending until applied.
-The bottom one staged nothing and, until `1c6827f`, was checked by nothing.
+The bottom one stages nothing and, until `1c6827f`, was checked by nothing;
+it is *current* today because an operator switched it, not because anything
+would have noticed if they had not.
 `home-arcade` and `agent-hub` are flake inputs, not deploy targets: they reach
 the box only through homelab's closure and inherit the same stall.
 
@@ -106,31 +111,29 @@ rebalance is among the undeployed commits.
 flowchart TB
     subgraph SYS ["system.slice — CPUWeight 100, uncapped"]
         S1["ac-host-static.service<br/>ac-host-nightly.timer"]
-        S2["sshd · fail2ban · wpa_supplicant ⚠"]
-        S3["samba-smbd · samba-winbindd · rsync<br/><i>arcade claims them in git;<br/>the box has not seen that yet</i>"]
+        S2["sshd · fail2ban · docker · NetworkManager"]
     end
-    subgraph CRIT ["critical.slice — weight 500, 87.9 GiB, unfenced"]
+    subgraph CRIT ["critical.slice — weight 100, 25.1 GiB, unfenced"]
         C1["3 × ac-static-* containers"]
         C2["auth · details · plugin sidecars"]
         C3["ac-host-bot-1"]
     end
-    subgraph INT ["interactive.slice — weight 200, 37.7 GiB"]
+    subgraph INT ["interactive.slice — weight 50, 12.5 GiB"]
         I1["arcade-freeciv · arcade-mindustry"]
+        I2["samba-smbd · samba-winbindd · rsync"]
         I3["observability × 8"]
     end
-    subgraph BG ["background.slice — weight 250, 75.3 GiB, AllowedCPUs 28-55"]
-        G1["<i>empty — agent-hub-llm declared,<br/>not on the box</i>"]
+    subgraph BG ["background.slice — weight 700, 163.1 GiB, cores 3-25 + siblings"]
+        G1["<b>agent-hub-llm</b><br/>llama-server on :8100"]
     end
-    subgraph BAT ["batch.slice — weight 50, 25.1 GiB, AllowedCPUs 28-55 ⚠"]
-        T1["buildkite agent · minio<br/><i>hand-started, no unit</i>"]
+    subgraph BAT ["batch.slice — weight 50, 25.1 GiB, cores 26-27 + siblings"]
+        T1["buildkite agent · minio<br/><i>ac-host-ci.service, under systemd</i>"]
     end
 
     DOCKER["dockerd"] -- "places every container in<br/><b>system.slice</b> regardless of<br/>which unit started it" --> SYS
     COMPOSE["each tenant's compose file<br/><b>cgroup_parent: &lt;tier&gt;.slice</b>"] -- "is the only thing that<br/>puts a container in a tier" --> CRIT
     COMPOSE --> BAT
 
-    classDef empty fill:none,stroke:#8d5c0c,stroke-dasharray:4 3,color:#101819;
-    class G1 empty;
 ```
 
 **Assetto's containers are fenced; its units are not.** `ac-host-static.service`
@@ -139,11 +142,15 @@ stays in `system.slice` on purpose — `resources.nix` assigns `Slice=` only whe
 start and restarting `ac-host-static` means `docker rm -f` on three live race
 servers.
 
-**`background` and `batch` share one fence, and it fences nothing.** Both carry
-`AllowedCPUs = 28-55`. On this dual E5-2680 v4, CPUs 28–55 are the SMT
-*siblings* of 0–27, one per physical core — so the two yielding tiers get the
-second thread of every core, share every physical core with racing, and a
-memory-bandwidth-bound LLM gets the worst possible CPU set.
+**The fence now fences.** Until generation 30, `background` and `batch` both
+carried `AllowedCPUs = 28-55` — on this dual E5-2680 v4 those are the SMT
+*siblings* of 0–27, so the fence handed the yielding tiers the second thread of
+every core and isolated nothing. `3fef4fe` does the arithmetic in physical
+cores: background holds 3–25 and siblings 31–53, batch 26–27 and 54–55, and
+cores 0–2 with siblings 28–30 stay with the unsliced racing stack. Background's
+weight 700 against `system.slice`'s 100 ranks the model server *above* racing
+under contention — deliberate; the fence is what protects racing, not the
+weight.
 
 **Slicing the unit that runs `docker compose` does nothing.** `dockerd` places
 container scopes under `system.slice` no matter who invoked it. Only
@@ -153,12 +160,12 @@ container scopes under `system.slice` no matter who invoked it. Only
 
 | | Current |
 | --- | --- |
-| **Tenants** | 5 declared: `assetto` (bot inside it as compose profile), `arcade`, `agent-hub` (declared, unit absent), `observability`, `ci` (`units = []`, hand-started). |
+| **Tenants** | 5 declared and 5 in the inventory: `assetto` (bot still inside it as a compose profile), `arcade`, `agent-hub` (**running**), `observability`, `ci` (**under systemd**, `units = [ "ac-host-ci.service" ]`). |
 | **Network** | `enp8s0` carries everything — LAN, forwarded AC traffic, sshd. `eno1` is cabled and **down**; `mgmt` scope exists in the schema and nothing may use it until the interface has an address. |
 | **Secrets** | Hand-placed files: `/var/lib/monitoring/secrets/*`, `compose/.env.buildkite`, `whitelist.json`. `tenants.<name>.secrets` names them; nothing provisions them. |
 | **Metrics** | Five scrape jobs, all loopback. `agent-hub-llm` serves `/metrics` on the LAN address and is unscraped — `metricsEndpoint` has no address field. |
-| **Gates** | Every tree evaluated (`1c6827f`), skips counted. Composed eval covers what is *reachable*; `agent-hub`'s body is largely unevaluated because its enable flag is false in the composition. |
-| **Reporting** | `hub-status.sh` reports closure drift as a hard lower bound; exact mode behind `HUB_STATUS_EXACT=1`. `Configuration Revision: Unknown` on every generation. |
+| **Gates** | Every tree evaluated (`1c6827f`), skips counted. `agent-hub`'s enable flag is now true in the composition, so its body is reached by the composed eval. |
+| **Reporting** | `hub-status.sh` reports closure drift as a hard lower bound; exact mode behind `HUB_STATUS_EXACT=1` says CLEAN. `Configuration Revision: Unknown` on every generation. |
 
 ---
 
@@ -285,32 +292,32 @@ do those. Ordered roughly by what unblocks what.
 
 | # | Gap | Closes it | Status |
 | --- | --- | --- | --- |
-| 1 | 25 commits committed, not on the box | One `nixos-rebuild switch --flake` **after** the CI adoption sequence (`modules/ci` HAZARD 1) | **Human.** Runbooks exist. Lands #3, #4, #5, #6 together. |
+| 1 | 25 commits committed, not on the box | Two switches, `3fef4fe` then HEAD, after HAZARD 1 | **Done 12 Sep** — generations 30 and 31. `HUB_STATUS_EXACT=1` reports CLEAN. |
 | 2 | Closure has no deploy path | ADR 0006: `queue-closure` step + `modules/deploy` | Applying half **built, inert, tested**. Staging half **blocked**: the agent mounts only `/var/lib/ac-host`; a `/var/lib/homelab` bind mount must land in `ac-host`'s `docker-compose.buildkite.yml` (one place — `modules/ci` runs that file, it declares no volumes). |
-| 3 | Fence is `28-55` on both tiers | `3fef4fe` | Committed, undeployed → #1 |
-| 4 | `agent-hub-llm` absent; `tcp/8100` open with nothing behind it | `45f67ab`, `3fef4fe` | Committed, undeployed → #1 |
-| 5 | CI stack hand-started, no unit | `4257aea` + HAZARD 1 | Committed, undeployed → #1. **Human** runs the adoption sequence first. |
-| 6 | Tier shares are the old defaults | `45f67ab`, `0de8c09` | Committed, undeployed → #1 |
-| 7 | `ci.units = []` — `ac-host-ci.service` lands in no slice even after #5 | Add it to `ci.units` | **Done** — `214cfdd`. Rides #1. |
+| 3 | Fence is `28-55` on both tiers | `3fef4fe` | **Done** — live at gen 30. |
+| 4 | `agent-hub-llm` absent; `tcp/8100` open with nothing behind it | `45f67ab`, `3fef4fe` | **Done** — `llama-server` on `192.168.1.50:8100` since gen 31. |
+| 5 | CI stack hand-started, no unit | `4257aea` + HAZARD 1 | **Done** — `ac-host-ci.service` active at gen 31, same volumes. Found and fixed `c97cbbe` in the doing. |
+| 6 | Tier shares are the old defaults | `45f67ab`, `0de8c09` | **Done** — live at gen 31. |
+| 7 | `ci.units = []` — `ac-host-ci.service` lands in no slice even after #5 | Add it to `ci.units` | **Done** — `214cfdd`, live at gen 31. |
 | 8 | Bot is a compose profile inside assetto | Split into a `bot` tenant | **Open.** Design decision: name, ports, quiet policy. Deferral expired at phase 6. |
 | 9 | `agent-hub` runner off | sops-backed `githubTokenFile` (`homelab-bqo.10`) + runner image | **Open.** Depends on #10. |
 | 10 | Secrets hand-placed | sops-nix | **Open.** No provisioning exists yet. |
 | 11 | `eno1` down; `mgmt` scope unused | Dual-NIC runbook, **plus an ADR** deciding what moves to `mgmt` — the repo names the interface's role and nothing else | **Human.** Interface work on the box; the placement decision is unmade. |
 | 12 | `agent-hub` metrics unscraped | `metricsEndpoint.address` | **Open.** Schema change. |
-| 13 | `agent-hub` body ungated | Turn its enable on in the composition (= #4 deploying) or a dedicated eval fixture | Resolves with #1; a fixture would cover it sooner. |
+| 13 | `agent-hub` body ungated | Turn its enable on in the composition | **Done** — enable is true in the composition, so the composed eval reaches the body. |
 | 14 | Harnesses not flake `checks` | `tryEval` inversion in the harnesses | **Open.** Design task; makes `run-eval-tests.sh` largely redundant. |
 | 15 | L2 not exported as `nixosModules` (F4) | `flake.nix` | **Open.** Small; matters only once there is a second host. |
 | 16 | `Configuration Revision: Unknown` | `system.configurationRevision = self.rev or self.dirtyRev` | **Human ruling.** Retires the "compare drvPath before/after" no-op proof this repo leans on. Buys speed only; `HUB_STATUS_EXACT=1` is already exact. |
-| 17 | `/etc/nixos/configuration.nix` stale | Replace with a `throw` | **Human.** `docs/runbook-decommission.md` item 1. Gate 0 passes. |
-| 18 | `wpa_supplicant` on a box with no wireless | `networking.wireless.enable = lib.mkForce false` in `network.nix` | **Done** — `214cfdd`. Rides #1. |
-| 19 | Booted ≠ current | Reboot, **last**, after #5 — nothing restarts the CI containers between `compose down` and the switch | **Human.** No kernel change pending; general hazard only. |
+| 17 | `/etc/nixos/configuration.nix` stale | Replace with a `throw` | **Done 12 Sep.** |
+| 18 | `wpa_supplicant` on a box with no wireless | `networking.wireless.enable = lib.mkForce false` in `network.nix` | **Done** — gone at gen 31. |
+| 19 | Booted ≠ current | Reboot | **Human, now safe** — #5 is done, so `ac-host-ci` returns on boot. No kernel change pending. |
 | 20 | 13 containers → 9, unexplained | Establish whether four were retired deliberately | **Open.** Until settled, the cutover runbook's success criterion 4 cannot be evaluated. |
 | 21 | `agent-push=yes` on homelab will mean "schedule a switch" once #2 is live | Reconsider the flag alongside #2 | **Human decision.** |
 
 ### What the delta says, read as a whole
 
-Rows 3–6 are one switch. Rows 7–10 are the tenant model finishing what phase 6
-started. Rows 11–12 are the two schema words — `mgmt`, `metricsEndpoint.address`
+Rows 1 and 3–7, 13, 17, 18 closed on 12 Sep in two switches. Rows 8–10 are the
+tenant model finishing what phase 6 started. Rows 11–12 are the two schema words — `mgmt`, `metricsEndpoint.address`
 — that exist in the contract and nothing uses yet. Rows 2 and 21 are the
 change that makes the box self-switching, and they should land together and
 deliberately.

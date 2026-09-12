@@ -5,31 +5,16 @@ not archived. `docs/noop-reconciliation.md` is the *phase 1* survey and is
 frozen as a historical record of that migration step; this file is the one
 that must be true today.
 
-**Last reconciled:** 9 Sep 2026, read-only over `ssh ac-box`.
-**Last updated:** 9 Sep 2026, after the first round of supervised work landed
-(`45db9dc`, `6e18170`, `1c6827f`, `37e6927`, and `home-arcade` `92c1c68`).
+**Last reconciled:** 12 Sep 2026, read-only over `ssh ac-box`, after
+generations 30 and 31 were switched. The box runs HEAD.
 **Method:** see [Keeping this current](#keeping-this-current) at the bottom.
-**Nothing on ac-box was modified to produce this document.**
 
-> **Correction, same day.** The closure drift was first recorded here as 26
-> commits against boundary `8f17486`. That compared the box's `-0500` wall
-> clock against UTC committer dates. On epochs the boundary is `5fc6c90` and
-> the count is **15** — settled against ground truth rather than by argument,
-> by checking both candidates out into scratch worktrees and evaluating each:
-> `5fc6c90` reproduces the box's exact toplevel store path `2a6qm0b…`,
-> `8f17486` does not. Corrected throughout. The finding is unchanged; only its
-> magnitude was wrong.
-
-> **Reboot owed — but narrower than first recorded.** `/run/booted-system`
-> (`9ick7piz…`) differs from `/run/current-system` (`2a6qm0b…`), so the box was
-> switched after boot. But `kernel`, `initrd`, `kernel-modules` and
-> `kernel-params` are **identical** between the two; only `init` and
-> `system-path` differ (gen 28→29: samba, freeciv, the four slices). **No
-> kernel change is pending.** The general hazard stands — a future kernel or
-> boot-parameter change would look applied and not be — and `hub-status.sh`
-> reports the condition. Order the reboot last: HAZARD 1 step 2 removes the CI
-> containers, and nothing restarts them until the switch creates
-> `ac-host-ci.service`, so rebooting in that window leaves no Buildkite agent.
+> **History of this document, kept because the corrections are the useful
+> part.** First written 9 Sep against generation 29 with a 26-commit drift
+> figure; corrected the same day to **15** (a UTC-vs-`-0500` error, settled by
+> reproducing the box's store path from a scratch worktree). The drift grew to
+> 25 over three days of committed, gated, unapplied work, then closed to zero
+> on 12 Sep in two switches. §1 records how.
 
 Diagrams of the structures this document reports on —
 [`docs/architecture.md`](architecture.md), tracked in git.
@@ -39,127 +24,108 @@ Visual companion to this survey (hosted, outside version control):
 
 ---
 
-## 1. The headline: two delivery paths, one of them missing
+## 1. The headline: the closure is on the box
 
-ac-box takes code by two entirely separate routes, and only one is wired.
+**12 Sep 2026, ~12:00 CDT: generations 30 and 31 were switched, and
+`HUB_STATUS_EXACT=1 bash scripts/hub-status.sh` reports "CLEAN — this tree
+builds exactly what the box runs."** The 25-commit closure gap this document
+was written to expose is closed. The box runs HEAD `c97cbbe`.
+
+The two delivery paths still differ in *mechanism*, and that difference is the
+next slice of work (ADR 0006), but they no longer differ in *state*:
 
 | | Tenant tree | System closure |
 | --- | --- | --- |
 | Owns | containers, scripts, content | units, slices, firewall, ports |
 | Repo | `ac-host` | `homelab` |
 | Registry | `deploy=buildkite` | `deploy=none` |
-| Pipeline | test → lint → `wait: ~` → `queue-prod` | `nix flake check` → module eval → **stops** |
-| Reaches the box by | `rsync` to `/var/lib/ac-host/src` | `nixos-rebuild switch --flake`, by hand |
-| Staging artifact | `pending-deploy.json` | none |
-| Drift detectable by `hub-status.sh` | yes | **no** |
+| Applied | `340b4fb`, byte-clean | `c97cbbe`, store-path exact |
+| Reaches the box by | `queue-prod` → human `DOWNTIME=1` → rsync | `nixos-rebuild switch --flake`, by an operator or, during the migration, an agent (`AGENTS.md`) |
+| Staging artifact | `pending-deploy.json` | none yet — `modules/deploy` is on the box, inert |
+| Drift detectable by `hub-status.sh` | yes | **yes**, since `1c6827f` |
 
-Both paths end at a human — `queue-prod` sits behind a `DOWNTIME=1` block step
-with no webhook. The difference is that the tenant-tree path ends at a human
-*who is prompted*: it stages a sha, and `hub-status.sh` reports it as pending
-until applied. The closure path stages nothing and is checked by nothing.
+### How the switch was done
 
-`home-arcade` and `agent-hub` reach the box only *through* homelab's closure
-(they are flake inputs, not deploy targets), so they inherit the same stall.
+Two switches, not one, on this repo's own smallest-blast-radius rule:
 
-### The consequence, as of this survey
+- **Generation 30 → `3fef4fe`.** Fence fix and the `tcp/8100` close; neither
+  service-enabling commit. `diff-closures` empty, `dry-activate` a firewall
+  reload only. Bounced nothing.
+- **Generation 31 → HEAD.** After the HAZARD 1 adoption sequence (hand-started
+  compose stack stopped, three volumes verified, ports free). Started
+  `agent-hub-llm` and `ac-host-ci`, moved samba/rsync into `interactive.slice`,
+  stopped `wpa_supplicant`, rebalanced the tiers.
 
-`scripts/hub-status.sh` exits 0 and prints `VERDICT: reconciled`. Every claim
-it makes is true. It compares each WSL tree to origin, and the box's tenant
-tree to the sha in `/var/lib/ac-host/last-applied.json`. Both are clean.
+One defect surfaced by doing it: `docker compose … --build` under systemd
+needed `git` on `ac-host-ci`'s `PATH` to fetch its build context. Fixed in
+`c97cbbe`.
 
-It never reads `/run/current-system`. So the one repo that owns the host is the
-one repo whose deployed state the hub does not check — which is how 15 commits,
-two of which enable services, sat unapplied under a green verdict.
+`/etc/nixos/configuration.nix` is a `throw` (runbook-decommission item 1).
 
-| | |
-| --- | --- |
-| Running generation | 29, built 2026-09-07 19:41 |
-| System closure | `nixos-system-ac-box-26.05.20260829.c5c4a43` |
-| Commit that built it | `5fc6c90` "Phase 8: lift observability out of the racing tenant into L2" — confirmed by reproducing the box's exact store path from a scratch worktree |
-| homelab HEAD at survey | `492064b` |
-| Closure drift | **15 commits**, 2 of which flip services on |
-| Tenant tree | `340b4fb`, applied = pending, box tree byte-clean |
+### What is still owed
 
-Undeployed commits that change behaviour, not just text:
-
-| Commit | Effect still missing from the box |
-| --- | --- |
-| `45f67ab` | enables the agent-hub model server + retargets tier shares at it |
-| `4257aea` | `homelab.ci.enable` — adopts the CI stack under systemd |
-| `3fef4fe` | fences tiers by *physical* core; stops opening ports for disabled tenants |
-| `0de8c09` | restores batch's memory ceiling |
-| `3803e45` | moves observability's Grafana firewall rule onto the tenant contract |
+- **A reboot.** `/run/booted-system` is still the 7 Sep generation. Now safe:
+  `ac-host-ci` is under systemd and returns on boot, which was the ordering
+  constraint. No kernel change is pending; this is hygiene.
+- **The deploy path** (ADR 0006, delta rows 2 and 21). Until it is on,
+  closure changes still need an operator. The applying half is on the box and
+  inert; the staging half needs a `/var/lib/homelab` bind mount in `ac-host`'s
+  compose file.
 
 ---
 
 ## 2. Classification
 
 "Conforming" means: declared in the tenant contract, present on the box, and
-matching the declaration on ports, slice and state path. Anything that is only
-two of those three is nonconforming, in either direction — a declaration with
-no service behind it fails just as surely as a service with no declaration.
+matching the declaration on ports, slice and state path.
 
 ### Conforming
 
 | Service | Tenant | Basis |
 | --- | --- | --- |
-| `ac-host-static.service` + 3 `ac-static-*` containers | assetto | Three lobbies live on 9600–9602 / 8081–8083 / 8181–8183 / 11200–11202, all inside declared ranges. State preserved at `/var/lib/ac-host`. |
-| `ac-host-nightly.timer` / `.service` | assetto | Declared, scheduled, no failures. |
-| `ac-host-dev.service` | assetto | Inactive, and correctly so — the unit is documented "manual, does not start at boot". Its port 18081 is declared and unbound. The absence *is* the declaration being honoured. |
-| `ac-host-auth-1`, `-details-1`, `-plugin-1` | assetto | All in `critical.slice` via `cgroup_parent`. Loopback bind on 18080 matches `scope = "local"`. |
-| `arcade-freeciv.service` | arcade | 5556/tcp on the LAN address, 4555/udp announce — both declared, matching the correction recorded in `tenants.nix`. |
-| observability, 8 units | observability | All eight in `interactive.slice`. Nine declared ports, nine live binds; every collector on loopback, Grafana the one LAN port. State preserved at `/var/lib/monitoring`. |
+| `ac-host-static.service` + 3 `ac-static-*` containers + sidecars | assetto | Lobbies on 9600–9602 / 8081–8083 / 8181–8183 / 11200–11202; sidecar sockets 18080, 11300–11302 — every one declared. Containers in `critical.slice` via `cgroup_parent`; the unit unsliced by design. State at `/var/lib/ac-host`. |
+| `ac-host-nightly.timer`, `ac-host-dev.service` | assetto | Declared; dev inactive by design. |
+| `arcade-freeciv`, `arcade-mindustry` | arcade | `interactive.slice`. 5556/tcp, 4555/udp, 6567, **20151/udp** all declared and open — LAN discovery now works. |
+| `samba-smbd`, `samba-winbindd`, `rsync` | arcade | **Now in `interactive.slice`** — were `system.slice` until gen 31. |
+| observability, 8 units | observability | All in `interactive.slice`; nine declared ports, nine live binds. UniFi address read from `homelab.host`, not hardcoded. |
+| **`agent-hub-llm.service`** | agent-hub | **Running since gen 31**, alone in `background.slice` (weight 700, 163 GiB ceiling, cores 3–25 + siblings). `llama-server` on `192.168.1.50:8100`; the firewall rule now has a listener behind it. |
+| **`ac-host-ci.service`** | ci | **Adopted under systemd at gen 31.** `units = [ "ac-host-ci.service" ]`; agent and MinIO in `batch.slice`, attached to the same `ac-host-ci_*` volumes as before. |
 
 ### Nonconforming
 
 | Item | Tenant | Gap |
 | --- | --- | --- |
-| `agent-hub-llm.service` | agent-hub | **Does not exist on the box.** `enable = true` with a full `llm` block (modelPath, threads 23, mlock, NUMA). `background.slice` is inactive with no members; 8100 has no listener. Undeployed (`45f67ab`, `0de8c09`). |
-| `tcp/8100` firewall rule | agent-hub | Open on `enp8s0` with nothing behind it — `iptables -S nixos-fw` confirms the accept rule. The exact stale-rule bug `tenants.nix` describes as "fixed now"; the fix (`3fef4fe`) has not reached the box. |
-| `ac-host-ci-agent-1`, `-minio-1` | ci | Declared with `units = []` — an empty unit set is the tell. Hand-started with `docker compose up -d`; no systemd unit, no start-on-boot, no supervised restart. Resource fencing is correct (`cgroup_parent: batch.slice`); lifecycle is not managed at all. Fix committed (`4257aea`), undeployed, and gated behind a human-run adoption sequence. |
-| `ac-host-bot-1` | assetto | The Discord bot, running in `critical.slice` as compose profile `["bot"]`, in no tenant's `units` list — invisible to drain, quiet hours and `/etc/homelab/tenants.json`. README defers the split to "after phase 6"; phase 6 (slices) is applied, so the deferral has expired. |
-| ~~`samba-smbd`, `samba-winbindd`, `rsync.service`~~ | arcade | **Closed 9 Sep.** Added to arcade's `units`, so all three now take `Slice=interactive.slice`. Doing it exposed a contract defect — see F8. |
-| ~~`udp 11300–11302`~~ | assetto | **Closed 9 Sep.** Registered as `assetto.portRanges.pluginEvent`, `start = 11300; count = 16`, derived from `render_cfg.py`'s `PLUGIN_EVENT_START` and `acctl.py`'s `SLOT_COUNT = 16` — not from the three sockets that happened to be bound. |
-| ~~`udp 20151`~~ | arcade | **Closed 9 Sep, and it was a live bug.** Proven a fixed constant, not ephemeral: outside the kernel ephemeral range, and `javap -constants mindustry.Vars` on the shipped jar gives `multicastPort = 20151` / `multicastGroup = "227.2.7.7"`, corroborated by `/proc/net/igmp` showing group `070702E3` joined on `enp8s0`. **Mindustry LAN discovery was broken** — nothing opened 20151, so every discovery packet was dropped and the only way onto the server was typing its address. Fixed in `home-arcade` (`mindustry.multicastPort`, mirroring `freeciv.announcePort`) and the claim flipped to `scope = "lan"`. |
-| `background` + `batch` share `AllowedCPUs = 28-55` | — | Live, and wrong: a Buildkite Nix build lands on precisely the cores the model server is meant to be pinned to; only `CPUWeight` (50 vs 250) separates them, which is a share, not an isolation. Fixed in `3fef4fe`, undeployed. |
+| `ac-host-bot-1` | assetto | The Discord bot, still a compose profile inside assetto, in no tenant's `units`. README's "splits out after phase 6" deferral has expired. Delta row 8. |
+| `agent-hub` metrics | agent-hub | `/metrics` served on the LAN address, unscraped — `metricsEndpoint` has no address field. Delta row 12. |
 
 ### Decommission
 
 | Item | Why |
 | --- | --- |
-| `/etc/nixos/configuration.nix` | A stock, pre-refactor NixOS host config dated 31 Aug, at the path `nixos-rebuild` reads when `--flake` is omitted. **Correction:** this was first recorded here as building silently and exiting 0. It does not — a bare `nixos-rebuild switch` fails at evaluation, because the box's `NIX_PATH` carries no `nixos-config` entry (`nix-instantiate --find-file nixos-config` → not found). The danger is real but narrower: that protection is an accidental nixpkgs default that nothing in this repo asserts, and four ordinary actions re-arm it (`-I nixos-config=`, `NIXOS_CONFIG=`, anyone setting `nix.nixPath`, a nixpkgs bump) — plus the reader who opens `/etc/nixos` to learn what the box runs and believes it. If it *did* apply: no `virtualisation.docker`, so `docker.service` stops and all nine containers with it, and `PermitRootLogin = "yes"` against the platform's `"prohibit-password"`. Remedy is a `throw`, not deletion — `nixos-generate-config` writes `configuration.nix` only when the path is *absent*, so an empty `/etc/nixos` is one accidental invocation away from a fresh stock config. See `docs/runbook-decommission.md`. |
-| ~~`/etc/nixos/hardware-configuration.nix`~~ | **Keep.** Verified AST-identical to the tracked copy and to the one at `5fc6c90` (the commit that built the running closure) — `nix-instantiate --parse` sha256 `0f0e8b723682cbe8` for all three, despite three different formattings. It declares no services and reverts nothing. Do **not** verify by regenerating: `nixos-generate-config` on the box today emits a *worse* file — nine `fileSystems."/var/lib/docker/rootfs/overlayfs/<hash>"` entries, one per running container, and drops `usbhid`, `usb_storage` and `sd_mod` from the initrd modules. |
-| `wpa_supplicant.service` | Running on a machine with no wireless interface — `/sys/class/net` lists `eno1`, `enp8s0`, docker bridges and veths, nothing else. A NetworkManager default nobody turned off. |
-| ~~`ac-host-ci-minio-init-1`~~ | **Not a leftover — this entry was wrong.** The `agent` service declares `depends_on: minio-init: service_completed_successfully`, so the exited container *is* the record that the condition was met. Compose needs it, and it reappears after adoption. No action. |
-| `inquire-platform` (registry row) | `hub/repos.psv` carries it as `remote=none deploy=none` on branch `local-dev-environment`. Nothing on ac-box runs it, and with no remote it cannot be gated, pushed or deployed. It is a WSL working tree, not a home-lab service. |
+| ~~`/etc/nixos/configuration.nix`~~ | **Done** — a `throw` since 12 Sep. Hardware file kept; proven AST-identical to git. |
+| ~~`wpa_supplicant.service`~~ | **Done** — `mkForce false` in `network.nix`, gone at gen 31. |
+| `inquire-platform` (registry row) | Still in `hub/repos.psv` with no remote and nothing on the box. Your call. |
 
 ---
 
 ## 3. The box at rest
 
-Live values, read from `systemctl show`. Note that these reflect the *old* tier
-defaults — the rebalance in `45f67ab`/`0de8c09` is undeployed.
+Live from `systemctl show`, 12 Sep 2026, generation 31. These are the
+**rebalanced** shares from `45f67ab`/`0de8c09`.
 
 | Slice | CPUWeight | MemoryMax | AllowedCPUs | Members |
 | --- | --- | --- | --- | --- |
-| `critical.slice` | 500 | 87.9 GiB | unfenced | 7 docker scopes (3 lobbies, 3 sidecars, the bot) |
-| `interactive.slice` | 200 | 37.7 GiB | unfenced | arcade ×2, observability ×8 |
-| `background.slice` | 250 | 75.3 GiB | `28-55` | **inactive, none** |
-| `batch.slice` | 50 | 25.1 GiB | `28-55` | 2 docker scopes (buildkite agent, minio) |
-| `system.slice` | 100 (default) | none | — | `ac-host-static`, nightly timer, samba, rsync, sshd, fail2ban |
+| `critical.slice` | 100 | 25.1 GiB | unfenced | 7 docker scopes (3 lobbies, 3 sidecars, the bot) |
+| `interactive.slice` | 50 | 12.5 GiB | unfenced | arcade ×2, samba ×2, rsync, observability ×8 |
+| `background.slice` | **700** | **163.1 GiB** | **`3-25,31-53`** | `agent-hub-llm` |
+| `batch.slice` | 50 | 25.1 GiB | **`26-27,54-55`** | buildkite agent, minio |
+| `system.slice` | 100 | none | — | `ac-host-static`, platform only (sshd, fail2ban, docker, NetworkManager) |
 
-Two structural facts read straight off this table:
-
-**Assetto's containers are fenced but its units are not.** The compose file's
-`cgroup_parent: critical.slice` puts the seven containers in the tier, while
-`ac-host-static.service` itself stays in `system.slice` — exactly as
-`resources.nix` intends. `tier = "critical"` *and* `quiet.drainable = false`
-each independently disqualify a tenant from `Slice=` assignment, because
-`Slice=` applies at unit start and `ac-host-static`'s `ExecStop` is
-`docker rm -f` on three live race servers. This is correct, deliberate, and
-documented in the module; it is listed here so it is not re-discovered as a bug.
-
-**`background` and `batch` share one fence.** See the nonconforming table.
+The fence now fences: background and batch hold distinct physical cores, and
+neither touches cores 0–2 or their siblings 28–30, which stay with the unsliced
+racing stack. Background's weight 700 against `system.slice`'s 100 ranks the
+model server above racing under contention — deliberate, per
+`configuration.nix`; the fence is what protects racing, not the weight.
 
 ---
 
@@ -362,12 +328,12 @@ Ordered by risk carried per unit of effort.
 
 | # | Item | Status |
 | --- | --- | --- |
-| 1 | Neutralise the stale `/etc/nixos/configuration.nix` on the box | **Human action, runbook written** — `docs/runbook-decommission.md`. Gate 0 passes: the hardware files are proven AST-identical, so nothing blocks it. Replace with a `throw`; keep the hardware file. |
+| 1 | Neutralise the stale `/etc/nixos/configuration.nix` on the box | **Done 12 Sep** — a `throw`, hardware file kept. |
 | 2 | Teach `hub-status.sh` to report closure drift (F3) | **Done** — `1c6827f`. Three-tier cascade; `HUB_STATUS_EXACT=1` is the exact check. Also reports the owed reboot. |
 | 3 | Correct the stale `hardware-configuration.nix` documentation (F1) | **Done** — `37e6927`. Nine sites, not three; the silent `.example` fallback is now a `throw`. |
 | 4 | Register `udp 11300–11302`; adjudicate `udp 20151` | **Done.** Both registered; 20151 turned out to be a live LAN-discovery outage, fixed in `home-arcade`. |
-| 5 | Run the CI adoption sequence, then switch once | **Human action, in a window.** `modules/ci/default.nix` documents the order and both hazards. The switch must not be run *by* the Buildkite agent it bounces. Lands all 15 commits together. |
-| 6 | Add samba/winbindd/rsync to arcade's `units` | **Done**, on explicit instruction that an arcade bounce is acceptable. Uncovered and fixed F8. The three still restart on the next switch — that is the intended, accepted cost. |
+| 5 | Run the CI adoption sequence, then switch | **Done 12 Sep** — generations 30 (`3fef4fe`) and 31 (HEAD). One defect found and fixed in the doing (`c97cbbe`, git on `ac-host-ci`'s PATH). |
+| 6 | Add samba/winbindd/rsync to arcade's `units` | **Done, and live** since gen 31 — all three in `interactive.slice`. Uncovered and fixed F8. |
 | 7 | Split the Discord bot into its own tenant | Deferral expired at phase 6. Needs a decision on tenant name and port/unit ownership. |
 | 8 | Drop the `inquire-platform` registry row | Trivial, but it is a decision about the user's tree layout, not a defect. |
 | 9 | Give the UniFi router address a home on `homelab.host` (F6) | **Done** — `6e18170`. `homelab.host.unifi.address`, not `networks.lan.gateway`. Proven a no-op: drvPath unchanged. |
