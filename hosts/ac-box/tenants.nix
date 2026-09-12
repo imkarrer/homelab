@@ -486,6 +486,23 @@
       description = "Self-hosted Buildkite agent (Flox sandbox) with a loopback MinIO Nix binary cache.";
       tier = "batch";
 
+      # The unit modules/ci creates once homelab.ci.enable is on. Declared
+      # here so the inventory (/etc/homelab/tenants.json), drain planning and
+      # the reconciliation diff all know the unit belongs to someone -- an
+      # empty `units` was the tell that this tenant's lifecycle was unmanaged,
+      # and it stayed empty after the module landed, so the unit would have
+      # run in no tenant's name. modules/ci's own header names this follow-up.
+      #
+      # What Slice= does and does not do here. ac-host-ci is Type=oneshot with
+      # RemainAfterExit: it runs `docker-compose up -d --build` and exits, so
+      # the slice holds a brief supervisor invocation and nothing else. The
+      # agent and MinIO containers were already in batch.slice via the compose
+      # file's cgroup_parent (ADR 0005) -- that is not what this line changes.
+      # It also does not bounce the unit on switch: modules/ci sets
+      # restartIfChanged = false and stopIfChanged = false for HAZARD 2, and
+      # those hold regardless of Slice=.
+      units = [ "ac-host-ci.service" ];
+
       ports = {
         minio-api = {
           number = 9000;
