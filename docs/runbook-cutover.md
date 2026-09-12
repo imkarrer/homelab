@@ -170,7 +170,7 @@ Cutover happens during the 03:00 maintenance window, a ritual the Discord commun
 | T−1h | Operator | Freeze the content plane. No new races, no config changes to tenants, no new Discord bot deployments. Content and system changes do not travel in the same window. | |
 | T−15m | Operator | Run `nix-store --add-root` to pin the rollback root. Capture observable surface before. | Gate 3 (before) |
 | T−5m | Operator | SSH to ac-box (plain session, not Buildkite). Run `sudo ./result/bin/switch-to-configuration dry-activate`. | Gate 2 |
-| T−0 | Operator | Run `sudo nixos-rebuild switch --flake github:imkarrer/homelab#ac-box`. Use `switch`, never `boot` or `reboot`. A reboot drops every tenant and requires console access if boot fails. | |
+| T−0 | Operator | Run `sudo nixos-rebuild switch --refresh --flake github:imkarrer/homelab#ac-box`. Use `switch`, never `boot` or `reboot`. A reboot drops every tenant and requires console access if boot fails. | |
 | T+2m | Operator | Capture observable surface after. Diff before and after. | Gate 3 (after) |
 | T+10m | Operator | Join Discord, spawn a lobby, drive a lap. Verify auth and container lifecycle. | Gate 3b |
 

@@ -51,6 +51,24 @@ justification, and it is the only one of the four that gets one.
 
 ---
 
+## Standing Hazard: `github:` refs are cached for an hour
+
+`nixos-rebuild switch --flake github:imkarrer/homelab#ac-box` does **not**
+necessarily build what is on `main`. Nix caches the resolution of a bare
+`github:` ref for `tarball-ttl` — 3600 seconds by default, and that is what
+ac-box has. Found 12 Sep 2026: a switch at 12:00 cached `c97cbbe`; a switch at
+12:51, after three more commits had been pushed, resolved to the *cached*
+`c97cbbe`, built the identical closure, and applied a no-op — while reporting
+success and refreshing the generation's timestamp. The heuristic check in
+`hub-status.sh` read that fresh timestamp as "consistent with current";
+only `HUB_STATUS_EXACT=1` saw that the box and the tree were different closures.
+
+Every switch command in this document carries `--refresh` for that reason.
+Pinning to a full sha (`github:imkarrer/homelab/<40-hex>#ac-box`) is immune
+without it — which is why ADR 0006's deploy unit stages a rev, never "main".
+After any switch, run `HUB_STATUS_EXACT=1 bash scripts/hub-status.sh`; the
+cheap check cannot tell you whether the switch did anything.
+
 ## Standing Hazard: the closure backlog
 
 **Do not write "then switch" as if it were a small step.** As of 9 Sep 2026
@@ -364,7 +382,7 @@ cat > /etc/nixos/configuration.nix <<'EOF'
 # platform layer (modules/platform), the tenant contract (modules/tenant) and
 # this host's composition (hosts/ac-box/). Rebuild with:
 #
-#   sudo nixos-rebuild switch --flake github:imkarrer/homelab#ac-box
+#   sudo nixos-rebuild switch --refresh --flake github:imkarrer/homelab#ac-box
 #
 # What used to be here was a stock, pre-refactor host config dated 31 Aug 2026.
 # Building it produces a system with no Docker daemon, no tenant contract, no
@@ -385,7 +403,7 @@ throw ''
 
   ac-box's system closure comes from the homelab flake:
 
-    sudo nixos-rebuild switch --flake github:imkarrer/homelab#ac-box
+    sudo nixos-rebuild switch --refresh --flake github:imkarrer/homelab#ac-box
 
   If you reached this by running `nixos-rebuild` without --flake, or with
   -I nixos-config= / NIXOS_CONFIG=, that is the bug. Use the command above.
@@ -409,7 +427,7 @@ ssh ac-box 'head -3 /etc/nixos/configuration.nix'
 # The throw fires when the file is actually reached:
 ssh ac-box 'nix-instantiate --eval /etc/nixos/configuration.nix 2>&1 | head -12'
 #   expect: error: ... /etc/nixos/configuration.nix is retired and must not be built.
-#           ... nixos-rebuild switch --flake github:imkarrer/homelab#ac-box
+#           ... nixos-rebuild switch --refresh --flake github:imkarrer/homelab#ac-box
 
 # The hardware file is untouched and still matches git.
 # Note: nix-instantiate --parse needs a real file -- it cannot read a pipe
