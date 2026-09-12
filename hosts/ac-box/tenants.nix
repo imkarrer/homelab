@@ -5,7 +5,12 @@
 # found along the way (mindustry not actually bound despite "active", the
 # observability state dir being /var/lib/monitoring not /var/lib/observability,
 # freeciv's real LAN-announce UDP port being 4555 not 5556).
-{ ... }:
+#
+# Takes `config` for exactly one reason: agent-hub's metrics.address must be
+# a REFERENCE to homelab.host.networks.lan.address, never a literal -- the
+# same way configuration.nix feeds services.agent-hub.lanAddress. A literal
+# passes today and fails evaluation the day the box's address moves.
+{ config, ... }:
 
 {
   homelab.tenants = {
@@ -381,19 +386,29 @@
         backup = true;
       };
 
-      # null even though llama-server has a real Prometheus endpoint
-      # (`--metrics` exists in the pinned build 9190 and is passed in
-      # configuration.nix, so /metrics IS being served on 8100).
+      # Scraped on the LAN address, not loopback -- the first endpoint on this
+      # box that is. llama-server runs `--host 192.168.1.50 --metrics`
+      # (configuration.nix) because being reachable from other machines is
+      # the whole point of the service, and it does NOT also listen on
+      # loopback: `curl 127.0.0.1:8100/metrics` on the box is connection
+      # refused while the LAN address serves eleven `llamacpp:*` series
+      # (verified 12 Sep 2026, generation 32). Until metricsEndpoint gained
+      # `address` today this was `metrics = null` with a comment saying why;
+      # that comment was right that it needed a schema change, and the schema
+      # changed.
       #
-      # It cannot be declared here yet: metrics.nix hardcodes the scrape
-      # target to 127.0.0.1:<port> -- its header pins that as a deliberate
-      # convention, since every exporter on this box binds loopback -- and
-      # agent-hub-llm binds the LAN address instead, because the whole point
-      # of the service is to be reachable from other machines. Declaring it
-      # would generate a scrape job that fails on every interval. Wiring this
-      # up properly means giving metricsEndpoint an address field, which the
-      # metrics.nix header says is a schema change, not a metrics.nix change.
-      metrics = null;
+      # address is a REFERENCE to the host fact, never the literal. metrics.nix
+      # asserts it is loopback or an address homelab.host actually declares,
+      # so a literal would pass today and fail the day the address moves --
+      # which is the assertion doing its job, but late and by surprise.
+      #
+      # job defaults to the tenant name, "agent-hub". No dashboard is keyed on
+      # it yet, so there is nothing to preserve and no reason to spell it
+      # differently from the tenant.
+      metrics = {
+        port = 8100;
+        address = config.homelab.host.networks.lan.address;
+      };
     };
 
     # Prometheus/Alertmanager/Grafana plus the box's own exporters. Every

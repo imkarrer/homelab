@@ -90,6 +90,51 @@ let
   metricsEndpoint = types.submodule {
     options = {
       port = mkOption { type = types.port; };
+      # Added 12 Sep 2026 (docs/architecture.md delta row 12). Until then
+      # this submodule had no address and metrics.nix hardcoded 127.0.0.1:
+      # every exporter on ac-box binds loopback, so "scrape over loopback"
+      # was the convention and metrics.nix's header pinned it as one. The
+      # first tenant it could not describe was agent-hub: llama-server runs
+      # with `--host 192.168.1.50 --metrics` because being reachable from
+      # other machines is the whole point of the service, and it does NOT
+      # also listen on loopback -- `curl http://127.0.0.1:8100/metrics` on
+      # the box is connection refused (curl exit 7) while the LAN address
+      # serves eleven `llamacpp:*` series. A 127.0.0.1 scrape job for it
+      # would be a permanent `up == 0`.
+      #
+      # The default is loopback, deliberately and load-bearingly: every
+      # declaration that predates this field must produce a byte-identical
+      # `static_configs` entry, because the whole reason `job` can be
+      # overridden is that Grafana dashboards are keyed on job/target and a
+      # reshaped job orphans them. tests/eval-metrics.nix pins the
+      # 127.0.0.1:9100 / 127.0.0.1:9132 reproductions for exactly that.
+      #
+      # A free string, constrained by an assertion in metrics.nix rather
+      # than by a type here, because the constraint is a HOST fact this file
+      # is not allowed to know: the address must be loopback, or one of
+      # homelab.host.networks.<name>.address that is non-null. That rules
+      # out "0.0.0.0" (a bind wildcard, not somewhere Prometheus can connect
+      # to), a hostname (a DNS dependency smuggled into a scrape config), and
+      # a literal that stops being true when the box's address changes. It
+      # also mirrors ports.nix's rule for scope = "mgmt": nothing may point
+      # at an interface that has no address. Write the value as a REFERENCE
+      # -- `config.homelab.host.networks.lan.address`, the way
+      # hosts/ac-box/configuration.nix already feeds services.agent-hub
+      # .lanAddress -- never as a literal; a literal passes today and fails
+      # evaluation the day the address moves, which is the assertion doing
+      # its job, but late and by surprise.
+      address = mkOption {
+        type = types.str;
+        default = "127.0.0.1";
+        description = ''
+          IPv4 address Prometheus connects to for this endpoint. Default is
+          loopback, which is where every exporter on this host binds. Set it
+          only for a service that binds a non-loopback address and does not
+          also listen on 127.0.0.1 -- and set it by reference to
+          homelab.host.networks.<name>.address, not as a literal. metrics.nix
+          asserts the value is loopback or an address the host actually has.
+        '';
+      };
       path = mkOption { type = types.str; default = "/metrics"; };
       interval = mkOption { type = types.str; default = "30s"; };
       job = mkOption {
