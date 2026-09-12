@@ -213,16 +213,20 @@
       # deliberate change, not a side effect of naming the tenant.
       tier = "critical";
 
-      # Empty, and that is a finding rather than an omission: the bot has NO
-      # systemd unit. Docker's `restart: unless-stopped` brings it up at boot
-      # (12:37:41 on 12 Sep, one second after dockerd) and
-      # scripts/ci_downtime.py runs `compose --profile bot up -d --build bot`
-      # nightly. Two owners, neither of them systemd -- so the unit-based
-      # blast-radius gate cannot see it, the same gap bead homelab-bqo.14
-      # named for the dev stack. ac-host's module is where a unit would live
-      # (a oneshot running that compose command, RemainAfterExit, the shape
-      # modules/ci uses); when one exists it goes here.
-      units = [ ];
+      # ac-host 8c456cb, same day as this tenant. Until then the bot had NO
+      # unit: Docker's `restart: unless-stopped` brought it up at boot and
+      # scripts/ci_downtime.py ran `compose --profile bot up -d --build bot`
+      # nightly -- two owners, neither systemd, invisible to the unit-based
+      # blast-radius gate (bead homelab-bqo.14's gap, one container over).
+      # The unit runs the same compose command, so the owners agree by
+      # construction and there is one ac-host-bot-1, never two.
+      #
+      # tier = critical means resources.nix assigns it no Slice= (critical is
+      # never sliced) -- correct, since the container's placement comes from
+      # cgroup_parent in the compose file, not from the unit. It will appear
+      # in the "intentionally NOT assigned a slice" evaluation warning
+      # alongside assetto's units; that is the declaration working.
+      units = [ "ac-host-bot.service" ];
 
       # No ports. It is a Discord client: outbound WebSocket and HTTPS only,
       # nothing bound. Verified against `ss -tulnp` -- every socket on the box
