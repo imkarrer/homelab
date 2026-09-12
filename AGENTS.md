@@ -8,12 +8,7 @@ all already decided.
 Its **Working agreements for automated changes** section is also binding, and
 is the short version:
 
-- Never write to ac-box. Read-only SSH inspection only: change it by landing
-  in git and letting Buildkite deploy.
-- Push only what `hub/repos.psv` marks `agent-push=yes`, and only on green
-  gates. Everything else is `ask`.
-- Never run `bd` write commands — one coordinator owns the tracker.
-- Prove Nix work with `nix eval` / `nix flake check` locally.
+Never hand-edit ac-box. Read-only SSH inspection is always fine. Migration exception, until ADR 0006's deploy unit is enabled: an agent may apply a pushed revision with nixos-rebuild switch --flake github:imkarrer/homelab/<full-sha>#ac-box, and may run box-side steps a runbook in docs/ spells out verbatim. Two conditions: the sha must already be on origin, and the agent must stop — not judge — at a runbook's abort criteria. ac-host-static.service or docker.service under stop/restart in dry-activate is an abort, full stop.
 
 ## Which tenants may be disrupted
 

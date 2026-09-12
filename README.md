@@ -86,10 +86,7 @@ which is why the two files above are tracked in a public repo.
 
 ## Working agreements for automated changes
 
-- **Never write to ac-box.** Read-only inspection over SSH is fine. Every
-  `nixos-rebuild`, `systemctl`, and file write on the box is a human action,
-  gated by the cutover runbook.
-- **Never push.** Commit locally; publishing is a human action.
+- Never hand-edit ac-box. Read-only SSH inspection is always fine. Migration exception, until ADR 0006's deploy unit is enabled: an agent may apply a pushed revision with nixos-rebuild switch --flake github:imkarrer/homelab/<full-sha>#ac-box, and may run box-side steps a runbook in docs/ spells out verbatim. Two conditions: the sha must already be on origin, and the agent must stop — not judge — at a runbook's abort criteria. ac-host-static.service or docker.service under stop/restart in dry-activate is an abort, full stop.
 - **Do not run `bd` write commands.** The tracker is updated by one coordinator
   to avoid Dolt lock contention between parallel workers.
 - Prove Nix work with `nix eval` / `nix flake check` in WSL. The closure gates
