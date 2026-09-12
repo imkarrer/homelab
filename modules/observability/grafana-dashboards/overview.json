@@ -177,12 +177,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "rate(unpoller_device_wan_receive_bytes_total{name=\"Dream Router\"}[5m])",
+          "expr": "rate(unpoller_device_wan_receive_bytes_total{name=\"Dream Router\"}[10m])",
           "legendFormat": "in"
         },
         {
           "refId": "B",
-          "expr": "rate(unpoller_device_wan_transmit_bytes_total{name=\"Dream Router\"}[5m])",
+          "expr": "rate(unpoller_device_wan_transmit_bytes_total{name=\"Dream Router\"}[10m])",
           "legendFormat": "out"
         }
       ]
@@ -200,12 +200,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "rate(unpoller_device_wan_receive_packets_total{name=\"Dream Router\"}[5m])",
+          "expr": "rate(unpoller_device_wan_receive_packets_total{name=\"Dream Router\"}[10m])",
           "legendFormat": "in"
         },
         {
           "refId": "B",
-          "expr": "rate(unpoller_device_wan_transmit_packets_total{name=\"Dream Router\"}[5m])",
+          "expr": "rate(unpoller_device_wan_transmit_packets_total{name=\"Dream Router\"}[10m])",
           "legendFormat": "out"
         }
       ]
@@ -223,7 +223,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "sum by (chain) (rate(udr_firewall_packets_total{chain=~\"WAN_IN|WAN_LOCAL|WAN_PF_IN\"}[5m]))",
+          "expr": "sum by (chain) (rate(udr_firewall_packets_total{chain=~\"WAN_IN|WAN_LOCAL|WAN_PF_IN\"}[15m]))",
           "legendFormat": "{{ chain }}"
         }
       ]

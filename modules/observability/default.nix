@@ -258,21 +258,44 @@ in
           }
         ];
       }
+      # The two UniFi jobs poll the Dream Router's Network application, a Java
+      # process sharing 2 GB with everything else on the router. In Prometheus
+      # mode unpoller fetches from the controller ON EVERY SCRAPE, so this
+      # interval IS the load we put on it: at 30s it was ~2,900 fetches/day of
+      # ~270 KB each (~2.5s of controller time per fetch, ~8% of wall-clock),
+      # and controller response time crept up ~0.15s/day alongside its memory
+      # until the app wedged on 10 Sep 2026 (see UnifiGatewayMemTrend below).
+      #
+      # 2m, not 5m: Prometheus's staleness lookback is 5m, so a 5m interval
+      # leaves instant selectors (`up == 0`, the dashboard gauges) empty
+      # between samples and silently resets alert `for:` timers. 2m is 4x less
+      # load and still well inside the lookback. The dashboard's rate() windows
+      # over these series are [10m] for the same reason.
+      #
+      # scrape_timeout is raised from the 10s default because a controller that
+      # takes 12s to answer is degraded, not down, and "up" should say so;
+      # UnifiControllerSlow is the alert that reads the duration.
       {
         job_name = "unpoller";
-        scrape_interval = "30s";
+        scrape_interval = "2m";
+        scrape_timeout = "45s";
         static_configs = [ { targets = [ "127.0.0.1:9130" ]; } ];
         metric_relabel_configs = [
           {
             source_labels = [ "__name__" ];
-            regex = "up|unpoller_device_cpu_utilization_ratio|unpoller_device_memory_utilization_ratio|unpoller_device_wan_.*";
+            # uptime is kept so a router reboot is a visible counter reset,
+            # not something inferred from a gap in the graph.
+            regex = "up|unpoller_device_cpu_utilization_ratio|unpoller_device_memory_utilization_ratio|unpoller_device_uptime_seconds|unpoller_device_wan_.*";
             action = "keep";
           }
         ];
       }
+      # udr-fw-exporter polls the controller on its own timer (UDR_FW_POLL_SECONDS
+      # in its unit, below) and serves the last result from memory, so this
+      # scrape is a cache read and its interval does not touch the router.
       {
         job_name = "udr-fw";
-        scrape_interval = "30s";
+        scrape_interval = "2m";
         static_configs = [ { targets = [ "127.0.0.1:9131" ]; } ];
       }
       {
@@ -318,29 +341,72 @@ in
                 annotations:
                   summary: "Prometheus scrape {{ $labels.job }} is down"
 
+              # The Dream Router rules were rewritten after 10-11 Sep 2026, when
+              # the router's Network app ran out of memory over a week and was
+              # unresponsive for 12h before a reboot. The old rules (instant
+              # value > threshold for 5m) went "pending" 19 times that week and
+              # fired zero times: peaks crossed the line, the `for:` timer reset
+              # in the troughs. Every rule below reads a window instead of an
+              # instant, which also makes them indifferent to the 2m scrape
+              # interval above.
+
+              # No successful scrape in 20 minutes. max_over_time rather than a
+              # bare `up == 0` so a single slow scrape cannot start the timer.
               - alert: UnpollerDown
-                expr: up{job="unpoller"} == 0
+                expr: max_over_time(up{job="unpoller"}[10m]) == 0
                 for: 10m
                 labels:
                   severity: warning
                 annotations:
                   summary: "unpoller is down or cannot reach the Dream Router API"
 
-              - alert: UnifiGatewayCpuHigh
-                expr: 100 * max(unpoller_device_cpu_utilization_ratio{type="udm"}) > 80
-                for: 5m
+              # The leading indicator. Healthy, the controller answers unpoller in
+              # 1.2-1.5s (p95 2-3s); in the week before it wedged the p95 rose
+              # ~0.15s/day, and the sick day averaged 4.5s. An hour averaging
+              # above 4s is the controller telling us it is struggling, days
+              # before memory alone would.
+              - alert: UnifiControllerSlow
+                expr: avg_over_time(scrape_duration_seconds{job="unpoller"}[1h]) > 4
+                for: 30m
                 labels:
                   severity: warning
                 annotations:
-                  summary: "Dream Router CPU is {{ $value | printf \"%.0f\" }}%"
+                  summary: "Dream Router API is averaging {{ $value | printf \"%.1f\" }}s per poll (healthy: ~1.5s)"
 
-              - alert: UnifiGatewayMemHigh
-                expr: 100 * max(unpoller_device_memory_utilization_ratio{type="udm"}) > 85
-                for: 5m
+              # Sustained, not peak. Daily average CPU is ~20% with spikes to
+              # 100% that mean nothing; an hourly average above 60% does.
+              - alert: UnifiGatewayCpuHigh
+                expr: 100 * max(avg_over_time(unpoller_device_cpu_utilization_ratio{type="udm"}[1h])) > 60
+                for: 30m
                 labels:
                   severity: warning
                 annotations:
-                  summary: "Dream Router RAM is {{ $value | printf \"%.0f\" }}%"
+                  summary: "Dream Router CPU has averaged {{ $value | printf \"%.0f\" }}% for an hour"
+
+              # The app failed with hourly-average RAM around 85%. 80% sustained
+              # is the "act today" line; the trend rule below is the "act this
+              # week" line.
+              - alert: UnifiGatewayMemHigh
+                expr: 100 * max(avg_over_time(unpoller_device_memory_utilization_ratio{type="udm"}[1h])) > 80
+                for: 30m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "Dream Router RAM has averaged {{ $value | printf \"%.0f\" }}% for an hour"
+
+              # Extrapolate the last two days of RAM three days forward. On the
+              # slope seen in Sep 2026 (+1.5-3 points/day from ~70%) this fires
+              # around 76-80%, three to four days before the app dies -- time to
+              # trim controller features or schedule a reboot in the 03:00
+              # window. A reboot inside the 2d window gives a negative slope and
+              # clears it, which is the right answer.
+              - alert: UnifiGatewayMemTrend
+                expr: 100 * max(predict_linear(unpoller_device_memory_utilization_ratio{type="udm"}[2d], 3 * 86400)) > 85
+                for: 6h
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "Dream Router RAM is on course for {{ $value | printf \"%.0f\" }}% within 3 days"
 
               - alert: PracticeLobbiesFailed
                 expr: node_systemd_unit_state{name="ac-host-static.service",state="failed"} == 1
