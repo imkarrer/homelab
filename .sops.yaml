@@ -1,0 +1,18 @@
+# Who can decrypt secrets/*.yaml. Both recipients are derived from ssh ed25519
+# keys that already existed -- see modules/platform/secrets.nix for the model.
+#
+#   ac-box    ssh-to-age < /etc/ssh/ssh_host_ed25519_key.pub   (decrypts at activation)
+#   operator  ssh-to-age -i ~/.ssh/id_ed25519_ac-host.pub      (encrypts, edits)
+#
+# Add a recipient: append it here, then `sops updatekeys secrets/ac-box.yaml`.
+# Edit a secret (identity derived in-memory, never on disk):
+#   SOPS_AGE_KEY="$(ssh-to-age -private-key -i ~/.ssh/id_ed25519_ac-host)" sops secrets/ac-box.yaml
+keys:
+  - &ac-box    age135yqc5evu2tjffzgr8ryrn7n65qeuccu26jp5scpf8hp36eyrgest8agyl
+  - &operator  age1ygy44hwqkmnf8s742a9vf9k9fxwc7gh9jl2hyfmwwlk45n4laqqqrmyk8w
+creation_rules:
+  - path_regex: secrets/.*\.yaml$
+    key_groups:
+      - age:
+          - *ac-box
+          - *operator

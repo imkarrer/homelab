@@ -36,10 +36,21 @@
       url = "github:imkarrer/agent-hub";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Secrets. README has said "credentials go to sops-nix" since the repo
+    # began; as of 12 Sep 2026 one does (arcade's SMB password, the proof),
+    # and the rest are hand-placed files whose NAMES the tenants declare in
+    # homelab.tenants.<name>.secrets. See modules/platform/secrets.nix for
+    # the key model -- no new key material anywhere: the box decrypts with
+    # its ssh host key, the operator with theirs.
+    sops-nix = {
+      url = "github:Mic92/sops-nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs =
-    { self, nixpkgs, ac-host, home-arcade, agent-hub }:
+    { self, nixpkgs, ac-host, home-arcade, agent-hub, sops-nix }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -127,6 +138,8 @@
           ./modules/platform/nix.nix
           ./modules/platform/ssh.nix
           ./modules/platform/boot.nix
+          sops-nix.nixosModules.sops
+          ./modules/platform/secrets.nix
 
           # L2: shared services that cross tenants. Lifted out of ac-host in
           # phase 8 -- see modules/observability/default.nix for why it lived
