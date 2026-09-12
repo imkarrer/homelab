@@ -28,10 +28,10 @@
     home-arcade.url = "github:imkarrer/home-arcade";
 
     # The local coding-agent tenant: llama.cpp model serving plus a sandboxed
-    # repo+task->PR runner. Declared in hosts/ac-box/tenants.nix but not yet
-    # enabled there (homelab.tenants.agent-hub.enable = false) -- importing
-    # the module here is the no-op half of turning it on; a human still has
-    # to flip services.agent-hub.enable, set llm.modelPath, and switch.
+    # repo+task->PR runner. Declared in hosts/ac-box/tenants.nix and ON since
+    # 45f67ab (llm only; the runner waits on a sops-backed githubTokenFile).
+    # Live on ac-box since generation 31, 12 Sep 2026: llama-server on
+    # 192.168.1.50:8100, alone in background.slice.
     agent-hub = {
       url = "github:imkarrer/agent-hub";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -50,11 +50,51 @@
       nixosModules = {
         tenantContract = ./modules/tenant;
         platform = ./modules/platform;
+        # L2, exported so a second host can take the shared services without
+        # taking ac-box's tenants. observability was lifted out of a tenant
+        # repo precisely to be shareable; leaving it consumable only as an
+        # inline path in the module list below was that job half-done
+        # (docs/current-state.md F4).
+        observability = ./modules/observability;
+        ci = ./modules/ci;
+        deploy = ./modules/deploy;
       };
 
       nixosConfigurations.ac-box = nixpkgs.lib.nixosSystem {
         inherit system;
         modules = [
+          # Stamp the closure with the git revision that built it, so the
+          # running system is self-identifying: `nixos-version
+          # --configuration-revision` on the box answers "which commit is
+          # this?" exactly, with no evaluation and no heuristic.
+          #
+          # Why now. On 12 Sep 2026 a `nixos-rebuild switch --flake
+          # github:imkarrer/homelab#ac-box` resolved to a rev nix had CACHED
+          # an hour earlier (tarball-ttl = 3600), built the identical closure,
+          # and applied a no-op while reporting success and refreshing the
+          # generation timestamp. hub-status.sh's timestamp heuristic read
+          # that as "consistent with current". A stamped revision would have
+          # said c97cbbe against HEAD 0f87e07 instantly. It prefers this
+          # stamp when present; this is what makes that branch live.
+          #
+          # The cost, and how it is paid. Every commit now yields a different
+          # toplevel store path, which retires "compare drvPath before/after"
+          # as a proof that an import is a no-op -- the technique this file's
+          # own comments cite three times. The proof survives with one
+          # override on both sides:
+          #
+          #   (nixosConfigurations.ac-box.extendModules {
+          #     modules = [ { system.configurationRevision = lib.mkForce null; } ];
+          #   }).config.system.build.toplevel.drvPath
+          #
+          # That strips the stamp and compares what is left, which is what
+          # the technique was always actually comparing.
+          #
+          # `self.rev` exists only for a clean tree; `dirtyRev` carries the
+          # base rev plus "-dirty" so a switch from an uncommitted checkout is
+          # labelled as one rather than passing as its base commit.
+          { system.configurationRevision = self.rev or self.dirtyRev or "unknown"; }
+
           # L1: the contract. Assertions run unconditionally; every effect is
           # gated behind homelab.enforce.*, all of which default false. That is
           # what lets this configuration be a no-op on the first switch.
@@ -93,18 +133,15 @@
           # inside a tenant repo until now.
           ./modules/observability
 
-          # modules/ci: imported but inert (beads homelab-bqo.12 prep).
-          # homelab.ci.enable defaults false and nothing sets it, so this is
-          # a no-op -- verified by comparing nixosConfigurations.ac-box's
-          # toplevel store path before/after this line was added, same as
-          # agent-hub below. Do NOT flip homelab.ci.enable from here or from
-          # any other agent-authored change: the module's own header
-          # documents a specific, human-run, live-SSH adoption sequence
-          # (stop the hand-started compose stack, verify its three named
-          # volumes and freed ports, THEN flip enable and switch) that must
-          # happen first, and a nixos-rebuild that bounces this unit can
-          # never be shipped as a step run BY the Buildkite agent this unit
-          # itself is -- see modules/ci/default.nix's "HAZARD 2" comment.
+          # modules/ci: the Buildkite agent + MinIO cache under systemd.
+          # Imported inert in f461509 (proven by unchanged toplevel drvPath),
+          # enabled in 4257aea, and LIVE since generation 31, 12 Sep 2026,
+          # after a human ran the module header's HAZARD 1 adoption sequence
+          # from a plain SSH session. HAZARD 2 stands permanently: a
+          # nixos-rebuild that bounces this unit can never be shipped as a
+          # step run BY the Buildkite agent this unit is -- which is why the
+          # closure's deploy path is a systemd unit (modules/deploy) and not a
+          # pipeline step.
           ./modules/ci
 
           # modules/deploy: imported but inert (ADR 0006's applying half).
