@@ -303,15 +303,15 @@ do those. Ordered roughly by what unblocks what.
 | 9 | `agent-hub` runner off | sops-backed `githubTokenFile` (`homelab-bqo.10`) + runner image | **Open.** Depends on #10. |
 | 10 | Secrets hand-placed | sops-nix | **Open.** No provisioning exists yet. |
 | 11 | `eno1` down; `mgmt` scope unused | Dual-NIC runbook, **plus an ADR** deciding what moves to `mgmt` — the repo names the interface's role and nothing else | **Human.** Interface work on the box; the placement decision is unmade. |
-| 12 | `agent-hub` metrics unscraped | `metricsEndpoint.address` | **Open.** Schema change. |
+| 12 | `agent-hub` metrics unscraped | `metricsEndpoint.address` | **Done** — `e4bf36f`. Loopback default keeps all five existing jobs byte-identical; new job `agent-hub` at the LAN address; a non-loopback address must be one the host declares. Lands on next switch. |
 | 13 | `agent-hub` body ungated | Turn its enable on in the composition | **Done** — enable is true in the composition, so the composed eval reaches the body. |
 | 14 | Harnesses not flake `checks` | `tryEval` inversion in the harnesses | **Open.** Design task; makes `run-eval-tests.sh` largely redundant. |
-| 15 | L2 not exported as `nixosModules` (F4) | `flake.nix` | **Open.** Small; matters only once there is a second host. |
-| 16 | `Configuration Revision: Unknown` | `system.configurationRevision = self.rev or self.dirtyRev` | **Human ruling.** Retires the "compare drvPath before/after" no-op proof this repo leans on. Buys speed only; `HUB_STATUS_EXACT=1` is already exact. |
+| 15 | L2 not exported as `nixosModules` (F4) | `flake.nix` | **Done** — `0a58999`. |
+| 16 | `Configuration Revision: Unknown` | `system.configurationRevision = self.rev or self.dirtyRev` | **Done** — `0a58999`, forced by the cache-stale switch: a stamp would have caught it instantly where the heuristic could not. The no-op proof survives via `extendModules { system.configurationRevision = lib.mkForce null; }` on both sides. Lands on next switch. |
 | 17 | `/etc/nixos/configuration.nix` stale | Replace with a `throw` | **Done 12 Sep.** |
 | 18 | `wpa_supplicant` on a box with no wireless | `networking.wireless.enable = lib.mkForce false` in `network.nix` | **Done** — gone at gen 31. |
 | 19 | Booted ≠ current | Reboot | **Human, now safe** — #5 is done, so `ac-host-ci` returns on boot. No kernel change pending. |
-| 20 | 13 containers → 9, unexplained | Establish whether four were retired deliberately | **Open.** Until settled, the cutover runbook's success criterion 4 cannot be evaluated. |
+| 20 | 13 containers → 9, unexplained | Establish whether four were retired deliberately | **Settled — deliberate.** The four were the dev environment (`ac-host-dev-*` ×3, `ac-dev-static-dev-blackhawk`), torn down from the workstation 7 Sep 23:57 so the unit-based gate would see everything running (bead .14). Criterion 4 rewritten to name the configured set, not a number. |
 | 21 | `agent-push=yes` on homelab will mean "schedule a switch" once #2 is live | Reconsider the flag alongside #2 | **Human decision.** |
 
 ### What the delta says, read as a whole

@@ -31,7 +31,10 @@
 
       portRanges = {
         # acServer opens a second UDP socket at gamePort + 1600 per slot; live
-        # on 11200/11201/11202/11208 for the four running lobbies. Nothing
+        # on 11200/11201/11202 for the three configured prod lobbies (slots
+        # 0-2). 11208 appears only while the dev environment is up -- slot 8
+        # is DEV_RESERVED in acctl.py -- and it was up when this was first
+        # written (7 Sep) and torn down that night. Nothing
         # firewalls or forwards these — ac-host.nix never mentions them and
         # unifi_pf.py only forwards game/http/details — so they are effectively
         # host-local despite binding on all interfaces.

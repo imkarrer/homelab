@@ -401,11 +401,13 @@ human decision is more useful recorded as such than silently dropped.
 
 ### Open questions this round raised but did not settle
 
-- **Thirteen containers became nine.** `docker ps` and `hub-status.sh` both
-  report nine running; `docs/runbook-cutover.md`'s baseline and its success
-  criterion 4 both say thirteen. Whether four were retired deliberately is
-  unestablished — and until it is, the cutover runbook's success criterion
-  cannot be evaluated.
+- ~~**Thirteen containers became nine.**~~ **Settled, 12 Sep.** The four were
+  the dev environment, torn down deliberately from the workstation on 7 Sep
+  at 23:57 (one SSH session, four `stopping restart-manager` lines in one
+  second) so the unit-based blast-radius gate would see everything that was
+  running — bead `homelab-bqo.14`, still open, should be closed with that.
+  Nothing wanted is missing. The runbook criterion now names the configured
+  set rather than a number.
 - **`ci.units` is still `[]`**, in `tenants.nix` and in the live
   `/etc/homelab/tenants.json`. So even after the CI adoption switch,
   `ac-host-ci.service` is claimed by no tenant and lands in no slice —

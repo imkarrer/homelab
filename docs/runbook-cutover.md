@@ -141,7 +141,7 @@ Captured 7 Sep 2026 with no races running, into `.cutover/` (gitignored — rege
 | | Baseline |
 |---|---|
 | Closure | `52rfi2kgix05hmyawfz4wj04pngcfn82-nixos-system-ac-box-26.05.20260829.c5c4a43` |
-| Containers | 13 |
+| Containers | 13 (9 prod + 4 dev; dev torn down 7 Sep 23:57 — see criterion 4) |
 | Running services | 28 |
 | Listening sockets | 46 lines of `ss -tulnp` |
 | Prometheus targets | 5, all `up`: cadvisor, docker-names, node, udr-fw, unpoller |
@@ -208,7 +208,7 @@ Do not attempt these changes during the cutover window. They require data migrat
 |--------|--------------------------|---------------|
 | Rename `ac-host` to `assetto` | The Buildkite pipeline slug (`isaac-karrer/ac-host`), its GitHub webhooks, and the CI agent's checkout path all encode the current name. This is the phase 7 rename, and it is code-only — see ADR 0003 on why `/var/lib/ac-host` stays regardless. | After phase 6, in its own change. |
 | Move `/var/lib/ac-host` | This is where Assetto races, series, content, and the player whitelist live. Moving the directory requires a data migration: rsync or a custom script that remaps references. Once you cut over, you cannot atomically move the data to a new location and rollback — the new system refers to the new path, and you cannot downgrade the reference. | Plan a data migration window separately, after system stability is proven. |
-| Rename the Docker Compose project | Docker orphans the 13 running containers if the project name changes. They continue to consume memory and network resources under the old names. The rebuild orphans them, but you must still `docker rm` them manually or lose disk and network capacity. | Never rename mid-cutover. Document the current project name and keep it stable. If renaming is needed, do it months later after a deprecation period. |
+| Rename the Docker Compose project | Docker orphans every running container if the project name changes. They continue to consume memory and network resources under the old names. The rebuild orphans them, but you must still `docker rm` them manually or lose disk and network capacity. | Never rename mid-cutover. Document the current project name and keep it stable. If renaming is needed, do it months later after a deprecation period. |
 | Rename a Docker container | `docker_name_exporter.py` maps container names to Grafana dashboards. Renaming a container breaks the dashboard until the exporter and Grafana are updated. The new dashboards will show no data, the old dashboards will vanish. | Document the current names (Buildkite already has them). Renaming containers is a data-plane change that can happen after system cutover, but only after the exporter, Prometheus, and Grafana are updated to the new names. |
 | Lift the observability module | The `observability` module references `../scripts/docker_name_exporter.py` and `../scripts/udr_fw_exporter.py`. If you lift observability to a separate flake input, those script paths break. The scripts must be migrated with the module, or inlined, or moved to a separate package. | Keep observability in the repo for now. If lifting is needed later, move the scripts first, update the references, then lift the module. |
 
@@ -219,7 +219,9 @@ You have successfully cut over when:
 1. `readlink -f /run/current-system` points at the closure you built and diffed in gate 1 — not at something rebuilt from another source. (Comparing `/run/current-system` to `/nix/var/nix/profiles/system` proves nothing after a switch: they are the same thing by definition.)
 2. `systemctl show -p NRestarts docker.service` is unchanged from the value you captured before the switch.
 3. `ac-host-static.service` is in the same state it was before, and its `ExecStop` has not run — check with `journalctl -u ac-host-static.service --since "-15 min"`, which must show no `docker rm -f`.
-4. `docker ps` shows the same 13 container names as `/tmp/ac-box-docker-before.txt`, with uptimes that predate the switch.
+4. `docker ps --format '{{.Names}}'` shows exactly the container names captured *immediately before* the switch (`docker ps --format '{{.Names}}\t{{.Status}}' > .cutover/<label>.containers`, committed — not `/tmp`, which does not survive a reboot), and each one's uptime is longer than the time since the switch. **The expected set is the configured one, not a fixed number**: one `ac-static-<id>` per lobby in `catalog/statics.json`, the `ac-host` compose sidecars (`auth`, `details`, `plugin`, `bot`), the `ac-host-ci` stack (`agent`, `minio`; `minio-init` is a one-shot and is expected `Exited (0)`), plus any `ac-race-*` in flight and — only if `ac-host-dev.service` was active before — the `ac-host-dev-*` sidecars and `ac-dev-static-*` lobby. Anything in the before-capture and absent after, or vice versa, blocks.
+
+   > This criterion originally said "the same 13 container names". Thirteen was the 7 Sep count *with the dev environment up*; it was torn down deliberately from the workstation at 23:57 that night (`journalctl -b -1` on the box: four `stopping restart-manager` lines in one second from one SSH session) so the unit-based blast-radius gate would see everything running — bead `homelab-bqo.14`. Nine is the configured set today. A fixed number was wrong on principle before it went stale: the count moves with the catalog, with live races, and with dev.
 5. All Prometheus targets report `up`, matching the before capture.
 6. You drove a lap and the telemetry was recorded.
 
@@ -254,7 +256,7 @@ would start: arcade-mindustry.service, grafana.service, systemd-tmpfiles-resetup
 
 Acceptance criteria satisfied:
 
-- `docker.service` — absent from the output entirely. The 13 containers are untouched.
+- `docker.service` — absent from the output entirely. Every running container is untouched.
 - `ac-host-static.service` — changed, but listed under *would NOT stop*. The module carries `stopIfChanged = false`, which is what its "never bounce this on nixos-rebuild" comment implements. **The race containers survive the switch.**
 
 Actual service impact, all on drainable tenants: Mindustry stops and starts (and begins working for the first time), Grafana blinks, `systemd-tmpfiles-resetup` and a journald restart are routine.
