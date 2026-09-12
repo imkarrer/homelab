@@ -1,8 +1,10 @@
 # ADR 0007: What Moves to the Management Interface
 
-**Status:** Proposed. The decision is the operator's; this records the options
-and a recommendation. It has a physical precondition that no commit can
-satisfy.
+**Status:** Accepted, 12 Sep 2026 — **option D, which the first draft did not
+list: keep the scope, plug nothing in, move nothing.** The operator delegated
+the call ("I don't see a decision I need to make; what cable do you need?").
+The answer to the second question is *none*, and here is why that is also the
+answer to the first.
 
 ## Context
 
@@ -34,9 +36,36 @@ The question this ADR exists to settle — because the repo names the interface'
 *role* and nothing else — is **which services move**, and the answer decides
 what `scope = "mgmt"` means in practice.
 
-## Options
+## Decision
 
-**A. Nothing. Retire `mgmt` from the schema.**
+`eno1` stays unplugged. `scope = "mgmt"` stays in the contract. No service
+moves. Three facts decide it:
+
+1. **A second NIC on the same LAN isolates nothing.** Every kids' machine
+   that can reach `192.168.1.50` can reach a second address on the same
+   segment. Interface-level separation without a VLAN is cosmetic.
+2. **A VLAN would isolate, and there is nothing to isolate from.** The threat
+   model on this box is the internet-facing Assetto Corsa ports, and those are
+   gated by the auth sidecar and the router's per-slot forwards (ADR 0004).
+   Grafana on the LAN is reachable by household machines, which is the
+   audience it has. A management VLAN buys separation from the kids' arcade
+   network — a threat this house does not have.
+3. **`mgmt` is not a dead word after all.** The first draft of this ADR argued
+   for retiring it as unused. It is used: `modules/tenant/tests/eval-metrics.nix`'s
+   `addressOnDownInterface` case needs exactly "a network the host declares
+   that has no address" to prove `metrics.nix` rejects a scrape target on it.
+   Retiring the scope would have meant inventing a fixture to replace a real
+   one, across fourteen files, to remove an option that costs nothing while
+   unused.
+
+If a reason for isolation appears — a tenant that should not see the LAN, or
+a LAN device that should not see the box's operator surfaces — the path is a
+VLAN on the Dream Router, `networks.mgmt.address` set by reference to what it
+assigns, and options B or C below. The cable goes in then, not now.
+
+## Options considered
+
+**A. Retire `mgmt` from the schema.**
 Honest simplification: one interface, one scope fewer, `ports.nix`'s mgmt
 assertion and `host.nix`'s dead entry deleted. Rejected only if the isolation
 below is actually wanted; if it is not, this is the right answer and the cheap
@@ -51,8 +80,8 @@ without a trip to it. Mitigated by keeping `sshd` on *both* interfaces during a
 transition and only closing the LAN side once the mgmt path has been used
 through at least one reboot.
 
-**C. `sshd` plus the observability UI (Grafana).** — RECOMMENDED if `mgmt` is
-kept at all.
+**C. `sshd` plus the observability UI (Grafana).** — the right shape *if*
+isolation is ever wanted.
 Same as B, plus Grafana's 3000 moves from `scope = "lan"` to `scope = "mgmt"`.
 Reasoning: Grafana is the one tenant-owned service that is for the operator, not
 for the LAN's users (kids' machines need SMB, rsync, the game ports, the
