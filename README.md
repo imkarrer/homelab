@@ -37,9 +37,11 @@ second spelling of any of them.
 **Namespace** is `homelab.*` — `homelab.host.*`, `homelab.tenants.<name>.*`,
 `homelab.tiers.<tier>.*`. Never `platform.*` or `box.*`.
 
-**Tenant names** are exactly: `assetto`, `arcade`, `agent-hub`,
-`observability`, `ci`. The Discord bot is a compose profile *inside* `assetto`
-(`profiles: ["bot"]`), not its own tenant — it splits out after phase 6.
+**Tenant names** are exactly: `assetto`, `bot`, `arcade`, `agent-hub`,
+`observability`, `ci`. The Discord bot became its own tenant on 12 Sep 2026
+(phase 6 landed, so the deferral expired); it is still a compose *profile*
+inside assetto's project because it shares assetto's state directory by
+design -- the tenant declaration says so rather than pretending otherwise.
 
 **Unit and container names never change.** `docker_name_exporter.py` maps
 container names to Grafana dashboards; `arcade-freeciv`, `arcade-mindustry`,

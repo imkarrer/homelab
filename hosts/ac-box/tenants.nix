@@ -1,4 +1,4 @@
-# The five tenants sharing ac-box, declared against modules/tenant/schema.nix.
+# The six tenants sharing ac-box, declared against modules/tenant/schema.nix.
 # Every field here was verified live on the box (ss -tulnp, docker ps,
 # systemctl list-units, and the tenants' own source) on 7 Sep 2026 — see the
 # beads homelab-bqo.4 report for the full port table and the discrepancies
@@ -182,6 +182,89 @@
         drain = "python3 /var/lib/ac-host/src/scripts/acctl.py --env prod drain";
         resume = "python3 /var/lib/ac-host/src/scripts/acctl.py --env prod resume";
       };
+
+      metrics = null;
+    };
+
+    # The Discord bot, its own tenant as of 12 Sep 2026 -- README's "splits out
+    # after phase 6" deferral, honoured. It was a compose profile inside
+    # assetto because it shares assetto's state (it edits the whitelist) and
+    # assetto's compose project; it is a tenant because it has a lifecycle,
+    # secrets and a job of its own that assetto's declaration could not say.
+    #
+    # And the job matters more than a chat bot's usually does: bot/downtime.py
+    # runs the 03:00 countdown and, at mark 0, queues DOWNTIME=1 -- the build
+    # that applies the tenant tree and recycles the lobbies. It holds
+    # BUILDKITE_API_TOKEN for exactly that. If it is not running at 02:59,
+    # the tenant tree does not deploy that night. The deploy path for the
+    # system closure (modules/deploy) is a systemd timer and does not depend
+    # on it; the deploy path for the tenant tree does.
+    bot = {
+      description = "Discord bot: player whitelist and verification, the status page, and the 03:00 downtime countdown that queues the tenant-tree deploy.";
+
+      # critical, because that is where its container already runs --
+      # compose/docker-compose.yml sets cgroup_parent: critical.slice on the
+      # bot service -- and phase 6 declares what is, it does not re-tier.
+      # interactive would be the honest tier for a Discord client that needs
+      # no CPU priority: 0.3 GiB RSS, near-zero CPU, and its one time-critical
+      # act is an HTTP POST. Moving it is a one-line cgroup_parent change in
+      # ac-host's compose file plus this word; the next ci_downtime `up -d
+      # --build bot` recreates the container into the new slice. Left for a
+      # deliberate change, not a side effect of naming the tenant.
+      tier = "critical";
+
+      # Empty, and that is a finding rather than an omission: the bot has NO
+      # systemd unit. Docker's `restart: unless-stopped` brings it up at boot
+      # (12:37:41 on 12 Sep, one second after dockerd) and
+      # scripts/ci_downtime.py runs `compose --profile bot up -d --build bot`
+      # nightly. Two owners, neither of them systemd -- so the unit-based
+      # blast-radius gate cannot see it, the same gap bead homelab-bqo.14
+      # named for the dev stack. ac-host's module is where a unit would live
+      # (a oneshot running that compose command, RemainAfterExit, the shape
+      # modules/ci uses); when one exists it goes here.
+      units = [ ];
+
+      # No ports. It is a Discord client: outbound WebSocket and HTTPS only,
+      # nothing bound. Verified against `ss -tulnp` -- every socket on the box
+      # is accounted for by the other five tenants.
+
+      # assetto's state directory, declared here too, on purpose. The bot's
+      # data IS assetto's data -- /data/whitelist.json and steam_requests.json
+      # are the files it exists to edit -- and a separate directory would be
+      # a lie about where the state lives. Nothing asserts state-dir
+      # uniqueness across tenants (schema.nix), and this is the case that
+      # shows why it should not: shared state is real and should be declared
+      # as shared. backup = false because assetto already backs the directory
+      # up; a second true would not back it up twice, but it would make the
+      # inventory claim two owners of one backup.
+      state = {
+        dirs = [ "/var/lib/ac-host" ];
+        backup = false;
+      };
+
+      # Names only. discord-token and buildkite-api-token arrive as compose
+      # env (${DISCORD_TOKEN}, ${BUILDKITE_API_TOKEN} from compose/.env);
+      # github-token is a file at /var/lib/ac-host/secrets/github-token.
+      # None is provisioned by anything in this repo yet -- README says
+      # credentials go to sops-nix, and none do. Declaring the names is what
+      # lets that migration know what it is migrating.
+      secrets = [
+        "discord-token"
+        "buildkite-api-token"
+        "github-token"
+      ];
+
+      needsDocker = true;
+
+      # A bounce is a Discord reconnect, seconds, and the countdown state is
+      # recomputed from the clock on start -- so drainable. The one window
+      # where a bounce hurts is roughly 02:45-03:05, when a restart could miss
+      # the mark-0 DOWNTIME=1 post. Not encoded as a busyCheck: modules/deploy
+      # fires at exactly 03:00 and consults busyCheck only for non-drainable
+      # tenants, so the honest encoding would either be ignored or would
+      # defer every closure deploy forever. Recorded here instead, for the
+      # human planning a manual bounce.
+      quiet.drainable = true;
 
       metrics = null;
     };
