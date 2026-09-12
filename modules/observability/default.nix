@@ -207,6 +207,10 @@ in
         "UNIFI_USER=unpoller"
         "UNIFI_PASS_FILE=${unpollerPassFile}"
         "UDR_FW_BIND=127.0.0.1:9131"
+        # How often the exporter itself asks the router, independent of how
+        # often Prometheus scrapes it. Firewall hit counters do not need finer
+        # than this, and every call is work for the router's 2 GB Network app.
+        "UDR_FW_POLL_SECONDS=300"
       ];
     };
   };
