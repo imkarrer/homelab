@@ -14,8 +14,12 @@
         address = "192.168.1.50";
         prefixLength = 24;
       };
-      # Cabled but DOWN. The dual-NIC runbook brings this up as management.
-      # Nothing may be scoped to it until it has an address.
+      # NO-CARRIER as of 12 Sep 2026 (`cat /sys/class/net/eno1/carrier` = 0,
+      # speed -1, NetworkManager "unavailable"): administratively up, no link.
+      # An earlier comment said "cabled but down"; the box cannot confirm a
+      # cable, only that nothing is on the other end of it. What moves here
+      # once it has a link is ADR 0007's decision. Nothing may be scoped to it
+      # until it has an address, and it cannot have one until it has a link.
       mgmt = {
         interface = "eno1";
         address = null;
