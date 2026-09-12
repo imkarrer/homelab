@@ -256,12 +256,22 @@ expected-throw negatives, with `NIX_PATH` both cleared and poisoned. Suite
 runtime dropped 18.0s → 3.8s, because three lib-only harnesses no longer
 instantiate the whole package set.
 
-**Open follow-up.** Exposing the harnesses as flake `checks` (F4's neighbour)
-would let `nix flake check` cover them directly. The blocker is real: a fixture
-that must *throw* cannot be a check that must *succeed* without inverting it
-through `builtins.tryEval` and asserting `success == expected`. That inversion
-belongs in the harnesses, and it would make `run-eval-tests.sh` largely
-redundant — a separate design task, not a tidy-up.
+**Follow-up done — `2ac2f37`.** The harnesses are flake `checks`
+(`eval-ci`, `eval-tenant`, `eval-tenant-metrics`, `eval-tenant-quiet`,
+`eval-tenant-resources`); one shared inversion in
+`modules/tenant/tests/check.nix`; `run-eval-tests.sh` reduced to a
+human-readable front-end; the pipeline's separate harness step folded into
+`flake check`. Evaluation-only, ~1s for all five.
+
+Doing it found a **defect in `e4bf36f`**, pushed earlier the same day: three of
+the four new metrics negatives were throwing a *definition tie* — the case set
+`agent-hub.metrics.address` at the same priority as the shared fixture — before
+`metrics.nix`'s assertion ever ran. The runner said "expected throw, got throw"
+and passed them; the commit message claimed they "prove the assertion bites",
+and they did not. Fixed with `mkForce`, and `check.nix` now requires a negative
+case's `.messages` to be non-empty — the throw must come *through the module's
+own verdict*. A test that fails for the wrong reason is a test that proves
+nothing, and until today nothing in this tree could tell the difference.
 
 **F8 — the contract could not claim any unit nixpkgs already sliced. Fixed.**
 Found by doing the arcade work, not by reading: `resources.nix` emitted

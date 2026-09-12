@@ -316,7 +316,7 @@ do those. Ordered roughly by what unblocks what.
 | 11 | `eno1` down; `mgmt` scope unused | Dual-NIC runbook, **plus an ADR** deciding what moves to `mgmt` — the repo names the interface's role and nothing else | **Human.** Interface work on the box; the placement decision is unmade. |
 | 12 | `agent-hub` metrics unscraped | `metricsEndpoint.address` | **Done** — `e4bf36f`. Loopback default keeps all five existing jobs byte-identical; new job `agent-hub` at the LAN address; a non-loopback address must be one the host declares. Lands on next switch. |
 | 13 | `agent-hub` body ungated | Turn its enable on in the composition | **Done** — enable is true in the composition, so the composed eval reaches the body. |
-| 14 | Harnesses not flake `checks` | `tryEval` inversion in the harnesses | **Open.** Design task; makes `run-eval-tests.sh` largely redundant. |
+| 14 | Harnesses not flake `checks` | `tryEval` inversion in the harnesses | **Done** — `2ac2f37`. One shared inversion; the runner is a front-end. Found three negatives in `e4bf36f` passing for the wrong reason (a definition tie, not the assertion) and now requires a throw to come through the module's own verdict. |
 | 15 | L2 not exported as `nixosModules` (F4) | `flake.nix` | **Done** — `0a58999`. |
 | 16 | `Configuration Revision: Unknown` | `system.configurationRevision = self.rev or self.dirtyRev` | **Done** — `0a58999`, forced by the cache-stale switch: a stamp would have caught it instantly where the heuristic could not. The no-op proof survives via `extendModules { system.configurationRevision = lib.mkForce null; }` on both sides. Lands on next switch. |
 | 17 | `/etc/nixos/configuration.nix` stale | Replace with a `throw` | **Done 12 Sep.** |

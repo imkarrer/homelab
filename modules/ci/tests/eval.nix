@@ -1,8 +1,9 @@
-# Eval harness for the DRAFT modules/ci/default.nix.
+# Eval harness for modules/ci/default.nix.
 #
-# Nothing imports modules/ci/ into hosts/ac-box (deliberately -- see the
-# module's own header), so this is not, and cannot be, a full system
-# evaluation. It only proves the module's own logic evaluates cleanly and
+# The module is live on ac-box (generation 31, 12 Sep 2026), so the real
+# composition IS evaluated -- by `nix flake check`'s ac-box toplevel. This
+# harness is the other half: it is not a full system evaluation and does not
+# try to be. It only proves the module's own logic evaluates cleanly and
 # produces the expected shape against a stub of the systemd option surface
 # it touches -- same spirit as modules/tenant/tests/eval-resources.nix
 # proving resources.nix against tests/stub-systemd.nix rather than the real
