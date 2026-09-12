@@ -286,12 +286,12 @@ do those. Ordered roughly by what unblocks what.
 | # | Gap | Closes it | Status |
 | --- | --- | --- | --- |
 | 1 | 25 commits committed, not on the box | One `nixos-rebuild switch --flake` **after** the CI adoption sequence (`modules/ci` HAZARD 1) | **Human.** Runbooks exist. Lands #3, #4, #5, #6 together. |
-| 2 | Closure has no deploy path | ADR 0006: `queue-closure` step + `modules/deploy` | Applying half **built, inert, tested**. Staging half **blocked**: the agent mounts only `/var/lib/ac-host`; a `/var/lib/homelab` bind mount must land in *both* the compose file and `modules/ci`. |
+| 2 | Closure has no deploy path | ADR 0006: `queue-closure` step + `modules/deploy` | Applying half **built, inert, tested**. Staging half **blocked**: the agent mounts only `/var/lib/ac-host`; a `/var/lib/homelab` bind mount must land in `ac-host`'s `docker-compose.buildkite.yml` (one place — `modules/ci` runs that file, it declares no volumes). |
 | 3 | Fence is `28-55` on both tiers | `3fef4fe` | Committed, undeployed → #1 |
 | 4 | `agent-hub-llm` absent; `tcp/8100` open with nothing behind it | `45f67ab`, `3fef4fe` | Committed, undeployed → #1 |
 | 5 | CI stack hand-started, no unit | `4257aea` + HAZARD 1 | Committed, undeployed → #1. **Human** runs the adoption sequence first. |
 | 6 | Tier shares are the old defaults | `45f67ab`, `0de8c09` | Committed, undeployed → #1 |
-| 7 | `ci.units = []` — `ac-host-ci.service` lands in no slice even after #5 | Add it to `ci.units` | **Open.** Named in `modules/ci`'s header; not made. |
+| 7 | `ci.units = []` — `ac-host-ci.service` lands in no slice even after #5 | Add it to `ci.units` | **Done** — `214cfdd`. Rides #1. |
 | 8 | Bot is a compose profile inside assetto | Split into a `bot` tenant | **Open.** Design decision: name, ports, quiet policy. Deferral expired at phase 6. |
 | 9 | `agent-hub` runner off | sops-backed `githubTokenFile` (`homelab-bqo.10`) + runner image | **Open.** Depends on #10. |
 | 10 | Secrets hand-placed | sops-nix | **Open.** No provisioning exists yet. |
@@ -302,7 +302,7 @@ do those. Ordered roughly by what unblocks what.
 | 15 | L2 not exported as `nixosModules` (F4) | `flake.nix` | **Open.** Small; matters only once there is a second host. |
 | 16 | `Configuration Revision: Unknown` | `system.configurationRevision = self.rev or self.dirtyRev` | **Human ruling.** Retires the "compare drvPath before/after" no-op proof this repo leans on. Buys speed only; `HUB_STATUS_EXACT=1` is already exact. |
 | 17 | `/etc/nixos/configuration.nix` stale | Replace with a `throw` | **Human.** `docs/runbook-decommission.md` item 1. Gate 0 passes. |
-| 18 | `wpa_supplicant` on a box with no wireless | `networking.wireless.enable = lib.mkForce false` in `network.nix` | **Open.** Described in the runbook; `mkForce` is required, not stylistic. Deploys via #1. |
+| 18 | `wpa_supplicant` on a box with no wireless | `networking.wireless.enable = lib.mkForce false` in `network.nix` | **Done** — `214cfdd`. Rides #1. |
 | 19 | Booted ≠ current | Reboot, **last**, after #5 — nothing restarts the CI containers between `compose down` and the switch | **Human.** No kernel change pending; general hazard only. |
 | 20 | 13 containers → 9, unexplained | Establish whether four were retired deliberately | **Open.** Until settled, the cutover runbook's success criterion 4 cannot be evaluated. |
 | 21 | `agent-push=yes` on homelab will mean "schedule a switch" once #2 is live | Reconsider the flag alongside #2 | **Human decision.** |

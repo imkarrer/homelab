@@ -98,11 +98,14 @@ never call `nixos-rebuild`.
 > `buildkite-nix` named volumes. `/var/lib/homelab` is not among them, so a
 > `queue-closure` step as described would fail on its first write.
 >
-> The fix is a bind mount, and it has to land in **two** places or they drift:
-> `compose/docker-compose.buildkite.yml` in the `ac-host` repo, which is what
-> the hand-started stack runs today, and `modules/ci/default.nix`, which is
-> what runs it once adopted. That makes the staging half depend on the CI
-> adoption sequence (HAZARD 1) rather than being independent of it.
+> The fix is a bind mount in `compose/docker-compose.buildkite.yml`, in the
+> `ac-host` repo. **One place, not two** — this was first written as "both the
+> compose file and `modules/ci`", but `modules/ci` declares no volumes; it runs
+> the compose file, which does. So the mount is a tenant-tree change that
+> lands through `ac-host`'s own pipeline, and `modules/ci` picks it up for free
+> once adopted. It still depends on the CI adoption sequence (HAZARD 1) to be
+> *meaningful*, since the hand-started stack would also need restarting to see
+> the new mount.
 >
 > The tempting shortcut — putting `pending-closure.json` under
 > `/var/lib/ac-host`, which is already mounted — is rejected. That directory is
