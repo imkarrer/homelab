@@ -323,9 +323,23 @@ do those. Ordered roughly by what unblocks what.
 | 18 | `wpa_supplicant` on a box with no wireless | `networking.wireless.enable = lib.mkForce false` in `network.nix` | **Done** — gone at gen 31. |
 | 19 | Booted ≠ current | Reboot | **Human, now safe** — #5 is done, so `ac-host-ci` returns on boot. No kernel change pending. |
 | 20 | 13 containers → 9, unexplained | Establish whether four were retired deliberately | **Settled — deliberate.** The four were the dev environment (`ac-host-dev-*` ×3, `ac-dev-static-dev-blackhawk`), torn down from the workstation 7 Sep 23:57 so the unit-based gate would see everything running (bead .14). Criterion 4 rewritten to name the configured set, not a number. |
-| 21 | `agent-push=yes` on homelab will mean "schedule a switch" once #2 is live | Reconsider the flag alongside #2 | **Human decision.** |
+| 21 | `agent-push=yes` on homelab will mean "schedule a switch" once #2 is live | Reconsider the flag alongside #2 | **Decided `ask`** — `fd12f93`. Flip to `yes` once the timer has been watched firing. |
+| 22 | **`backup = true` is declared by four tenants and implemented by nothing.** No backup job exists for `/var/lib/ac-host` (races, series, whitelist), `/var/lib/monitoring`, `/var/lib/arcade` (saves) or `/var/lib/agent-hub`. A dead disk loses them. | A backup module consuming `tenants.<n>.state.backup` — the contract already says what to back up; nothing reads it | **Open. The largest remaining gap.** Found 13 Sep: the same "declared intention, no implementation" shape as the `enable=false` port and the gitignored hardware file. |
+| 23 | Seven secrets still hand-placed | sops, same shape as `arcade-smb-password` | **Open**, unblocked by `a3375be`. Do them after tonight's activation proves the first one. `/var/lib/ac-host/.env` and `.env.buildkite` are `sops.templates` (secret keys + literal config). |
+| 24 | **A push to `home-arcade`, `agent-hub`, or a change to `ac-host`'s `.nix` module does not reach the box** until someone bumps homelab's `flake.lock`. "Push to tenant → deployed" is false for module changes. | A scheduled lock bump — a Buildkite cron step that runs `nix flake update <input>`, gates, and pushes homelab — or a step in each tenant pipeline that bumps the hub on green | **Open.** The last open edge in the GitOps loop. |
+| 25 | Buildkite pipeline *objects* (which repo, branch, steps file) live in the Buildkite UI; only the steps are in git | Pipeline-as-code via the Buildkite API or Terraform provider | **Open.** Low urgency; a UI misclick could silently detach a pipeline from its steps file. |
+| 26 | The Dream Router's DHCP reservation for `192.168.1.50` and the UniFi settings are hand-set | Documented in a runbook at minimum; `unifi_pf.py` already drives the forwards from code | **Open.** `host.nix` declares the address; nothing declares that the router will hand it out. |
+| 27 | Pre-flake `nixos-26.05` channel still on the box; `NIX_PATH` references it | `nix.channel.enable = false` in `modules/platform/nix.nix` | **Open.** Harmless to the closure; a stale channel is one more thing that is not what the flake says. |
+| 28 | Hand-placed files in `/root`: `fetch-model.sh`/`.log`, `result` (a human's GC root), `.docker` | `fetch-model.sh` reconciled into `agent-hub` `bb6a7db` — git's copy fetched a *different, never-deployed* model. `/root/result` pins a stale closure against GC. | **Partly done.** The script is in git; the `/root` copies and the GC root remain, harmless. |
+| 29 | The loop has not yet closed end to end | Tonight: 03:00 tenant tree → 03:30 timer (nothing staged, exit 0) → 04:00 remount. Then a push to homelab → `queue-closure` writes → 03:30 next night → first automatic switch | **Pending.** `HUB_STATUS_EXACT=1` after Sunday 03:30 is the proof. |
 
 ### What the delta says, read as a whole
+
+Rows 1 and 3–8, 10 (first secret), 11–18, 20–21 closed 12 Sep. What remains
+divides cleanly: **rows 22–24 are the substance** — nothing backs up the state,
+seven secrets are still hand-placed, and module-only tenants need a hand to
+reach the box; **25–28 are hygiene**; **29 is tonight**. Rows 22 and 24 are
+the two that would make a rebuild-from-git or a push-to-deploy claim false.
 
 Rows 1 and 3–7, 13, 17, 18 closed on 12 Sep in two switches. Rows 8–10 are the
 tenant model finishing what phase 6 started. Rows 11–12 are the two schema words — `mgmt`, `metricsEndpoint.address`
