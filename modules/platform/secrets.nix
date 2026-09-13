@@ -216,6 +216,13 @@
   # two jobs, not one. PartOf= propagates stop and restart but never start.
   # So: stay active after the copy, and be restarted rather than stopped and
   # started, and the one restart job reaches the bot as a try-restart.
+  #
+  # The FIRST switch is the inactive case: ac-host-env does not exist yet,
+  # so it is started, not restarted, and PartOf carries nothing to the bot.
+  # Seen 13 Sep 2026 at gen 35: .env was rewritten, the bot stayed on its
+  # old env until the reboot that followed. Later switches whose render
+  # differs do bounce it; if no reboot is coming, `systemctl restart
+  # ac-host-env` does the same by hand.
   systemd.services.ac-host-env = {
     description = "Install the sops-rendered /var/lib/ac-host/.env as a regular file";
     wantedBy = [ "multi-user.target" ];
@@ -237,6 +244,10 @@
         exit 0
       fi
       # install reads through the symlink and writes a new regular file.
+      # install chmods after create, so without this the tmp file exists at
+      # the umask default for an instant -- in a directory the agent container
+      # bind-mounts.
+      umask 077
       install -m 0600 -o root -g root "$src" "$dst.tmp"
       mv -f "$dst.tmp" "$dst"
     '';

@@ -1,4 +1,4 @@
-# Architecture
+# ArchitectureFirst switch installs the rotated Discord and Buildkite tokens from sops (the box's copies are the dead ones from bead `.49`), so it changes the file on purpose -- but that first switch *starts* the copy unit rather than restarting it, and `PartOf=` propagates only restarts, so the bot stayed on its old env until the reboot of 13 Sep; every later switch with a changed render does bounce it. |
 
 Two architectures, and the distance between them.
 
