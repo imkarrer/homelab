@@ -7,11 +7,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1789255202,
-        "narHash": "sha256-bRd0RNUHU4sTXb3wAJigSy4bK3LrA7SUaaRYKpJSG6k=",
+        "lastModified": 1789256826,
+        "narHash": "sha256-WLUMxe8ugPBdBZkrLhK9p2a1IzmfqsqEDCpvFPNDwbg=",
         "owner": "imkarrer",
         "repo": "ac-host",
-        "rev": "8c456cb9157bd7c2289c1e564f73eb1d583b96fd",
+        "rev": "501d7e9cd447178dff90b7f3f877976438202e4c",
         "type": "github"
       },
       "original": {
@@ -27,11 +27,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1788840560,
-        "narHash": "sha256-QNh4xcuUATD8Epg3z8UKxutjx34+0sshC6h6bAn/ILI=",
+        "lastModified": 1789264507,
+        "narHash": "sha256-HT1oFeavuXYPbzPHp5Ef7T5LTBignK3Kvy6P/XRN+a0=",
         "owner": "imkarrer",
         "repo": "agent-hub",
-        "rev": "a2b781eda7a984b0f2cc333bc32fccf98a264086",
+        "rev": "bb6a7db48011c00a012625b40da4982faca183a0",
         "type": "github"
       },
       "original": {
@@ -42,11 +42,11 @@
     },
     "home-arcade": {
       "locked": {
-        "lastModified": 1789235413,
-        "narHash": "sha256-cGd5W1nl1hxyuvok67Za9c0T/RRrpGYttKg7rKQvkVQ=",
+        "lastModified": 1789257000,
+        "narHash": "sha256-0dGIxJS4Kb5kz0LMaVPUk9welUTDbCJn5iupKk0Imew=",
         "owner": "imkarrer",
         "repo": "home-arcade",
-        "rev": "2b396af7c7677d1afc8d08ddcfe764665dac87a0",
+        "rev": "711259eba15c59fb4d97b3c60c31f69f49821e1a",
         "type": "github"
       },
       "original": {
