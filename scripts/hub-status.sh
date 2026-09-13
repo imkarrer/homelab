@@ -46,6 +46,20 @@ while IFS='|' read -r name path remote deploy push; do
   [ "$dirty" != 0 ] && note "$name: $dirty uncommitted change(s)"
   [ "$untrk" != 0 ] && note "$name: $untrk untracked file(s)"
   printf "%-18s %-24s %5s %5s %s\n" "$name" "$br" "$dirty" "$untrk" "$rel"
+  # Worker worktrees (hub-worktree.sh) sit outside this tree, so the counts
+  # above do not see them. A branch main does not contain is unlanded work
+  # in the same sense as an unpushed commit: nothing has gated it.
+  # Process substitution, not a pipe: note() must run in this shell.
+  while read -r wpath wbr; do
+    wah=$(git -C "$path" rev-list --count "main..$wbr" 2>/dev/null || echo 0)
+    wdirty=$(git -C "$wpath" status --porcelain 2>/dev/null | wc -l)
+    [ "$wah" != 0 ] && note "$name: worktree $wbr has $wah commit(s) main does not - gate and merge, or drop it"
+    [ "$wdirty" != 0 ] && note "$name: worktree $wbr has $wdirty uncommitted change(s)"
+    printf "%-18s %-24s %5s %5s %s\n" "  ↳ worktree" "$wbr" "$wdirty" "" "ahead of main $wah"
+  done < <(git -C "$path" worktree list --porcelain 2>/dev/null | awk '
+    /^worktree /{w=$2} /^branch /{b=$2; sub("refs/heads/","",b)}
+    /^$/{ i++; if (i>1 && b!="") print w " " b; w=""; b="" }
+    END{ if (w!="" && b!="") { i++; if (i>1) print w " " b } }')
 done < "$REG"
 
 echo

@@ -88,9 +88,7 @@ which is why the two files above are tracked in a public repo.
 
 ## Working agreements for automated changes
 
-- Never hand-edit ac-box. Read-only SSH inspection is always fine. Migration exception, until ADR 0006's deploy unit is enabled: an agent may apply a pushed revision with nixos-rebuild switch --flake github:imkarrer/homelab/<full-sha>#ac-box, and may run box-side steps a runbook in docs/ spells out verbatim. Two conditions: the sha must already be on origin, and the agent must stop — not judge — at a runbook's abort criteria. ac-host-static.service or docker.service under stop/restart in dry-activate is an abort, full stop.
-- **Do not run `bd` write commands.** The tracker is updated by one coordinator
-  to avoid Dolt lock contention between parallel workers.
-- Prove Nix work with `nix eval` / `nix flake check` in WSL. The closure gates
-  (`diff-closures`, `switch-to-configuration dry-activate`) run on the box, by
-  a human, in the window.
+`AGENTS.md` is the operating contract: roles (supervisor / worker), the
+gate, the read-only rule for ac-box and its one migration exception, which
+tenants may be bounced, and the tracker policy. It is binding for agents and
+a fair summary for humans.

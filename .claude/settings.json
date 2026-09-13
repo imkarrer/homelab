@@ -11,5 +11,29 @@
         "matcher": ""
       }
     ]
+  },
+  "permissions": {
+    "allow": [
+      "Bash(bash scripts/hub-status.sh:*)",
+      "Bash(bash scripts/hub-gates.sh:*)",
+      "Bash(bash scripts/hub-worktree.sh list:*)",
+      "Bash(bash scripts/hub-ask.sh:*)",
+      "Bash(bash /home/nixos/src/homelab/scripts/hub-ask.sh:*)",
+      "Bash(bash /home/nixos/src/homelab/scripts/hub-status.sh:*)",
+      "Bash(bash /home/nixos/src/homelab/scripts/hub-gates.sh:*)",
+      "Bash(bd ready:*)",
+      "Bash(bd show:*)",
+      "Bash(bd list:*)",
+      "Bash(bd search:*)",
+      "Bash(bd stats:*)",
+      "Bash(bd memories:*)",
+      "Bash(nix eval:*)",
+      "Bash(nix flake check:*)",
+      "Bash(nix flake metadata:*)",
+      "Bash(git status:*)",
+      "Bash(git log:*)",
+      "Bash(git diff:*)",
+      "Bash(git show:*)"
+    ]
   }
 }

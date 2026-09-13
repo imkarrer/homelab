@@ -1,14 +1,72 @@
 # Agent instructions — homelab
 
-Read `README.md` first. Its **Pinned conventions** section is binding: option
-namespace, tenant names, port scopes, unit-name stability, tier semantics,
-state-path preservation, nixpkgs ownership, and the public/private boundary are
-all already decided.
+This repo is the hub for four source trees (`hub/repos.psv`), the platform
+layer of `ac-box`, and the single `bd` tracker for work landing in any of
+them. `README.md`'s **Pinned conventions** are binding: namespace, tenant
+names, port scopes, unit-name stability, tier semantics, state paths,
+nixpkgs ownership and the public/private boundary are decided; a module does
+not re-litigate them.
 
-Its **Working agreements for automated changes** section is also binding, and
-is the short version:
+## Roles
 
-Never hand-edit ac-box. Read-only SSH inspection is always fine. Migration exception, until ADR 0006's deploy unit is enabled: an agent may apply a pushed revision with nixos-rebuild switch --flake github:imkarrer/homelab/<full-sha>#ac-box, and may run box-side steps a runbook in docs/ spells out verbatim. Two conditions: the sha must already be on origin, and the agent must stop — not judge — at a runbook's abort criteria. ac-host-static.service or docker.service under stop/restart in dry-activate is an abort, full stop.
+Two roles, and every session is one of them:
+
+- The **supervisor** is the interactive session. It owns `bd`, the merge
+  into `main`, `git push`, and the decision to dispatch. Its loop is
+  `.agents/skills/homelab-supervise/`.
+- A **worker** is a subagent dispatched with one bead in one tree, in its
+  own worktree (`scripts/hub-worktree.sh add <tree> <bead>`, branch
+  `wt/<bead>`). It edits, commits on that branch, runs the gate against
+  the worktree, and returns a handoff. Four definitions in
+  `.agents/agents/`: `homelab-worker` (changes), `homelab-local-worker`
+  (changes drafted by agent-hub's model on ac-box — the `homelab-route` skill
+  says which tasks; `scripts/hub-ask.sh` is the wire), `homelab-inspector`
+  (read-only facts), `homelab-reviewer` (a diff against the rules below).
+
+Skills live in `.agents/skills/`. Both directories are harness-agnostic
+Markdown; `.claude/` holds only symlinks to them so Claude Code discovers
+them, and another harness points at `.agents/` directly.
+
+`bd prime` runs at session start and says *you MUST `bd close` before
+done*. That sentence is addressed to the supervisor. A worker's tracker
+update is its handoff; one writer keeps the Dolt tracker coherent.
+
+## The gate
+
+```bash
+bash scripts/hub-gates.sh <repo>     # homelab ~7s; green is the literal PASS line
+```
+
+Nothing is done, reported or committed red. The `homelab-verify` skill has
+the rest: the harness check, `NIX_CONFIG` for a bare `nix`, and how to show a
+refactor was a no-op (`drvPath` unchanged) rather than merely evaluable.
+
+## Where the rules live
+
+| Question | Answer lives in |
+| --- | --- |
+| What is decided and not up for discussion | `README.md` → Pinned conventions |
+| Why it was decided | `docs/adr/` |
+| What the box runs, every service classified | `docs/current-state.md` |
+| How code reaches the box, and the delta to the target | `docs/architecture.md` (Part III rows carry bead ids) |
+| What to do at the box, step by step | `docs/runbook-*.md` |
+| Why CI is shaped the way it is, and what must never bounce | `modules/ci/default.nix` HAZARD 1 and 2 |
+| What is actionable now | `bd ready` — the one open-work list |
+
+## ac-box is read-only
+
+Never hand-edit ac-box. Read-only SSH inspection is always fine. Migration
+exception, until ADR 0006's timer has been watched firing: an agent may apply
+a pushed revision with `nixos-rebuild switch --flake
+github:imkarrer/homelab/<full-sha>#ac-box`, and may run box-side steps a
+runbook in `docs/` spells out verbatim. Two conditions: the sha must already
+be on origin, and the agent must stop — not judge — at a runbook's abort
+criteria. `ac-host-static.service` or `docker.service` under stop/restart in
+`dry-activate` is an abort, full stop.
+
+The closure gates (`diff-closures`, `switch-to-configuration dry-activate`)
+run on the box, by `modules/deploy` in the window. Prove Nix work in WSL with
+the gate above.
 
 ## Which tenants may be disrupted
 
@@ -46,40 +104,28 @@ authoritative claim on where that unit runs. **The cost:** a typo in a `units`
 list silently relocates some other module's unit instead of failing loudly.
 Keep those lists short, explicit and hand-checked; never derive or glob them.
 
-## Issue tracker
-
-Beads (`bd`), rooted in this repo. This is the single tracker for the whole
-multi-repo refactor, including work that lands in `home-arcade`, `agent-hub`
-and `ac-host`.
-
-```bash
-bd ready              # what is actionable
-bd show <id>          # detail
-```
-
 ## Hub
 
-This repo is the hub for all four source trees. `hub/repos.psv` is the
-registry: where each tree lives, whether it reaches ac-box, and whether an
-agent may push it unattended.
-
 ```bash
-bash scripts/hub-status.sh        # three-way state: box vs origin vs WSL trees
-bash scripts/hub-gates.sh <repo>  # the gates CI will run, before pushing
+bash scripts/hub-status.sh        # three-way state: box vs origin vs WSL trees, ~2s
 ```
 
-Run `hub-status.sh` before acting. It answers what the box runs, what is on
-origin, and what is uncommitted here — in one call, so none of it gets
-re-derived by hand. Exit 1 prints what is unreconciled.
+Run it before acting and after landing. It answers what the box runs, what
+is on origin, and what is uncommitted here — in one call, so none of it gets
+re-derived by hand. Exit 1 prints what is unreconciled; the `homelab-hub`
+skill defines each verdict line. A hand-edit on ac-box is a debugging step,
+never a resting state: land it the same session.
 
-A hand-edit on ac-box is a debugging step, never a resting state: land it the
-same session. `hub-status.sh` reports the box tree diverging from the sha it
-claims to run, which is how such an edit is found before an rsync destroys it.
+Two sessions never share a working tree. Registry checkouts under
+`/home/nixos/src/<tree>` are where the supervisor merges and pushes; every
+other writer gets a worktree, and `hub-status.sh` reports a worktree branch
+main does not contain as unlanded work. `hub-gates.sh <tree> <path>` gates
+a worktree; `hub-worktree.sh rm` refuses while dirty and keeps the branch
+while unmerged.
 
-It also compares ac-box's running **system closure** against this repo's HEAD.
-That is a separate question from the tenant tree above, with a separate answer:
-`hub/repos.psv` marks homelab `deploy=none`, so committing and pushing does not
-reach the box — only a human `nixos-rebuild switch --flake` does. Green there
-means no commit is newer than the last switch, which is consistent with the box
-being current, not proof of it; `HUB_STATUS_EXACT=1 bash scripts/hub-status.sh`
-proves it by comparing store paths, at ~7s instead of ~2s.
+Every tree reaches the box through git (ADR 0006): a green `homelab` build
+stages its sha in `/var/lib/homelab/pending-closure.json` and
+`homelab-deploy.timer` switches at 03:30; `ac-host` stages through
+`queue-prod` and a human applies; module-only trees arrive by bumping
+`flake.lock`. `hub/repos.psv` says per tree whether an agent pushes green
+work unattended (`yes`) or asks. The `homelab-land` skill is the procedure.

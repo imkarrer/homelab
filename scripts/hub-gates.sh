@@ -2,7 +2,9 @@
 # Run the gates Buildkite will run, locally, before pushing.
 # queue-prod sits behind `wait: ~`, so a red gate blocks every deploy --
 # catching it here costs seconds, catching it in CI costs a stalled pipeline.
-# Usage: hub-gates.sh [repo]   (default: ac-host)
+# Usage: hub-gates.sh [repo] [path]   (default: ac-host, at its registry path)
+#   path: gate a worktree of <repo> instead of the registry checkout --
+#   the registry still names the flake input to override for module-only trees.
 set -uo pipefail
 export NIX_CONFIG="experimental-features = nix-command flakes"
 
@@ -11,6 +13,10 @@ REG="${HUB_REGISTRY:-$HUB/hub/repos.psv}"
 REPO="${1:-ac-host}"
 PATHX=$(awk -F'|' -v r="$REPO" '$1==r{print $2}' "$REG")
 [ -n "$PATHX" ] || { echo "unknown repo: $REPO (see $REG)"; exit 2; }
+if [ -n "${2:-}" ]; then
+  [ -d "$2" ] || { echo "no such path: $2"; exit 2; }
+  PATHX=$(cd "$2" && pwd)
+fi
 cd "$PATHX" || exit 2
 
 # flox pinned to the version in the CI agent container: a lock written by a

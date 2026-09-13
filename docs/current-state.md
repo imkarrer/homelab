@@ -336,29 +336,13 @@ compose file is the fix, and it is applied. This is handled correctly.
 
 ## 5. Open work
 
-Tracked in **one** place: `docs/architecture.md` Part III, the delta between
-current and target, one row per gap with what closes it and where that
-stands. This section used to carry its own eleven-row list; by 12 Sep nine
-were done and the two lists had started to disagree, which is the failure
-README's "no second spelling" rule exists to prevent. Read Part III.
-
-The short version as of 12 Sep evening: the box runs `0f87e07` (generation 32),
-everything committed since is gated and waiting on the next switch, and the
-one line that makes future switches automatic — `homelab.deploy.enable` — is
-the operator's to apply (ADR 0006, "Implementation status").
-
---- | --- | --- |
-| 1 | Neutralise the stale `/etc/nixos/configuration.nix` on the box | **Done 12 Sep** — a `throw`, hardware file kept. |
-| 2 | Teach `hub-status.sh` to report closure drift (F3) | **Done** — `1c6827f`. Three-tier cascade; `HUB_STATUS_EXACT=1` is the exact check. Also reports the owed reboot. |
-| 3 | Correct the stale `hardware-configuration.nix` documentation (F1) | **Done** — `37e6927`. Nine sites, not three; the silent `.example` fallback is now a `throw`. |
-| 4 | Register `udp 11300–11302`; adjudicate `udp 20151` | **Done.** Both registered; 20151 turned out to be a live LAN-discovery outage, fixed in `home-arcade`. |
-| 5 | Run the CI adoption sequence, then switch | **Done 12 Sep** — generations 30 (`3fef4fe`) and 31 (HEAD). One defect found and fixed in the doing (`c97cbbe`, git on `ac-host-ci`'s PATH). |
-| 6 | Add samba/winbindd/rsync to arcade's `units` | **Done, and live** since gen 31 — all three in `interactive.slice`. Uncovered and fixed F8. |
-| 7 | Split the Discord bot into its own tenant | Deferral expired at phase 6. Needs a decision on tenant name and port/unit ownership. |
-| 8 | Drop the `inquire-platform` registry row | **Done 12 Sep** — the operator confirmed it is a personal project outside the homelab. |
-| 9 | Give the UniFi router address a home on `homelab.host` (F6) | **Done** — `6e18170`. `homelab.host.unifi.address`, not `networks.lan.gateway`. Proven a no-op: drvPath unchanged. |
-| 10 | Pin the eval harnesses to the flake's `lib` (F7) | **Done** — `365e1d5`. The runner was already pinned; the harnesses were not. |
-| 11 | Decide: does homelab get a pipeline, or a documented hand-off? | **Decision, not code.** Either is defensible — a switch that can bounce the CI agent may genuinely belong to a human. What is not defensible is the current state, where the registry says `deploy=none`, no runbook step names the switch, and drift accrues silently. |
+Tracked in **one** place: `bd ready`. `docs/architecture.md` Part III is the
+narrative of the delta, one row per gap, and every open row carries its bead
+id. This section used to carry its own eleven-row list; by 12 Sep nine were
+done and the two lists had started to disagree, which is the failure README's
+"no second spelling" rule exists to prevent. By 13 Sep the last two were also
+done (the bot split, `5f58ae0`; the homelab pipeline, ADR 0006) and the table
+is gone.
 
 ---
 
