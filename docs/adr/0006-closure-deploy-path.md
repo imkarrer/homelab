@@ -14,6 +14,16 @@ path: push → Buildkite runs test and lint → `wait: ~` → `queue-prod` stage
 sha into `/var/lib/ac-host/pending-deploy.json` and syncs the tree → a human
 sets `DOWNTIME=1` and the ops pipeline applies it in the 03:00 window.
 
+> **Correction, 13 Sep 2026.** "a human sets `DOWNTIME=1`" above was wrong
+> when written. The Discord bot's countdown (`ac-host` `bot/downtime.py`,
+> `bot/bot.py` `fire_downtime_mark`) queues that build itself at mark 0, and
+> `/var/lib/ac-host/last-downtime.json` records it doing so nightly. The
+> tenant tree has had an unattended path the whole time; what it depends on
+> is the bot container being up at 02:59. The argument below — that a gate a
+> human must remember to open silently stays shut — still holds, but its
+> evidence was the *closure's* 15 undeployed commits, not the tenant tree's.
+> `docs/architecture.md` Part III row 32.
+
 The **system closure** (`homelab`: every unit, slice, firewall rule and port)
 has no path at all. `hub/repos.psv` registers homelab `deploy=none`. Its
 pipeline runs `nix flake check` and the module eval harnesses, and stops. The
