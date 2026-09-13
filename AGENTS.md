@@ -52,6 +52,7 @@ refactor was a no-op (`drvPath` unchanged) rather than merely evaluable.
 | What to do at the box, step by step | `docs/runbook-*.md` |
 | Why CI is shaped the way it is, and what must never bounce | `modules/ci/default.nix` HAZARD 1 and 2 |
 | What is actionable now | `bd ready` — the one open-work list |
+| What a word means — box, tree, closure, window, bead | `CONTEXT.md`, the glossary; use its term, not a synonym |
 
 ## ac-box is read-only
 
@@ -126,6 +127,28 @@ while unmerged.
 Every tree reaches the box through git (ADR 0006): a green `homelab` build
 stages its sha in `/var/lib/homelab/pending-closure.json` and
 `homelab-deploy.timer` switches at 03:30; `ac-host` stages through
-`queue-prod` and a human applies; module-only trees arrive by bumping
-`flake.lock`. `hub/repos.psv` says per tree whether an agent pushes green
+`queue-prod` and the bot's DOWNTIME build applies it at 03:00 (a human may
+apply early with `scripts/hub-deploy.sh`); module-only trees arrive by
+bumping `flake.lock`. `hub/repos.psv` says per tree whether an agent pushes green
 work unattended (`yes`) or asks. The `homelab-land` skill is the procedure.
+
+## Agent skills
+
+The engineering skills (`to-tickets`, `triage`, `to-spec`, `wayfinder`,
+`domain-modeling`, …) read their per-repo configuration from `docs/agents/`.
+
+### Issue tracker
+
+`bd` (beads), rooted here, is the single tracker for every tree; GitHub Issues
+are not used. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, each label string equal to its name
+(`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`,
+`wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` at the root is the glossary, `docs/adr/` the
+decisions. See `docs/agents/domain.md`.
