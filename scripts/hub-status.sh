@@ -79,6 +79,18 @@ BOXTXT=$("${SSH[@]}" '
   # down at 02:59 a queued tree waits, and nothing says so. `docker ps` rather
   # than the unit: the container is what holds the countdown.
   echo "BOT=$(docker ps --filter name=^ac-host-bot-1$ --format {{.Status}} 2>/dev/null | head -1)"
+  # Whether that build actually RAN. The bot only asks Buildkite for it, and on
+  # 13 Sep 2026 the bot was up, mark 0 fired, and the trigger came back HTTP 401
+  # (dead BUILDKITE_API_TOKEN in .env) -- in docker logs only. last-downtime.json
+  # is the one record: ac-host scripts/ci_downtime.py writes it at the start of
+  # every DOWNTIME build, "date" box-local (America/Chicago), "sha" empty when
+  # nothing was pending. Its date is the heartbeat of the build; bot uptime is not.
+  echo "DOWNTIME=$(grep -E "^ *\"date\"" $s/last-downtime.json 2>/dev/null | grep -oE "[0-9]{4}-[0-9]{2}-[0-9]{2}" | head -1)"
+  # The date whose 03:00 has most recently passed, box-local, with an hour for
+  # the agent to pick the build up: what DOWNTIME should read right now. Before
+  # 04:00 that is yesterday, after it today -- so "older than yesterday" is
+  # always stale, and "yesterday" is stale once the window this morning has gone.
+  echo "DOWNTIMEDUE=$(date -d "-4 hours" +%F)"
   p=/nix/var/nix/profiles/system
   echo "SYS=$(readlink -f /run/current-system)"
   echo "SYSBOOTED=$(readlink -f /run/booted-system)"
@@ -116,11 +128,21 @@ else
   # applies the tree and recycles the lobbies once. Until 13 Sep 2026 this
   # line said "needs ops pipeline DOWNTIME=1" as if a human had to start it;
   # last-downtime.json on the box showed it had been running nightly, unattended,
-  # the whole time. It is a PROBLEM only when nothing will queue it.
-  BOT=$(get BOT)
+  # the whole time. It is a PROBLEM when nothing will queue it -- or when
+  # something did and the build still did not run: the bot being up is
+  # necessary, not sufficient (13 Sep: up, and a 401 from Buildkite at mark 0).
+  # The last build's date sits next to the bot's uptime so the two are read
+  # together, and a date behind the window that should have applied the tree
+  # is a verdict, not a state.
+  BOT=$(get BOT); DOWNTIME=$(get DOWNTIME); DOWNTIMEDUE=$(get DOWNTIMEDUE)
   if [ -n "$PENDING" ] && [ "$PENDING" != "$APPLIED" ]; then
     if [ -n "$BOT" ]; then
-      echo "             tree ${PENDING:0:7} is queued; the bot's 03:00 DOWNTIME=1 build applies it (bot: $BOT)"
+      echo "             tree ${PENDING:0:7} is queued; the bot's 03:00 DOWNTIME=1 build applies it (bot: $BOT; last DOWNTIME build: ${DOWNTIME:-unknown})"
+      if [ -z "$DOWNTIME" ]; then
+        note "deploy queued (${PENDING:0:7}) but /var/lib/ac-host/last-downtime.json is unreadable - whether the DOWNTIME build runs is unknown, not fine"
+      elif [[ "$DOWNTIME" < "$DOWNTIMEDUE" ]]; then
+        note "DOWNTIME build has not run since $DOWNTIME (the $DOWNTIMEDUE 03:00 has passed); the pending tree ${PENDING:0:7} is not being applied - the bot is up, so it is the trigger: docker logs ac-host-bot-1, a 401 means BUILDKITE_API_TOKEN in .env is dead"
+      fi
     else
       note "deploy queued (${PENDING:0:7}) but ac-host-bot-1 is not running - nothing will queue DOWNTIME=1 at 03:00"
     fi

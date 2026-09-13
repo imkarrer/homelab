@@ -75,9 +75,9 @@ flowchart LR
         B1["homelab<br/>+ 3 tenant inputs"] --> B2["origin"]
         B2 --> B3["Buildkite<br/>flake check · module eval"]
         B3 -- "wait: ~" --> B4["queue-closure<br/><i>built; skips until the agent<br/>is recreated with its mount</i>"]
-        B4 -.-> B5["homelab-deploy.timer<br/><i>enabled, gen 34 — first firing<br/>Sun 13 Sep 03:30</i>"]
+        B4 -.-> B5["homelab-deploy.timer<br/><i>enabled, gen 34 — fired 13 Sep 03:30,<br/>nothing staged (no-op, exit 0)</i>"]
         B5 -.-> B6["/run/current-system<br/><b>gen 34 = 90e6374</b>"]
-        B3 -- "the live edge until tonight:<br/>an operator, --refresh" --> B6
+        B3 -- "the live edge until queue-closure writes:<br/>an operator, --refresh" --> B6
     end
 
     classDef ok fill:#dae8df,stroke:#2c6b4b,color:#101819;
@@ -95,13 +95,34 @@ that build itself at mark 0 (`bot/bot.py` `fire_downtime_mark`), and
 `last-downtime.json` shows it did so at 03:00:11 that morning with nobody
 present. `queue-prod` stages, the bot applies, the lobbies recycle once behind
 a ten-minute countdown. The one lobby bounce on this machine is that one, and
-it is the designed one. What that path *depends on* is the bot container being
-up at 02:59 — `hub-status.sh` now checks that instead of asking for a human.
+it is the designed one. What that path *depends on* is two things: the bot
+container being up at 02:59, **and a live `BUILDKITE_API_TOKEN` in
+`/var/lib/ac-host/.env`** — the bot only *asks* Buildkite for the build. The
+first was checked from 13 Sep; the second was not, and it is the one that
+failed that morning. Evidence, 13 Sep: `ac-host` `e72c1e4` went green at 01:28
+CDT and `queue-prod` staged it (build 36). At 03:00 the countdown ran its
+300/60/30/5/0 marks and at mark 0 logged `downtime pipeline trigger failed:
+Buildkite trigger failed HTTP 401` — to docker logs only, nowhere a human
+looks. `ac-host-nightly` recycled blackhawk/road-america/gingerman at 03:00:01
+on the old tree `340b4fb`; `last-downtime.json` still reads
+`{"date":"2026-09-12","sha":"","at":"2026-09-12T08:00:11Z"}`. At 08:50 a `GET
+https://api.buildkite.com/v2/access-token` with the token from `.env` returned
+401: the token is dead, and `.env`'s mtime is 6 Sep. So "the bot is up" was
+true all night and proved nothing. `hub-status.sh` now prints that file's date
+next to the bot's uptime and makes it a verdict when a tree is pending and the
+date is behind the 03:00 that should have applied it. `ac-host` `596b970`
+(bead `.49`) has the bot post a trigger failure to `#server-status` and
+validate the token at startup — staged by build 38, and it reaches the box
+only through the very build that needs the rotated token first.
 
 **The bottom path ends at a timer as of generation 34** (`homelab.deploy.enable
 = true`, switched 12 Sep 20:50 CDT by hand — the last hand switch). Its first
-firing is Sunday 03:30; it stages nothing yet because the agent lacks its mount
-until the 04:00 recreate (row 29). Until `1c6827f` this path was checked by
+firing was Sunday 13 Sep 03:30:03: `homelab-deploy.service` logged "nothing
+staged at /var/lib/homelab/pending-closure.json; nothing to do" and exited
+clean — the timer has now been watched firing, on its no-op path. It stages
+nothing yet because the agent lacks its mount, and the 04:00 recreate that
+morning came from the *old* compose, so it still lacks it (row 2, row 29).
+Until `1c6827f` this path was checked by
 nothing; it is *current* today because an operator switched it.
 `home-arcade` and `agent-hub` are flake inputs, not deploy targets: they reach
 the box only through homelab's closure, and only when `flake.lock` moves —
@@ -343,8 +364,8 @@ decision; agents do not do those. Ordered roughly by what unblocks what.
 | 26 | The Dream Router's DHCP reservation for `192.168.1.50` and the UniFi settings are hand-set | Documented in a runbook at minimum; `unifi_pf.py` already drives the forwards from code | `homelab-bqo.42` — **Open.** `host.nix` declares the address; nothing declares that the router will hand it out. |
 | 27 | Pre-flake `nixos-26.05` channel still on the box; `NIX_PATH` references it | `nix.channel.enable = false` in `modules/platform/nix.nix` | `homelab-bqo.43` — **Open.** Harmless to the closure; a stale channel is one more thing that is not what the flake says. |
 | 28 | Hand-placed files in `/root`: `fetch-model.sh`/`.log`, `result` (a human's GC root), `.docker` | `fetch-model.sh` reconciled into `agent-hub` `bb6a7db` — git's copy fetched a *different, never-deployed* model. `/root/result` pins a stale closure against GC. | `homelab-bqo.44` — **Partly done.** The script is in git; the `/root` copies and the GC root remain, harmless. |
-| 29 | The loop has not yet closed end to end | Tonight: 03:00 tenant tree → 03:30 timer (nothing staged, exit 0) → 04:00 remount. Then a push to homelab → `queue-closure` writes → 03:30 next night → first automatic switch | `homelab-bqo.45` — **Pending.** `HUB_STATUS_EXACT=1` after Sunday 03:30 is the proof. |
-| 30 | **The lobbies are recycled twice at 03:00.** `ac-host-nightly.timer` ran `recycle-static` at 03:00:01 on 12 Sep; the bot's `DOWNTIME=1` build recycled again at ~03:00:11. `ci_downtime.py` dedupes against its own `last-downtime.json`; `ac-host-nightly` neither reads nor writes it. Ten seconds apart, so nobody has noticed, but one of them is redundant and both are on the racing tenant's critical path. | Order matters: the tree must be *applied* before the recycle that picks it up, so the build's recycle is the one that has to stay. Make `ac-host-nightly` the fallback — skip when the bot is up (it will queue the build), recycle only when nothing else will. An `ac-host` change, in `modules/ac-host.nix` and `ci_downtime.py`. | `homelab-bqo.46` — **Open, deliberately not touched 13 Sep.** Found while answering "what can deploy without affecting the lobbies". Left alone tonight because tonight is row 29's proof and the 03:00 machinery is the thing under test. |
+| 29 | The loop has not yet closed end to end | The proof night: 03:00 tenant tree → 03:30 timer → 04:00 remount. Then a push to homelab → `queue-closure` writes → 03:30 next night → first automatic switch | `homelab-bqo.45` — **Ran 13 Sep; one of three legs held.** 03:00 did *not* apply: `e72c1e4` was staged (build 36, 01:28 CDT), the bot's countdown reached mark 0, and the trigger got HTTP 401 — the `BUILDKITE_API_TOKEN` in `.env` is dead (I.2); the lobbies were recycled at 03:00:01 by `ac-host-nightly` on the old tree `340b4fb`. 03:30 fired clean: `homelab-deploy.service` "nothing staged at /var/lib/homelab/pending-closure.json; nothing to do", exit 0 — the timer has now been watched firing, on its no-op path. 04:00 recreated `ac-host-ci` from the *old* compose, so the agent still has no `/var/lib/homelab` mount (row 2). The proof night restarts once the token is rotated (bead `.49`; `ac-host` `596b970`, staged by build 38, waits on it) and homelab's pipeline exists (bead `.50`, row 33). `HUB_STATUS_EXACT=1` after that 03:30 is the proof. |
+| 30 | **The lobbies are recycled twice at 03:00.** `ac-host-nightly.timer` ran `recycle-static` at 03:00:01 on 12 Sep; the bot's `DOWNTIME=1` build recycled again at ~03:00:11. `ci_downtime.py` dedupes against its own `last-downtime.json`; `ac-host-nightly` neither reads nor writes it. Ten seconds apart, so nobody has noticed, but one of them is redundant and both are on the racing tenant's critical path. | Order matters: the tree must be *applied* before the recycle that picks it up, so the build's recycle is the one that has to stay. Make `ac-host-nightly` the fallback — skip when the bot is up (it will queue the build), recycle only when nothing else will. An `ac-host` change, in `modules/ac-host.nix` and `ci_downtime.py`. "Skip when the bot is up" is the wrong key: on 13 Sep the bot was up and the build did not fire (I.2) — key the fallback on `last-downtime.json`'s date instead, the fact `hub-status.sh` now reads for the same reason (bead `.46`). | `homelab-bqo.46` — **Open, deliberately not touched 13 Sep.** Found while answering "what can deploy without affecting the lobbies". Left alone tonight because tonight is row 29's proof and the 03:00 machinery is the thing under test. |
 | 31 | Everything waits for the window even when nothing it changes is racing-adjacent. A firewall rule, a tier share, a Grafana dashboard, a secret, or the deploy unit itself sits staged until 03:30 by design, though nothing in them can reach a lobby: `ac-host-static` is `restartIfChanged = false`, the sidecars are compose-owned, and the only closure change that *can* touch a race is a `docker.service` restart — already AGENTS.md's abort criterion. | A push-time switch gated on blast radius: the deploy unit runs `switch-to-configuration dry-activate` first and switches immediately when the restart/stop set excludes `docker.service` and every `assetto`/`bot` unit; anything else falls through to the window as now. The tenant-tree analogue is splitting `ci_downtime.py`'s *apply* (tree sync, bot rebuild — drainable) from its *recycle* (lobbies, `plugin`/`auth`/`details`), so only the second half waits. | `homelab-bqo.47` — **Proposed, not decided — ADR 0008.** The cost is not racing: it is that `arcade`'s SMB/game units and observability would bounce at any hour on a change to them. That is a kid-facing choice, not a lobby one, and it is the operator's. Nothing to build until it is made. |
 | 32 | Three documents said the tenant tree "needs a human to set `DOWNTIME=1`": this file's I.2, ADR 0006's context, `hub-status.sh`'s verdict line and header. The bot has queued it nightly since `bot/downtime.py` landed; `last-downtime.json` on the box is the record. | Corrected in place, dated. `hub-status.sh` now reports the queued tree as a state with a schedule and complains only when `ac-host-bot-1` is not running; its closure notes say "needs a human switch" only when `homelab-deploy.timer` is not enabled. | **Done 13 Sep.** The same class of error as row 20's "13 → 9 containers": the doc described the process as it was designed, not as it was running. |
 | 33 | **homelab's Buildkite pipeline has never run.** The only `queue=self` agent (`ac-host-ci-agent-1`, up since 12 Sep 12:37) has executed 32 jobs, every one of them `ac-host`: none for the homelab pushes of 12 Sep evening, none for `eb55a83` (13 Sep 01:25), and none for `home-arcade` `3ae0a71` either. `.buildkite/pipeline.yml` is in git (bead `.29`, "verified locally") but the pipeline *object* — repo, webhook, cluster, first step `buildkite-agent pipeline upload` — is a Buildkite UI action (`home-arcade/docs/ci.md` "First-time pipeline") and nothing records it being done for homelab. Without it `queue-closure` never writes, and row 29's "push → 03:30 next night" cannot happen. | Create the `homelab` (and `home-arcade`) pipeline in the `isaac-karrer` org: GitHub `imkarrer/homelab`, slug `homelab`, first step `buildkite-agent pipeline upload`, GitHub builds on push, cluster/queue that `ac-host-ci-agent-1` serves. The tenant `trigger: homelab` steps assume that slug. Then push anything to homelab and watch the agent log for a `homelab/builds/1` job. | **Open, human, before Monday.** Found 13 Sep by waiting for the build that the push should have produced. Confirmed by the operator the same night: no homelab pipeline exists in Buildkite yet. Row 25's "a misclick could detach a pipeline" was optimistic — the closure's pipeline was never attached. |
