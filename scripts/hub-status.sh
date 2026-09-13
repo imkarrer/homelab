@@ -60,6 +60,11 @@ BOXTXT=$("${SSH[@]}" '
   echo "DISK=$(df -h / | awk "NR==2{print \$5}")"
   echo "LOAD=$(cut -d" " -f1-3 /proc/loadavg)"
   echo "CIEXIT=$(docker logs --tail 400 ac-host-ci-agent-1 2>&1 | grep -oE "Exit Status: [0-9]+" | tail -1 | grep -oE "[0-9]+$")"
+  # Whether the 03:00 DOWNTIME=1 build has something to queue it. bot/downtime.py
+  # posts it at mark 0 (ac-host bot/bot.py, fire_downtime_mark); with the bot
+  # down at 02:59 a queued tree waits, and nothing says so. `docker ps` rather
+  # than the unit: the container is what holds the countdown.
+  echo "BOT=$(docker ps --filter name=^ac-host-bot-1$ --format {{.Status}} 2>/dev/null | head -1)"
   p=/nix/var/nix/profiles/system
   echo "SYS=$(readlink -f /run/current-system)"
   echo "SYSBOOTED=$(readlink -f /run/booted-system)"
@@ -92,7 +97,20 @@ else
   echo "last CI job: exit $(get CIEXIT)"
   [ "$(get FAILED)" != 0 ] && note "box has $(get FAILED) failed systemd unit(s)"
   ce=$(get CIEXIT); [ -n "$ce" ] && [ "$ce" != 0 ] && note "last CI job exited $ce - queue-prod blocked, nothing can deploy"
-  [ -n "$PENDING" ] && [ "$PENDING" != "$APPLIED" ] && note "deploy queued (${PENDING:0:7}) but not applied - needs ops pipeline DOWNTIME=1"
+  # Queued-but-not-applied is a STATE while the bot is up: it queues the
+  # DOWNTIME=1 build at 03:00 (ac-host bot/downtime.py, mark 0) and that build
+  # applies the tree and recycles the lobbies once. Until 13 Sep 2026 this
+  # line said "needs ops pipeline DOWNTIME=1" as if a human had to start it;
+  # last-downtime.json on the box showed it had been running nightly, unattended,
+  # the whole time. It is a PROBLEM only when nothing will queue it.
+  BOT=$(get BOT)
+  if [ -n "$PENDING" ] && [ "$PENDING" != "$APPLIED" ]; then
+    if [ -n "$BOT" ]; then
+      echo "             tree ${PENDING:0:7} is queued; the bot's 03:00 DOWNTIME=1 build applies it (bot: $BOT)"
+    else
+      note "deploy queued (${PENDING:0:7}) but ac-host-bot-1 is not running - nothing will queue DOWNTIME=1 at 03:00"
+    fi
+  fi
 fi
 
 echo
@@ -135,9 +153,14 @@ echo "===== SYSTEM CLOSURE vs homelab HEAD ====="
 # TENANT tree -- /var/lib/ac-host/src and the sha in last-applied.json -- because
 # that is the only thing Buildkite carries. But homelab owns
 # nixosConfigurations.ac-box: the platform layer, the tenant contract, every
-# systemd unit, slice and firewall rule. hub/repos.psv registers homelab
-# deploy=none, so NO pipeline carries it; the only path from a green build to
-# the box is a human running `nixos-rebuild switch --flake`. Nothing compared
+# systemd unit, slice and firewall rule. When this section was written (9 Sep
+# 2026) hub/repos.psv registered homelab
+# deploy=none, so NO pipeline carried it; the only path from a green build to
+# the box was a human running `nixos-rebuild switch --flake`. (ADR 0006 has
+# since given it one: queue-closure stages, homelab-deploy.timer applies at
+# 03:30 -- so "behind HEAD" is now a state with a schedule when the timer is
+# enabled and the rev is staged, and a problem only otherwise; the notes below
+# say which.) Nothing compared
 # HEAD to what actually built /run/current-system, so on 9 Sep 2026 the script
 # printed "reconciled" over 15 commits of undeployed system configuration --
 # including 45f67ab (turns the agent-hub model server on) and 4257aea (sets
@@ -203,6 +226,21 @@ else
   fi
   echo "config rev : ${SYSREV:-(unstamped - system.configurationRevision is not set)}"
   CLPENDING=$(get CLPENDING); CLAPPLIED=$(get CLAPPLIED); CLTIMER=$(get CLTIMER)
+  # "Behind HEAD" means three different things depending on what will move it,
+  # and the verdict has to name the right one or the operator does the wrong
+  # thing (a hand switch over a staged rev is how the cache-stale no-op of
+  # 12 Sep happened). $1 is the measured gap; the tail says who closes it.
+  closure_behind() {
+    if [ "$CLTIMER" != "enabled" ]; then
+      note "system closure is $1 - homelab-deploy.timer is ${CLTIMER:-absent}, so only a human nixos-rebuild switch moves it"
+    elif [ -n "$CLPENDING" ] && [ "$CLPENDING" = "$HEADSHA" ]; then
+      echo "  HEAD is staged; homelab-deploy.timer applies it at the next window (nothing to do)"
+    elif [ -n "$CLPENDING" ] && [ "$CLPENDING" != "$CLAPPLIED" ]; then
+      note "system closure is $1 - ${CLPENDING:0:7} is staged, HEAD is not: push, or wait for HEAD's build to stage it"
+    else
+      note "system closure is $1 and nothing is staged - HEAD's build has not run queue-closure (unpushed? red gate? agent lacks the /var/lib/homelab mount?)"
+    fi
+  }
   case "$CLTIMER" in
     enabled) echo "deploy     : homelab-deploy.timer enabled (ADR 0006 live) - queued ${CLPENDING:-none}, applied ${CLAPPLIED:-none}" ;;
     *)       echo "deploy     : homelab-deploy.timer ${CLTIMER:-absent} - queued ${CLPENDING:-none}, applied ${CLAPPLIED:-none}" ;;
@@ -233,7 +271,7 @@ else
       n=$(git -C "$HL" rev-list --count "$SYSREV..$HEADSHA" 2>/dev/null)
       echo "DRIFT - box built from ${SYSREV:0:7}, $n commit(s) behind HEAD:"
       git -C "$HL" log --format='  %h %s' "$SYSREV..$HEADSHA" 2>/dev/null | head -8
-      note "system closure is $n commit(s) behind homelab HEAD - needs a human nixos-rebuild switch"
+      closure_behind "$n commit(s) behind homelab HEAD"
     else
       echo "DRIFT - box stamped ${SYSREV:0:7}, which is not in local history"
       note "box closure sha ${SYSREV:0:7} unknown locally - system config unverifiable"
@@ -249,7 +287,7 @@ else
     else
       echo; echo "would build: ${want##*/}"
       echo "DRIFT - this tree and the box are different closures"
-      note "system closure differs from this tree's build - needs a human nixos-rebuild switch"
+      closure_behind "differs from this tree's build"
     fi
   else
     BOXCLOCK=$(get BOXCLOCK)
@@ -268,7 +306,7 @@ else
         git -C "$HL" log --since="@$SYSTIME" --format='  %h %s' 2>/dev/null | head -8
         [ "$n" -gt 8 ] && echo "  ... and $((n - 8)) more"
         echo "newest commit that could have built it: ${base:0:7} $(git -C "$HL" log -1 --format=%s "$base" 2>/dev/null)"
-        note "system closure is >= $n commit(s) behind homelab HEAD - homelab is deploy=none, so only a human nixos-rebuild switch moves it"
+        closure_behind ">= $n commit(s) behind homelab HEAD"
       else
         echo "no commit is newer than that switch - CONSISTENT with current, not proof of it"
         echo "  (the box may still have switched from an older or dirty tree;"
