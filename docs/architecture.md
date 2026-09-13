@@ -16,7 +16,7 @@ Mermaid rather than an image or a hosted link, so a diagram is reviewed in the
 same diff as the change it describes and corrected when the code moves. Facts
 here are load-bearing and dated; when one stops being true, fix it in the same
 commit that made it false. Part I last verified against the box **12 Sep 2026 21:23 CDT, at
-generation 34** (`90e6374`; deploy timer armed, first firing Sun 03:30).
+generation 34** (`90e6374`; deploy timer armed; it fired Sun 13 Sep 03:30, a no-op with nothing staged).
 
 ---
 
@@ -375,7 +375,7 @@ decision; agents do not do those. Ordered roughly by what unblocks what.
 Rows 1 and 3–8, 10 (first secret), 11–18, 20–21 closed 12 Sep. What remains
 divides cleanly: **rows 22–24 are the substance** — nothing backs up the state,
 seven secrets are still hand-placed, and module-only tenants need a hand to
-reach the box; **25–28 are hygiene**; **29 is tonight**. Rows 22 and 24 are
+reach the box; **25–28 are hygiene**; **29 is the proof night, which restarts after `.49` (token) and `.50` (pipeline)**. Rows 22 and 24 are
 the two that would make a rebuild-from-git or a push-to-deploy claim false.
 
 **On "what can deploy without touching the lobbies" (13 Sep, rows 30–32):**

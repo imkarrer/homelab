@@ -36,8 +36,19 @@ Each line names a distinct failure, and they are not interchangeable:
   `hub-worktree.sh rm` keeps the branch until main contains it.
 - **deploy queued but not applied** — `ac-host`'s `queue-prod` staged a sha
   the box has not taken. It applies only through the ops pipeline
-  (`DOWNTIME=1`), which has no webhook and fires only when a human starts it.
-  It stalls silently.
+  (`DOWNTIME=1`), which the Discord bot queues at 03:00 unattended
+  (`bot/downtime.py`, mark 0); a human may start it early with
+  `scripts/hub-deploy.sh`. It is a verdict only when `ac-host-bot-1` is not
+  running — otherwise the BOX section prints it as a state with a schedule.
+- **DOWNTIME build has not run since \<date\>** — a tree is pending and
+  `/var/lib/ac-host/last-downtime.json` (written at the start of every
+  DOWNTIME build, box-local date) predates the 03:00 that should have applied
+  it. The bot is up, so the trigger is what failed: on 13 Sep 2026 that was
+  HTTP 401 from a dead `BUILDKITE_API_TOKEN` in `.env`, visible only in
+  `docker logs ac-host-bot-1`.
+- **last-downtime.json is unreadable** — a tree is pending and the file is
+  missing or has no `date`; whether the build runs at all is unknown, which is
+  not the same as fine.
 - **last CI job exited non-zero** — `queue-prod` and `queue-closure` both sit
   behind `wait: ~`, so a red test or lint gate blocks **every** deploy in that
   tree. Nothing reaches the box until it is green, however many times you push.
