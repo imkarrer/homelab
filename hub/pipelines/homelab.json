@@ -1,0 +1,14 @@
+{
+  "name": "homelab",
+  "slug": "homelab",
+  "description": "Object managed by homelab scripts/hub-pipeline.sh from hub/pipelines/homelab.json; the steps are homelab/.buildkite/pipeline.yml. Do not edit here.",
+  "repository": "https://github.com/imkarrer/homelab.git",
+  "default_branch": "main",
+  "configuration": "agents:\n  queue: self\nsteps:\n  - label: \":pipeline: upload .buildkite/pipeline.yml\"\n    command: buildkite-agent pipeline upload\n",
+  "provider_settings": {
+    "trigger_mode": "code",
+    "build_branches": true,
+    "build_pull_requests": true,
+    "publish_commit_status": true
+  }
+}

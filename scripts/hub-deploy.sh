@@ -2,8 +2,9 @@
 # Apply the queued deploy on ac-box by starting the ac-host-ops pipeline.
 # queue-prod only stages; this is what makes the box take it.
 #
-# Token: $BUILDKITE_API_TOKEN, or ~/.config/buildkite/token (chmod 600).
-# Never commit it -- needs write_builds.
+# Token: scripts/lib/buildkite-token.sh -- $BUILDKITE_API_TOKEN, else
+# ~/.config/buildkite/token (chmod 600), else secrets/ac-box.yaml decrypted
+# with the operator key. Needs write_builds. Never in argv, never in a file.
 #
 # Usage: hub-deploy.sh [downtime|emergency]
 #   downtime  (default) apply the folded pending tree + one lobby recycle
@@ -13,9 +14,9 @@ ORG=isaac-karrer
 PIPELINE=ac-host-ops
 MODE="${1:-downtime}"
 
-TOKEN="${BUILDKITE_API_TOKEN:-}"
-[ -z "$TOKEN" ] && [ -r "$HOME/.config/buildkite/token" ] && TOKEN=$(tr -d '\n' < "$HOME/.config/buildkite/token")
-[ -n "$TOKEN" ] || { echo "no token: set BUILDKITE_API_TOKEN or write ~/.config/buildkite/token"; exit 2; }
+# shellcheck source=scripts/lib/buildkite-token.sh
+. "$(cd "$(dirname "$0")" && pwd)/lib/buildkite-token.sh"
+TOKEN=$(buildkite_token) || exit 2
 
 case "$MODE" in
   downtime)  ENVJSON='{"DOWNTIME":"1"}' ;;
@@ -38,7 +39,8 @@ PENDING=$(ssh -o BatchMode=yes "${HOMELAB_BOX:-ac-box}" 'grep -oE "[0-9a-f]{40}"
 [ -n "$PENDING" ] || { echo "nothing queued - queue-prod has not staged a sha"; exit 1; }
 echo "queued sha: ${PENDING:0:7}"
 
-curl -sS -X POST -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+printf 'Authorization: Bearer %s\nContent-Type: application/json\n' "$TOKEN" |
+  curl -sS -X POST -H @- \
   --data "{\"commit\":\"HEAD\",\"branch\":\"main\",\"message\":\"Apply pending ${PENDING:0:7} ($MODE)\",\"env\":$ENVJSON}" \
   "https://api.buildkite.com/v2/organizations/$ORG/pipelines/$PIPELINE/builds" \
   | grep -oE '"web_url": *"[^"]+"' | head -1 | cut -d'"' -f4
