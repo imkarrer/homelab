@@ -461,7 +461,7 @@
       # the tier that CAN be fenced and capped; critical is the tier that is
       # never sliced at all (see resources.nix's sliceableTenants). Routing
       # the machine's resources here is done by moving the SHARES in
-      # configuration.nix's homelab.tiers block -- background now holds 0.65
+      # configuration.nix's homelab.tiers block -- background now holds 0.81
       # of memory and the bulk of the cores -- not by moving the tenant into
       # the tier that opts out of resource control entirely.
       tier = "background";
@@ -470,9 +470,14 @@
       # .llm.landingPage in configuration.nix). Nothing else on this box runs
       # nginx; if something ever does, this claim relocates it -- see the
       # AGENTS.md note on `units` being an authoritative claim.
+      #
+      # qdrant: the vector store beside the model server (services.agent-hub
+      # .vectors in configuration.nix), nixpkgs' own unit. Same pairing rule
+      # as nginx: this claim and vectors.enable flip together.
       units = [
         "agent-hub-llm.service"
         "nginx.service"
+        "qdrant.service"
       ];
 
       ports = {
@@ -481,6 +486,14 @@
         # every assetto/arcade/observability/ci claim in this file.
         llm = {
           number = 8100;
+          proto = [ "tcp" ];
+          scope = "lan";
+        };
+        # Qdrant's upstream HTTP port, kept because every client library
+        # defaults to it; nothing else here is near it. gRPC (6334) is off
+        # in the module, so there is no second claim.
+        vectors = {
+          number = 6333;
           proto = [ "tcp" ];
           scope = "lan";
         };
@@ -494,8 +507,16 @@
         backup = false;
       };
 
+      # /var/lib/qdrant is where nixpkgs' qdrant unit keeps its store
+      # (StateDirectory, a DynamicUser's -- not movable under agent-hub's
+      # own dir without overriding the unit). The vectors in it are
+      # re-derivable from the trees at the cost of re-embedding, which is
+      # CPU on this box; small enough that backing it up is cheaper.
       state = {
-        dirs = [ "/var/lib/agent-hub" ];
+        dirs = [
+          "/var/lib/agent-hub"
+          "/var/lib/qdrant"
+        ];
         backup = true;
       };
 

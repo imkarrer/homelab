@@ -268,6 +268,21 @@ in
         coder = {
           modelPath = "/srv/agent-hub/models/Qwen3-Coder-Next-Q8_0-00001-of-00004.gguf";
           description = "Qwen3-Coder-Next 80B-A3B Q8_0 -- code. Chat tab.";
+          # The server-side prompt cache: when a request arrives whose prompt
+          # does not continue the slot's current one, the slot's KV state is
+          # saved here and a cached entry sharing >= 50 % of the new prompt is
+          # restored instead of re-prefilled. ik's default is 8192 MiB and it
+          # is already on (the journal on 14 Sep 2026 shows a 2637-token
+          # prompt restored in 1.2 ms where its prefill took 14.3 s), so this
+          # line sizes it rather than enables it. Measured cost per entry on
+          # this hybrid model: ~76 MiB base plus a ~75 MiB context checkpoint
+          # every 512 tokens (Gated-DeltaNet state cannot be rolled back, so
+          # the checkpoints are what let a prefix be reused), so a full 32k
+          # conversation is ~2.5 GiB and the default held three. Agents
+          # alternate on this model; 12 GiB holds about five. Prefill is the
+          # box's binding constraint and RAM is not, which is the whole trade.
+          # Counted in background's memoryShare below.
+          extraArgs = [ "--cache-ram" "12288" ];
         };
 
         # The same architecture, size and speed, tuned for instructions and
@@ -283,6 +298,29 @@ in
             "claude-sonnet-4-6"
             "claude-haiku-4-5-20251001"
           ];
+          # ik's default, written down so the memory arithmetic below has
+          # every term in this file. inquire-platform's scoring prompts share
+          # a rubric prefix, which is exactly what this cache is for.
+          extraArgs = [ "--cache-ram" "8192" ];
+        };
+
+        # Embeddings for the vector store (`vectors` below): the small end of
+        # the same Qwen3 family, 1024-dim vectors, resident with the chat
+        # models so an embedding request evicts nothing. The module puts
+        # llama-server in embedding mode and raises both batch sizes to the
+        # context, so a chunk up to 8k tokens embeds in one call; the KV for
+        # that context on a 0.6B model is under a GiB. Four threads: the
+        # model is 0.6 GB, and it shares the fence with the two Qwens
+        # rather than competing with them for all 23 cores. The pooling is
+        # in the GGUF (last token), verified 14 Sep 2026 on the WSL box:
+        # 1842-token input, 1024-dim output, nearest-neighbour smoke green
+        # (agent-hub scripts/vectors-smoke.sh).
+        embed = {
+          kind = "embedding";
+          modelPath = "/srv/agent-hub/models/Qwen3-Embedding-0.6B-Q8_0.gguf";
+          description = "Qwen3-Embedding-0.6B Q8_0 -- 1024-dim embeddings for Qdrant on :6333. POST /v1/embeddings.";
+          contextSize = 8192;
+          threads = 4;
         };
 
         # Image generation: Z-Image-Turbo (6B DiT, distilled to 8 steps with
@@ -363,16 +401,17 @@ in
       # the same change that swapped the engine; one variable at a time.
       contextSize = 32768;
 
-      # Applied to every llama backend above (the image backend has its own
-      # extraArgs); the module appends these after the flags it emits.
-      # coder and instruct stay loaded side by side, so switching between
-      # them costs no 20 s reload: 2 x ~80 GiB of anonymous memory (-rtr)
-      # plus KV, which is what background's memoryShare below is sized for.
-      # They share the 23 cores when both are busy at once -- each then runs
-      # at roughly half speed -- and are unaffected when only one is. Asking
-      # for the image model evicts both; asking for either afterwards loads
-      # just that one.
-      concurrent = [ [ "coder" "instruct" ] ];
+      # coder, instruct, the 9B image model and the embedding model stay
+      # loaded side by side, so switching between them costs no 20-30 s
+      # reload: 2 x ~80 GiB of anonymous memory (-rtr) plus KV and prompt
+      # cache for the Qwens, ~19 GiB for klein (9.5 GB diffusion + 8.3 GB
+      # Qwen3-8B encoder + VAE, and working memory), ~2 GiB for embed --
+      # which is what background's memoryShare below is sized for. They
+      # share the 23 cores when busy at once: an image takes the whole fence
+      # for minutes, so a chat request during one runs slowly rather than
+      # waiting for a reload. Asking for klein 4B or Z-Image still evicts
+      # all four; asking for any of these afterwards loads just that one.
+      concurrent = [ [ "coder" "instruct" "flux2-klein-9b" "embed" ] ];
 
       # nginx in front, so http://<lan>:8100/ is a page that lists chat
       # models and image models apart and opens each in its own UI.
@@ -383,6 +422,8 @@ in
       # slice.
       landingPage = true;
 
+      # Applied to every llama backend above (the image backends have their
+      # own extraArgs); the module appends these after the flags it emits.
       extraArgs = [
         # Run-time repack: at load, rewrite the Q8_0 tensors into the
         # row-interleaved layout the fork's GEMM wants. Worth ~6 % prefill
@@ -419,6 +460,14 @@ in
         #                       pages, and the box has no swap.
       ];
     };
+
+    # Qdrant on the LAN address, :6333, the store the `embed` model above
+    # writes into; the module keeps gRPC off so that is its only port.
+    # qdrant.service and /var/lib/qdrant join this tenant in tenants.nix --
+    # the same pairing rule as nginx.service. Empty until something indexes
+    # into it (homelab-jtn); agent-hub's scripts/vectors-smoke.sh proves the
+    # pair works without leaving data behind.
+    vectors.enable = true;
   };
 
   # Where the model server's threads and memory go. Set here rather than in
@@ -483,31 +532,47 @@ in
   homelab.tiers = {
     critical = {
       # 12.5 GiB. Measured usage of the whole racing stack: well under 1 GiB
-      # (0.1 GiB on 14 Sep 2026). Was 0.10; the other 0.05 went to background
-      # so coder and instruct can be resident together.
-      memoryShare = 0.05;
+      # (0.1 GiB current, 2.5 GiB peak since boot per memory.peak, 14 Sep
+      # 2026). Was 0.10, then 0.05; each cut went to background so another
+      # model could be resident. 5 GiB now.
+      memoryShare = 0.02;
       cpuShare = 0.10; # -> 3 physical cores (0-2) reserved outside the fence.
     };
     interactive = {
-      memoryShare = 0.05; # 12.5 GiB for arcade + observability; Grafana+Prometheus measured at ~0.4 GiB.
+      # 5 GiB for arcade + observability; 1.0 GiB current, 1.3 GiB peak
+      # since boot. Was 0.05; the 0.03 went to background with klein 9B and
+      # the embedding model.
+      memoryShare = 0.02;
       cpuShare = 0.05;
     };
     background = {
-      # ~176 GiB: two resident Qwen models (`concurrent` above; each ~80 GiB
-      # of anonymous memory under -rtr, measured 80.5 GiB for coder with its
-      # KV) with ~15 GiB to spare. Was 0.65 (~163 GiB), sized for one model
-      # with room for a larger one. memoryShare is a CEILING, not a
-      # reservation, so the unused part costs nothing at runtime -- but it
-      # does consume the 0.9 budget. The 0.05 came from critical, which uses
-      # a tenth of a GiB; not from batch, whose ceiling ac-host's
-      # docker-compose.buildkite.yml documents as "~25 GiB" for Nix builds.
-      # Starving CI to leave an unusable ceiling here is not a trade.
+      # ~203 GiB, sized to hold everything `concurrent` above keeps resident
+      # at once, worst case:
+      #     coder     80.5 GiB   measured, anonymous under -rtr, with KV
+      #     instruct  80.4 GiB   measured (RSS, 14 Sep 2026)
+      #     klein 9B  ~19 GiB    17 GiB of weights + working memory, estimated
+      #     embed     ~2 GiB     0.6 GB of weights + KV for 8k, estimated
+      #     caches    20 GiB     --cache-ram 12288 + 8192, both ceilings
+      #     qdrant    ~0 GiB     an empty store; grows with the HNSW index
+      #               ~202 GiB
+      # Was 0.70 (~176 GiB) for the two Qwens alone. memoryShare is a
+      # CEILING, not a reservation, so the unused part costs nothing at
+      # runtime -- but it does consume the 0.9 budget, and the extra 0.11 is
+      # the other three tiers' slack: 0.03 from critical, 0.03 from
+      # interactive, 0.05 from batch. On batch: the earlier note here refused
+      # to cut it while background's ceiling was partly unusable; now every
+      # GiB of it is spoken for. batch's 25 GiB peak since boot equals its
+      # ceiling -- page cache filling up to the limit, not evidence of
+      # anonymous need; the agent's builds run make -j2 on two cores.
       #
       # Page cache counts against this ceiling too and is what gets reclaimed
-      # first, so with both models resident the cached copies of their GGUFs
-      # go -- the cost is that a reload after the image model evicts them
-      # reads from NVMe (~30 s) instead of from cache (~20 s).
-      memoryShare = 0.70;
+      # first, so the cached copies of the resident GGUFs go -- the cost is
+      # that a reload after klein 4B or Z-Image evicts them reads from NVMe
+      # (~30 s) instead of from cache (~20 s). Past reclaim there is no swap:
+      # the ceiling is enforced by an OOM kill inside the slice, which
+      # llama-swap survives (it restarts the backend), so the ~1 GiB of
+      # margin above is thin on purpose rather than by accident.
+      memoryShare = 0.81;
       cpuShare = 0.70; # CPUWeight 700, and cores 3-25 + siblings via the fence.
       # resources.nix defaults this to 10, which niced the inference server
       # down against everything else on the box. The tenant this tier exists
@@ -515,11 +580,12 @@ in
       nice = 0;
     };
     batch = {
-      # Left at the default 0.10 (~25 GiB), the figure ac-host's
-      # docker-compose.buildkite.yml already cites to its readers as the
-      # number to revisit if a build OOMs. Memory is where CI actually needs
-      # headroom; CPU is where it must yield, hence the small cpuShare below.
-      memoryShare = 0.10;
+      # 12.5 GiB. Was the default 0.10 (~25 GiB), the figure ac-host's
+      # docker-compose.buildkite.yml cites as the number to revisit if a
+      # build OOMs -- revisit it there too if one does. The 0.05 went to
+      # background with klein 9B (see the arithmetic there). CPU is where CI
+      # must yield, hence the small cpuShare below.
+      memoryShare = 0.05;
       # Sizes batch's OWN fence block (cores 26-27) as well as its weight.
       # Before the resources.nix fix, batch and background shared one
       # AllowedCPUs string, so a Buildkite Nix build ran on exactly the CPUs
