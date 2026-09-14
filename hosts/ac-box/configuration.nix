@@ -264,7 +264,10 @@ in
         #
         # If this turns out to be wrong, the 480B UD-Q2_K_XL is a modelPath
         # change plus a memoryShare bump, and both can be A/B'd on this box.
-        coder.modelPath = "/srv/agent-hub/models/Qwen3-Coder-Next-Q8_0-00001-of-00004.gguf";
+        coder = {
+          modelPath = "/srv/agent-hub/models/Qwen3-Coder-Next-Q8_0-00001-of-00004.gguf";
+          description = "Qwen3-Coder-Next 80B-A3B Q8_0 -- code. Chat tab.";
+        };
 
         # The same architecture, size and speed, tuned for instructions and
         # prose instead of code: the model for inquire-platform's rubric
@@ -274,6 +277,7 @@ in
         # change -- both of its tiers land here.
         instruct = {
           modelPath = "/srv/agent-hub/models/Qwen3-Next-80B-A3B-Instruct-Q8_0.gguf";
+          description = "Qwen3-Next-80B-A3B-Instruct Q8_0 -- prose, judgement, inquire-platform scoring. Chat tab.";
           aliases = [
             "claude-sonnet-4-6"
             "claude-haiku-4-5-20251001"
@@ -292,6 +296,7 @@ in
         z-image-turbo = {
           kind = "image";
           modelPath = "/srv/agent-hub/models/z_image_turbo-Q8_0.gguf";
+          description = "Z-Image-Turbo Q8_0 -- images, ~4 min per 512x512 on this CPU. Images tab only.";
           vae = "/srv/agent-hub/models/z_image-vae-ae.safetensors";
           textEncoder = "/srv/agent-hub/models/Qwen3-4B-Instruct-2507-Q8_0.gguf";
           extraArgs = [
