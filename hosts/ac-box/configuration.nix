@@ -220,45 +220,87 @@ in
     llm = {
       enable = true;
 
-      # ik_llama.cpp, not nixpkgs' llama-cpp. On this CPU-only box the fork's
-      # matrix kernels are a 4-5x, measured 14 Sep 2026 on this model, these
-      # cores and this memory placement: prefill 121 vs 30 tok/s, generation
-      # 12.5 vs 5.8 (agent-hub docs/prefill-tuning.md has every run). The
-      # deployed unit before this change measured 17 / 4.5; the validated
-      # unit below measures 140 / 13.3 on the same 1707-token request, first
-      # token in 12 s instead of 99.
+      # ik_llama.cpp, not nixpkgs' llama-cpp, for every llama model below. On
+      # this CPU-only box the fork's matrix kernels are a 4-5x, measured 14
+      # Sep 2026 on the coder model, these cores and this memory placement:
+      # prefill 121 vs 30 tok/s, generation 12.5 vs 5.8 (agent-hub
+      # docs/prefill-tuning.md has every run). The unit before that change
+      # measured 17 / 4.5; the live unit after it measures 140 / 13.3 on the
+      # same 1707-token request, first token in 12 s instead of 99.
       engine = "ik-llama-cpp";
 
-      # Qwen3-Coder-Next, 80B total / 3B active MoE (512 experts, 10 routed
-      # per token), Q8_0, ~85 GB across four shards. Point llama.cpp at shard
-      # 1; it finds the rest in the same directory.
+      # Three models behind the one port, one loaded at a time, swapped by
+      # llama-swap on demand (the agent-hub module's `models`; see its
+      # description). Every name here matches a file agent-hub's
+      # scripts/fetch-model.sh fetches, and is the `model` a request names.
       #
-      # Chosen over the bigger Qwen3-Coder-480B-A35B deliberately, and the
-      # reasoning is worth keeping because it inverts the obvious answer:
-      #
-      #   - The 480B does not fit here at a quantization that preserves code
-      #     quality. Q4_K_S is 273 GB against 251 GiB of physical RAM, so it
-      #     is not a tuning question -- it does not fit at all. What fits is
-      #     Q2_K_XL (180 GB) or Q3_K_S (207 GB), and sub-Q4 quantization
-      #     damage lands hardest on exactly this workload.
-      #   - Qwen's own line on the 80B-A3B variant is that it retains ~96% of
-      #     the 480B flagship's quality. Trading ~4% of a full-precision model
-      #     against Q2/Q3 damage to a larger one is not a close call.
-      #   - Q8_0 is effectively lossless, so the number above is the quality
-      #     we actually get rather than a starting point to degrade from.
-      #   - CPU token rate tracks ACTIVE parameters, not total. 3B active vs
-      #     35B active is roughly a tenfold difference in memory traffic per
-      #     token on a box with no GPU and ~130 GB/s of DDR4 -- the difference
-      #     between a tool you use and one you wait on.
-      #
-      # If this turns out to be wrong, the 480B UD-Q2_K_XL is a modelPath
-      # change plus a memoryShare bump, and both can be A/B'd on this box.
-      #
-      # A quoted STRING, not a Nix path literal. The option's type is
-      # types.path, which accepts either -- but an unquoted ./path literal
-      # would make Nix copy the whole GGUF into /nix/store at eval time.
-      # At a hundred-plus gigabytes that is not a mistake you notice early.
-      modelPath = "/srv/agent-hub/models/Qwen3-Coder-Next-Q8_0-00001-of-00004.gguf";
+      # All paths are quoted STRINGS, not Nix path literals: the option type
+      # accepts either, but an unquoted ./path would make Nix copy the whole
+      # file into /nix/store at eval time. At 85 GB that is not a mistake you
+      # notice early.
+      models = {
+        # Qwen3-Coder-Next, 80B total / 3B active MoE (512 experts, 10 routed
+        # per token), Q8_0, ~85 GB across four shards. Point llama.cpp at
+        # shard 1; it finds the rest in the same directory.
+        #
+        # Chosen over the bigger Qwen3-Coder-480B-A35B deliberately, and the
+        # reasoning is worth keeping because it inverts the obvious answer:
+        #
+        #   - The 480B does not fit here at a quantization that preserves
+        #     code quality. Q4_K_S is 273 GB against 251 GiB of physical RAM,
+        #     so it is not a tuning question -- it does not fit at all. What
+        #     fits is Q2_K_XL (180 GB) or Q3_K_S (207 GB), and sub-Q4
+        #     quantization damage lands hardest on exactly this workload.
+        #   - Qwen's own line on the 80B-A3B variant is that it retains ~96%
+        #     of the 480B flagship's quality. Trading ~4% of a full-precision
+        #     model against Q2/Q3 damage to a larger one is not a close call.
+        #   - Q8_0 is effectively lossless, so the number above is the
+        #     quality we actually get rather than a starting point to
+        #     degrade from.
+        #   - CPU token rate tracks ACTIVE parameters, not total. 3B active
+        #     vs 35B active is roughly a tenfold difference in memory traffic
+        #     per token on a box with no GPU and ~130 GB/s of DDR4 -- the
+        #     difference between a tool you use and one you wait on.
+        #
+        # If this turns out to be wrong, the 480B UD-Q2_K_XL is a modelPath
+        # change plus a memoryShare bump, and both can be A/B'd on this box.
+        coder.modelPath = "/srv/agent-hub/models/Qwen3-Coder-Next-Q8_0-00001-of-00004.gguf";
+
+        # The same architecture, size and speed, tuned for instructions and
+        # prose instead of code: the model for inquire-platform's rubric
+        # scoring and for anything that is not a coding task. The aliases
+        # are the hosted model names inquire-platform hard-codes, so pointing
+        # its Anthropic SDK at this port (ANTHROPIC_BASE_URL) needs no code
+        # change -- both of its tiers land here.
+        instruct = {
+          modelPath = "/srv/agent-hub/models/Qwen3-Next-80B-A3B-Instruct-Q8_0.gguf";
+          aliases = [
+            "claude-sonnet-4-6"
+            "claude-haiku-4-5-20251001"
+          ];
+        };
+
+        # Image generation: Z-Image-Turbo (6B DiT, distilled to 8 steps with
+        # no classifier-free guidance) through stable-diffusion.cpp, which
+        # needs the diffusion model plus its Qwen3-4B text encoder and the
+        # FLUX autoencoder. ~11 GB resident -- small next to the Qwen models,
+        # but it still takes the whole fence while it runs, so it swaps like
+        # the others rather than sitting alongside them. CPU-only means
+        # minutes per image, not seconds; the defaults below are the model's
+        # own recipe (8 steps, cfg 1.0) so a bare OpenAI-style request with
+        # just a prompt produces a correct image.
+        z-image-turbo = {
+          kind = "image";
+          modelPath = "/srv/agent-hub/models/z_image_turbo-Q8_0.gguf";
+          vae = "/srv/agent-hub/models/z_image-vae-ae.safetensors";
+          textEncoder = "/srv/agent-hub/models/Qwen3-4B-Instruct-2507-Q8_0.gguf";
+          extraArgs = [
+            "--steps" "8"
+            "--cfg-scale" "1.0"
+            "--diffusion-fa"
+          ];
+        };
+      };
 
       # PHYSICAL cores inside background.slice's fence, not logical threads
       # and not the host's 56. The fence (resources.nix) gives background
@@ -283,6 +325,8 @@ in
       # the same change that swapped the engine; one variable at a time.
       contextSize = 32768;
 
+      # Applied to every llama backend above (the image backend has its own
+      # extraArgs); the module appends these after the flags it emits.
       extraArgs = [
         # Run-time repack: at load, rewrite the Q8_0 tensors into the
         # row-interleaved layout the fork's GEMM wants. Worth ~6 % prefill
@@ -295,9 +339,10 @@ in
 
         "--flash-attn" "on"
 
-        # Serves /metrics on the same port. Not yet scraped -- see the
-        # agent-hub tenant's `metrics = null` in tenants.nix for why
-        # (metrics.nix scrapes 127.0.0.1 and this binds the LAN address).
+        # Each llama backend serves /metrics on its loopback port; the LAN
+        # port's /metrics is llama-swap's own. Neither is scraped yet --
+        # see the agent-hub tenant's `metrics = null` in tenants.nix for
+        # why (metrics.nix scrapes 127.0.0.1 and this binds the LAN address).
         "--metrics"
 
         # Gone, with the measurement that removed each:
