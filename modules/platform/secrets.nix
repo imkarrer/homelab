@@ -145,6 +145,88 @@
         # here. Stated for the reader; nothing to configure.
       };
 
+      # observability's four, 14 Sep 2026: the first shape again, one entry
+      # per hand-placed file in /var/lib/monitoring/secrets, each at the
+      # exact path its consumer already reads (modules/observability names
+      # them: grafanaAdminFile, grafanaSecretFile, unpollerPassFile,
+      # discordWebhookFile), root:monitoring 0640 as the files were. The
+      # "who opens it" test that sent the .env through a copy unit passes
+      # here: every reader is a host-side native unit, none is a container.
+      #
+      # Whether each reader can follow the link into /run/secrets.d/<n>/ was
+      # checked on the box, not assumed (14 Sep 2026):
+      #   grafana        User=grafana, SupplementaryGroups=monitoring,
+      #                  ProtectSystem=full -- /run stays readable.
+      #   alertmanager   DynamicUser=yes with SupplementaryGroups=monitoring
+      #                  (modules/observability's addition), ProtectSystem=
+      #                  strict -- strict makes the tree read-only, it hides
+      #                  nothing; the dynamic uid still carries gid monitoring.
+      #   unifi-poller   User=unifi-poller, no Group=/SupplementaryGroups= on
+      #                  the unit, so initgroups() applies and the live
+      #                  process shows gid 991 (monitoring); ProtectSystem=full.
+      #   udr-fw-exporter  User=unifi-poller Group=monitoring, no sandbox.
+      # All four already open the 0640 root:monitoring files today, so the
+      # group half is proven in production; the new half is the traversal,
+      # and sops-nix creates /run/secrets.d/<n> 0751 root:keys (MkdirAll
+      # 0o751 in sops-install-secrets), so any uid passes through it and the
+      # per-file mode decides. ConditionPathExists is evaluated by PID 1 with
+      # access(2), which follows the link; sops-nix has installed the
+      # generation from the activation script before any unit is considered.
+      #
+      # restartUnits names every reader, so a rotation is push-and-switch:
+      # none of the four units sets restartIfChanged = false (grafana,
+      # alertmanager and unpoller take the nixpkgs default; udr-fw-exporter
+      # is this repo's and sets nothing), so nothing is dropped from the
+      # activation restart list the way it would be for ac-host-bot. All are
+      # in the observability tenant, drainable (AGENTS.md). The FIRST switch
+      # restarts all four too -- each secret is new to sops-nix's generation
+      # -- which is the moment the regular files become symlinks.
+      #
+      # Two Grafana facts a rotation has to know. security.admin_password is
+      # read on first run only, when the admin user is created; a new value
+      # here does not change the password stored in grafana.db, and
+      # `grafana-cli admin reset-admin-password` (or the UI) does that.
+      # security.secret_key encrypts secrets Grafana stores in its db
+      # (datasource credentials); the one provisioned datasource has none,
+      # so a rotation costs nothing today, but that stops being true the day
+      # a datasource with a password is added.
+      grafana-admin = {
+        path = "/var/lib/monitoring/secrets/grafana-admin";
+        owner = "root";
+        group = "monitoring";
+        mode = "0640";
+        restartUnits = [ "grafana.service" ];
+      };
+      grafana-secret-key = {
+        path = "/var/lib/monitoring/secrets/grafana-secret-key";
+        owner = "root";
+        group = "monitoring";
+        mode = "0640";
+        restartUnits = [ "grafana.service" ];
+      };
+      # Two readers, not one: unpoller's controller `pass` (a file path, to
+      # unpoller) and udr-fw-exporter's UNIFI_PASS_FILE, both for the same
+      # `unpoller` account on the UDR, and both gate on the path with
+      # ConditionPathExists. The sops key is unpoller-pass; the file keeps
+      # its dot.
+      unpoller-pass = {
+        path = "/var/lib/monitoring/secrets/unpoller.pass";
+        owner = "root";
+        group = "monitoring";
+        mode = "0640";
+        restartUnits = [
+          "unifi-poller.service"
+          "udr-fw-exporter.service"
+        ];
+      };
+      discord-webhook = {
+        path = "/var/lib/monitoring/secrets/discord-webhook";
+        owner = "root";
+        group = "monitoring";
+        mode = "0640";
+        restartUnits = [ "alertmanager.service" ];
+      };
+
       # The four secrets in /var/lib/ac-host/.env. No `path`: nothing reads
       # them as files, they exist to be substituted into the template below
       # (sops-nix still installs each at /run/secrets/<name>, root 0400).
@@ -467,14 +549,17 @@
   #                   take a path from homelab.ci.envFile. The box's file
   #                   under the tenant tree is dead once ac-host-ci has been
   #                   restarted, and should be removed by hand then.
+  #   observability   /var/lib/monitoring/secrets/{grafana-admin,
+  #                   grafana-secret-key, unpoller.pass, discord-webhook},
+  #                   14 Sep 2026 -- four entries in the first shape, each
+  #                   linked at the path its reader already opens,
+  #                   root:monitoring 0640. The symlink question was checked
+  #                   per unit (the entries' comment); every reader is on
+  #                   the host. modules/observability no longer mints the
+  #                   two Grafana values when absent.
   #
   # NOT YET MIGRATED -- hand-placed values, as of 14 Sep 2026.
   #
-  #   observability   /var/lib/monitoring/secrets/{grafana-admin,
-  #                   grafana-secret-key, unpoller.pass, discord-webhook}
-  #                   root:monitoring 0640. Four sops.secrets entries, each
-  #                   with a path -- and each read on the host, so the
-  #                   symlink is fine there. Check that before assuming it.
   #   bot             github-token -- declared, and the file does not exist on
   #                   the box (/var/lib/ac-host/secrets/ is empty). The bot
   #                   runs without it; whatever needs it is not exercised.

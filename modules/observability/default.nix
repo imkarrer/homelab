@@ -28,10 +28,17 @@
 }:
 
 let
-  # Unchanged, and deliberately NOT derived from homelab.host.paths: this holds
-  # hand-placed secrets (the Grafana admin password, the unifi-poller password,
-  # the Discord webhook). Renaming it would be a data migration for no benefit --
-  # the same reasoning ADR 0003 applies to /var/lib/ac-host.
+  # Unchanged, and deliberately NOT derived from homelab.host.paths: these are
+  # the paths the consumers below read (the Grafana admin password and secret
+  # key, the unifi-poller password, the Discord webhook). Hand-placed from
+  # 3 Sep 2026 until 14 Sep; since then modules/platform/secrets.nix installs
+  # each as a symlink at the same path, root:monitoring 0640, from
+  # secrets/ac-box.yaml. The paths are still named here because the consumers
+  # are here -- $__file{}, UNIFI_PASS_FILE, webhook_url_file and the two
+  # ConditionPathExists all follow a symlink (os.ReadFile and access(2) both
+  # do), and every reader runs on the host, where /run/secrets is visible.
+  # Renaming the directory would be a data migration for no benefit -- the
+  # same reasoning ADR 0003 applies to /var/lib/ac-host.
   # The dashboard binds the LAN address rather than 0.0.0.0, and now takes it
   # from the one place this repo keeps machine literals.
   grafanaAddr = config.homelab.host.networks.lan.address;
@@ -82,19 +89,24 @@ in
     "d ${secretsDir} 0750 root monitoring -"
   ];
 
+  # The directory only. Until 14 Sep 2026 this script also generated the two
+  # Grafana values when absent and chmod/chowned all four files; both are
+  # gone. The values come from sops now, so a missing one is a build-time
+  # error (the sops-nix manifest check) rather than a silently minted
+  # password nobody wrote down -- and the four paths are symlinks into
+  # /run/secrets, whose mode and owner sops-nix sets from its declaration; a
+  # chmod through the link would touch the target, and one at boot, before
+  # sops-nix has run, would find the link dangling.
+  #
+  # Runs before sops-nix's setupSecrets on the first switch and on every
+  # boot: activation scripts are ordered by their deps and then by name, and
+  # "monitoring-secrets" sorts before "setupSecrets". sops-nix would mkdir the
+  # parent itself if it were missing (MkdirAll at the umask mode), so this is
+  # what makes the directory 0750 root:monitoring, not a correctness need.
   system.activationScripts.monitoring-secrets = ''
     mkdir -p ${secretsDir}
     chmod 0750 ${secretsDir}
     chown root:monitoring ${secretsDir} || true
-    if [ ! -s ${grafanaAdminFile} ]; then
-      tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24 > ${grafanaAdminFile}
-      echo "created Grafana admin password in ${grafanaAdminFile}"
-    fi
-    if [ ! -s ${grafanaSecretFile} ]; then
-      tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32 > ${grafanaSecretFile}
-    fi
-    chmod 0640 ${grafanaAdminFile} ${grafanaSecretFile} ${unpollerPassFile} ${discordWebhookFile} 2>/dev/null || true
-    chown root:monitoring ${grafanaAdminFile} ${grafanaSecretFile} ${unpollerPassFile} ${discordWebhookFile} 2>/dev/null || true
   '';
 
   users.users.unifi-poller.extraGroups = [ "monitoring" ];
