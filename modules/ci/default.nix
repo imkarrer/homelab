@@ -144,14 +144,26 @@
 # --------------------------------------------------------------------------
 # CREDENTIALS
 # --------------------------------------------------------------------------
-# compose/.env.buildkite (gitignored, mode 0600 on the box, owner root) holds
-# a live BUILDKITE_AGENT_TOKEN, MINIO_ROOT_PASSWORD, and the S3 cache
-# access/secret/signing keys. This module never reads that file's contents,
-# never inlines a value from it, and never prints one -- it only carries the
-# PATH (`homelab.ci.envFile`, below) into systemd's own EnvironmentFile= and
-# into `docker compose --env-file`, exactly the two places the file is
-# already consumed today. No fixture or test under tests/ contains a real or
-# realistic-looking secret value; they check argv/serviceConfig shape only.
+# The env file holds a live BUILDKITE_AGENT_TOKEN, MINIO_ROOT_PASSWORD, the
+# S3 cache access/secret/signing keys and GITHUB_STATUS_TOKEN. This module
+# never reads that file's contents, never inlines a value from it, and never
+# prints one -- it only carries the PATH (`homelab.ci.envFile`, below) into
+# systemd's own EnvironmentFile= and into `docker compose --env-file`,
+# exactly the two places the file is consumed. No fixture or test under
+# tests/ contains a real or realistic-looking secret value; they check
+# argv/serviceConfig shape only.
+#
+# Where the file comes from is not this module's concern, and since 14 Sep
+# 2026 it is not a hand-placed file either: modules/platform/secrets.nix
+# renders it from sops (sops.templates.ci-env, at /run/secrets/rendered/
+# ci-env) and sets homelab.ci.envFile to that path. The option's default
+# below is the pre-sops location under the tenant tree, kept so a host
+# without the secrets module still has a working shape; on ac-box it is
+# overridden. Both readers are on the host, so the rendered file is used in
+# place -- no symlink, no copy unit (secrets.nix's header, "the third
+# shape"). A changed render does NOT restart this unit: restartIfChanged =
+# false below stands, for HAZARD 2, and the operator bounces it by hand
+# from ssh once the agent is idle.
 { config, lib, pkgs, ... }:
 
 let
@@ -189,11 +201,14 @@ in
       type = types.path;
       default = "${composeDir}/.env.buildkite";
       description = ''
-        Path to the gitignored env file holding BUILDKITE_AGENT_TOKEN,
+        Path to the env file holding BUILDKITE_AGENT_TOKEN,
         MINIO_ROOT_PASSWORD and the S3 cache keys. Referenced by path only --
         passed straight through to systemd's EnvironmentFile= and to
         `docker compose --env-file`. Never read, inlined, or logged by this
-        module or its tests.
+        module or its tests. The default is the hand-placed, gitignored
+        location under the tenant tree; modules/platform/secrets.nix sets
+        it to the sops-rendered file (/run/secrets/rendered/ci-env) on any
+        host that imports it, which ac-box does.
       '';
     };
 

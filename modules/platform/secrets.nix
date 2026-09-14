@@ -92,6 +92,23 @@
 # (seed_github_env.py is a dev-profile tool, DEV.md); a value changes by
 # `scripts/hub-secret-set.sh <key>` and a switch, a non-secret key by editing
 # the template body here.
+#
+# --------------------------------------------------------------------------
+# THE THIRD SHAPE: A RENDERED FILE THAT NEEDS NEITHER PATH NOR COPY
+# --------------------------------------------------------------------------
+# compose/.env.buildkite, the ci tenant's env file, is the same .env shape --
+# thirteen keys, five of them secrets -- but the symlink hazard above does
+# not apply to it, because of WHO OPENS IT. Nothing inside a container reads
+# this file. Its only two readers are on the host: systemd's EnvironmentFile=
+# on ac-host-ci.service and the `docker compose --env-file` in that unit's
+# ExecStart/ExecStop, and modules/ci carries the PATH into both from one
+# option, homelab.ci.envFile. So the template renders at sops-nix's default,
+# /run/secrets/rendered/ci-env, with no `path` (no symlink to create) and no
+# copy unit; this module sets homelab.ci.envFile to the rendered path and the
+# consumer follows. The hand-placed file under /var/lib/ac-host/src/compose
+# stops being read at the next start of the unit -- and stops living inside
+# the tenant tree ci_downtime.py syncs, which is where a secret least
+# belongs.
 {
   config,
   lib,
@@ -142,6 +159,41 @@
       buildkite-api-token = { };
       ac-admin-password = { };
       github-status-token = { };
+
+      # The five secrets in compose/.env.buildkite, for the ci-env template
+      # below. Same rule, no `path`. github-status-token is not repeated:
+      # the ci tenant's file carries the same value assetto's .env does
+      # (ci_publish_pages.py pushes the site with the credential push_status.py
+      # writes leaderboard.json with), so it is one sops key substituted into
+      # two templates.
+      #
+      # buildkite-agent-token is the Default-cluster token 482de9f7, minted
+      # 14 Sep 2026 by scripts/hub-cluster-token.sh; the box's file holds the
+      # old unclustered token, so the first render of this template is what
+      # moves the agent into the cluster.
+      #
+      # The three cache values are NEW, generated 14 Sep 2026, not migrated:
+      # the box's S3_CACHE_SECRET_ACCESS_KEY and S3_CACHE_SIGNING_KEY were
+      # exposed in an agent transcript that day, and MINIO_ROOT_PASSWORD was
+      # rotated with them (all three are MinIO-local; nothing off the box
+      # holds them). minio-root-password and s3-cache-secret-access-key are
+      # 40 chars of `openssl rand -base64 33 | tr -d '/+='`;
+      # s3-cache-signing-key is a Nix cache key pair from `nix key
+      # generate-secret --key-name flox-binary-cache-2` (the retired pair is
+      # flox-binary-cache-1). The public half is not secret:
+      #   flox-binary-cache-2:ESa71iIsMeX6Wu7EBiXXZlJraWI0HF4xdOF/ivG4UTo=
+      # and must be ADDED, not swapped, where ac-host trusts the old one:
+      # compose/docker-compose.buildkite.yml's S3_CACHE_PUBLIC_KEY, both the
+      # image bake arg and the agent env default. The plugin (Dockerfile and
+      # lib/environment.bash) writes that value verbatim into nix.conf's
+      # extra-trusted-public-keys, a whitespace-separated list, so the two
+      # keys go in one value. flox-binary-cache-1's public key stays trusted
+      # so every NAR already in the cache, signed by it, remains
+      # substitutable; only new pushes carry the -2 signature.
+      buildkite-agent-token = { };
+      minio-root-password = { };
+      s3-cache-secret-access-key = { };
+      s3-cache-signing-key = { };
     };
 
     # /var/lib/ac-host/.env, as of the box on 13 Sep 2026 (sha256 d85835fd...,
@@ -201,7 +253,121 @@
         BUILDKITE_PIPELINE_SERIES=ac-host-series
       '';
     };
+
+    # compose/.env.buildkite, as of the box on 14 Sep 2026 (root 0600, 694
+    # bytes, last written 8 Sep): the same keys in the same order, the
+    # non-secret values verbatim. Two differences, neither visible to a
+    # reader. The comment line: the box's says "Copy this file onto ac-box;
+    # do not commit it", which is exactly what stops being true. And line
+    # endings: the box's file is CRLF on the six lines that came from
+    # env.buildkite.example and LF on the rest; both systemd's EnvironmentFile
+    # parser and compose's dotenv parser strip the CR (the live containers'
+    # env shows `ac-box`, `queue=self`, `ac-minio` clean), so the pure-LF
+    # render is the same file to both. Rendered to /run/secrets/rendered/ci-env, root
+    # 0400 (sops-nix's default; the box's file was 0600 and root is the only
+    # reader either way). No `path`, no copy unit: the third shape, in the
+    # header. What each key does is ac-host's business
+    # (compose/docker-compose.buildkite.yml, compose/minio-init.sh); the two
+    # that matter for the agent's identity are BUILDKITE_AGENT_NAME=ac-box
+    # and BUILDKITE_AGENT_TAGS containing queue=self, which every pipeline
+    # hub-pipeline.sh creates targets.
+    #
+    # No restartUnits, on purpose, and not for the reason ac-host-env has
+    # none for the bot. ac-host-ci.service carries restartIfChanged = false,
+    # so naming it here would be dropped silently by switch-to-configuration
+    # (the ac-host-env comment above); a PartOf= copy unit like the bot's
+    # could route around that, and is deliberately not built. modules/ci's
+    # HAZARD 2 is about a job on the agent bouncing the agent, and a switch
+    # by hand from ssh, or by modules/deploy at 03:30, is neither -- but the
+    # 03:30 switch lands while the tenant's own 03:00 ops job (ci_downtime.py,
+    # the sidecar rebuilds) may still be running ON that agent, and a
+    # lock-bump switch can coincide with any job. "A plain nixos-rebuild
+    # switch must never implicitly bounce this unit" is the stance modules/ci
+    # already took; a rotation of one of these values is rare and has been a
+    # human act every time. So: the render changes at the switch, the running
+    # unit keeps the environment it started with (EnvironmentFile= and
+    # --env-file are read at ExecStart/ExecStop, never in between), and the
+    # operator runs `systemctl restart ac-host-ci` from ssh once the agent is
+    # idle. The ci tenant is drainable (AGENTS.md): a re-queued job is not an
+    # outage.
+    #
+    # Ordering needs nothing here: this config has sops.useSystemdActivation
+    # = false (no sysusers), so sops-nix installs secrets and renders
+    # templates from the activation script -- at boot, in stage 2 before
+    # systemd starts a single unit; at a switch, before units are touched --
+    # and ac-host-ci is after docker.service besides. The file exists before
+    # EnvironmentFile= is read. (An absent EnvironmentFile= without a `-`
+    # prefix fails the unit; that is the right failure -- a box that could
+    # not decrypt should not start an agent with no token.)
+    #
+    # What a bounce does with the new values, from the compose file and
+    # minio-init.sh as of 14 Sep 2026:
+    #   MINIO_ROOT_PASSWORD   minio takes root creds from its environment at
+    #                         every start, and this MinIO (RELEASE.2025-09-07
+    #                         on the box) stores IAM and config in the clear
+    #                         unless a KMS is configured (cmd/iam-object-store
+    #                         .go: saveIAMConfig encrypts only with GlobalKMS,
+    #                         decryptData returns utf8 data untouched), so the
+    #                         bucket and the flox-cache user survive the
+    #                         rotation. A new value on the next start; nothing
+    #                         else to do.
+    #   S3_CACHE_SECRET_ACCESS_KEY
+    #                         NOT free. minio-init.sh runs `mc admin user add`
+    #                         only when `mc admin user info` says the user is
+    #                         absent, and flox-cache exists, so its stored
+    #                         secret stays the old one while the agent starts
+    #                         with the new -- every cache read and push would
+    #                         403 until the user's secret is reset. One
+    #                         box-side step after the bounce, from the same
+    #                         rendered file (`mc admin user add` on an
+    #                         existing user rewrites its secret; that is what
+    #                         the server's CreateUser documents):
+    #                           cd /var/lib/ac-host/src/compose && docker compose \
+    #                             -f docker-compose.buildkite.yml -p ac-host-ci \
+    #                             --env-file /run/secrets/rendered/ci-env \
+    #                             run --rm --entrypoint sh minio-init -c \
+    #                             'mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null && mc admin user add local "$S3_CACHE_ACCESS_KEY_ID" "$S3_CACHE_SECRET_ACCESS_KEY"'
+    #                         (Or drop the guard in minio-init.sh, which would
+    #                         make every future rotation free; that is an
+    #                         ac-host change.)
+    #   S3_CACHE_SIGNING_KEY  the plugin's post-command hook writes the value
+    #                         to a 0600 temp file and pushes with
+    #                         secret-key=<file>; new NARs are signed
+    #                         flox-binary-cache-2 from the first push after
+    #                         the bounce, and are trusted only once ac-host's
+    #                         S3_CACHE_PUBLIC_KEY carries the -2 public key
+    #                         (above). Until then a push succeeds and the
+    #                         pushed path is not substitutable; nothing
+    #                         breaks, the cache just does not warm.
+    #   BUILDKITE_AGENT_TOKEN the agent registers into the Default cluster;
+    #                         GET /v2/organizations/isaac-karrer/agents shows
+    #                         cluster non-null and queue self.
+    templates.ci-env = {
+      content = ''
+        # Rendered by sops-nix from homelab's modules/platform/secrets.nix; not hand-edited.
+        BUILDKITE_AGENT_TOKEN=${config.sops.placeholder.buildkite-agent-token}
+        BUILDKITE_AGENT_NAME=ac-box
+        BUILDKITE_AGENT_TAGS=queue=self
+
+        MINIO_ROOT_USER=ac-minio
+        MINIO_ROOT_PASSWORD=${config.sops.placeholder.minio-root-password}
+        S3_CACHE_BUCKET=flox-binary-cache
+        S3_CACHE_ACCESS_KEY_ID=flox-cache
+        S3_CACHE_SECRET_ACCESS_KEY=${config.sops.placeholder.s3-cache-secret-access-key}
+        S3_CACHE_SIGNING_KEY=${config.sops.placeholder.s3-cache-signing-key}
+        GITHUB_STATUS_TOKEN=${config.sops.placeholder.github-status-token}
+        GITHUB_STATUS_REPO=imkarrer/ac-practice
+        AC_PAGES_PUSH=1
+      '';
+    };
   };
+
+  # The consumer follows the render. modules/ci reads exactly one path,
+  # homelab.ci.envFile, into EnvironmentFile= and both `--env-file`s; its
+  # default is the hand-placed path under the tenant tree, and this is the
+  # platform saying the file is now rendered here instead. Set beside the
+  # template rather than in hosts/ac-box so the two cannot drift apart.
+  homelab.ci.envFile = config.sops.templates.ci-env.path;
 
   # The copy: /run/secrets/rendered/ac-host-env -> /var/lib/ac-host/.env as a
   # regular file (the symlink hazard in the header). Runs at boot and, via
@@ -293,20 +459,22 @@
   #                   named on 12 Sep: AC_ADMIN_PASSWORD and
   #                   GITHUB_STATUS_TOKEN were found on reading the file key
   #                   by key.
+  #   ci              compose/.env.buildkite, 14 Sep 2026 -- the ci-env
+  #                   template. Five secrets: the cluster agent token, the
+  #                   shared github-status-token, and three MinIO-local
+  #                   values generated new because the box's were exposed.
+  #                   Neither link nor copy: both readers are on the host and
+  #                   take a path from homelab.ci.envFile. The box's file
+  #                   under the tenant tree is dead once ac-host-ci has been
+  #                   restarted, and should be removed by hand then.
   #
-  # NOT YET MIGRATED -- hand-placed values, as of 13 Sep 2026.
+  # NOT YET MIGRATED -- hand-placed values, as of 14 Sep 2026.
   #
   #   observability   /var/lib/monitoring/secrets/{grafana-admin,
   #                   grafana-secret-key, unpoller.pass, discord-webhook}
   #                   root:monitoring 0640. Four sops.secrets entries, each
   #                   with a path -- and each read on the host, so the
   #                   symlink is fine there. Check that before assuming it.
-  #   ci              compose/.env.buildkite -- BUILDKITE_AGENT_TOKEN,
-  #                   MINIO_ROOT_PASSWORD, three S3 keys. The .env shape
-  #                   above, and the same question: modules/ci reads it via
-  #                   EnvironmentFile= (host; a symlink is fine), but if the
-  #                   agent container opens it too it needs the copy unit.
-  #                   Decide link-vs-copy by who opens the file.
   #   bot             github-token -- declared, and the file does not exist on
   #                   the box (/var/lib/ac-host/secrets/ is empty). The bot
   #                   runs without it; whatever needs it is not exercised.
