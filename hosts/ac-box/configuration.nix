@@ -229,9 +229,10 @@ in
       # same 1707-token request, first token in 12 s instead of 99.
       engine = "ik-llama-cpp";
 
-      # Three models behind the one port, one loaded at a time, swapped by
-      # llama-swap on demand (the agent-hub module's `models`; see its
-      # description). Every name here matches a file agent-hub's
+      # Three models behind the one port, swapped by llama-swap on demand (the
+      # agent-hub module's `models`; see its description). The two Qwen models
+      # may be resident together (`concurrent` below); the image model always
+      # runs alone. Every name here matches a file agent-hub's
       # scripts/fetch-model.sh fetches, and is the `model` a request names.
       #
       # All paths are quoted STRINGS, not Nix path literals: the option type
@@ -332,6 +333,15 @@ in
 
       # Applied to every llama backend above (the image backend has its own
       # extraArgs); the module appends these after the flags it emits.
+      # coder and instruct stay loaded side by side, so switching between
+      # them costs no 20 s reload: 2 x ~80 GiB of anonymous memory (-rtr)
+      # plus KV, which is what background's memoryShare below is sized for.
+      # They share the 23 cores when both are busy at once -- each then runs
+      # at roughly half speed -- and are unaffected when only one is. Asking
+      # for the image model evicts both; asking for either afterwards loads
+      # just that one.
+      concurrent = [ [ "coder" "instruct" ] ];
+
       extraArgs = [
         # Run-time repack: at load, rewrite the Q8_0 tensors into the
         # row-interleaved layout the fork's GEMM wants. Worth ~6 % prefill
@@ -431,7 +441,10 @@ in
   #      to 0.10 is what hands the model server the other 23 cores.
   homelab.tiers = {
     critical = {
-      memoryShare = 0.10; # 25.1 GiB. Measured usage of the whole racing stack: well under 1 GiB.
+      # 12.5 GiB. Measured usage of the whole racing stack: well under 1 GiB
+      # (0.1 GiB on 14 Sep 2026). Was 0.10; the other 0.05 went to background
+      # so coder and instruct can be resident together.
+      memoryShare = 0.05;
       cpuShare = 0.10; # -> 3 physical cores (0-2) reserved outside the fence.
     };
     interactive = {
@@ -439,15 +452,21 @@ in
       cpuShare = 0.05;
     };
     background = {
-      # ~163 GiB for the model + KV cache. Sized from the model that is
-      # actually deployed (Qwen3-Coder-Next Q8_0, ~79 GiB) with room for a
-      # much larger one, rather than from "give it everything": memoryShare is
-      # a CEILING, not a reservation, so an oversized one costs nothing at
-      # runtime -- but it does consume the 0.9 budget, and the tier it was
-      # taking that budget from was batch, whose ceiling ac-host's
+      # ~176 GiB: two resident Qwen models (`concurrent` above; each ~80 GiB
+      # of anonymous memory under -rtr, measured 80.5 GiB for coder with its
+      # KV) with ~15 GiB to spare. Was 0.65 (~163 GiB), sized for one model
+      # with room for a larger one. memoryShare is a CEILING, not a
+      # reservation, so the unused part costs nothing at runtime -- but it
+      # does consume the 0.9 budget. The 0.05 came from critical, which uses
+      # a tenth of a GiB; not from batch, whose ceiling ac-host's
       # docker-compose.buildkite.yml documents as "~25 GiB" for Nix builds.
       # Starving CI to leave an unusable ceiling here is not a trade.
-      memoryShare = 0.65;
+      #
+      # Page cache counts against this ceiling too and is what gets reclaimed
+      # first, so with both models resident the cached copies of their GGUFs
+      # go -- the cost is that a reload after the image model evicts them
+      # reads from NVMe (~30 s) instead of from cache (~20 s).
+      memoryShare = 0.70;
       cpuShare = 0.70; # CPUWeight 700, and cores 3-25 + siblings via the fence.
       # resources.nix defaults this to 10, which niced the inference server
       # down against everything else on the box. The tenant this tier exists
