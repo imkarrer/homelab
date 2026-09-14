@@ -229,7 +229,7 @@ in
       # same 1707-token request, first token in 12 s instead of 99.
       engine = "ik-llama-cpp";
 
-      # Three models behind the one port, swapped by llama-swap on demand (the
+      # Five models behind the one port, swapped by llama-swap on demand (the
       # agent-hub module's `models`; see its description). The two Qwen models
       # may be resident together (`concurrent` below); the image model always
       # runs alone. Every name here matches a file agent-hub's
@@ -294,6 +294,38 @@ in
         # minutes per image, not seconds; the defaults below are the model's
         # own recipe (8 steps, cfg 1.0) so a bare OpenAI-style request with
         # just a prompt produces a correct image.
+        # FLUX.2 klein, both sizes, next to Z-Image so they can be compared
+        # on the same prompts. 4-step distilled models (--steps 4, no CFG),
+        # each with the Qwen3 text encoder it was trained against -- the
+        # ORIGINAL Qwen3-4B / 8B, not Z-Image's 2507 Instruct -- and the
+        # FLUX.2 VAE. The 4B is Apache 2.0; the 9B is under BFL's
+        # non-commercial licence, which this box is. Both can also edit an
+        # image given one (/v1/images/edits), which Z-Image cannot.
+        flux2-klein-4b = {
+          kind = "image";
+          modelPath = "/srv/agent-hub/models/flux-2-klein-4b-Q8_0.gguf";
+          vae = "/srv/agent-hub/models/flux2-vae.safetensors";
+          textEncoder = "/srv/agent-hub/models/Qwen3-4B-Q8_0.gguf";
+          description = "FLUX.2 klein 4B Q8_0 -- images, fastest here; also edits. Images tab only.";
+          extraArgs = [
+            "--steps" "4"
+            "--cfg-scale" "1.0"
+            "--diffusion-fa"
+          ];
+        };
+        flux2-klein-9b = {
+          kind = "image";
+          modelPath = "/srv/agent-hub/models/flux-2-klein-9b-Q8_0.gguf";
+          vae = "/srv/agent-hub/models/flux2-vae.safetensors";
+          textEncoder = "/srv/agent-hub/models/Qwen3-8B-Q8_0.gguf";
+          description = "FLUX.2 klein 9B Q8_0 -- images, best quality here; also edits. Images tab only.";
+          extraArgs = [
+            "--steps" "4"
+            "--cfg-scale" "1.0"
+            "--diffusion-fa"
+          ];
+        };
+
         z-image-turbo = {
           kind = "image";
           modelPath = "/srv/agent-hub/models/z_image_turbo-Q8_0.gguf";
