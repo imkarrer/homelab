@@ -276,6 +276,11 @@
       minio-root-password = { };
       s3-cache-secret-access-key = { };
       s3-cache-signing-key = { };
+      # bump-lock's credential (scripts/hub-bump-lock.sh, row 24): a GitHub
+      # fine-grained token, imkarrer/homelab only, Contents read+write. The
+      # agent forwards it to jobs as HOMELAB_PUSH_TOKEN; absent, bump-lock
+      # skips and says so. Minted 14 Sep 2026.
+      homelab-push-token = { };
     };
 
     # /var/lib/ac-host/.env, as of the box on 13 Sep 2026 (sha256 d85835fd...,
@@ -440,6 +445,7 @@
         GITHUB_STATUS_TOKEN=${config.sops.placeholder.github-status-token}
         GITHUB_STATUS_REPO=imkarrer/ac-practice
         AC_PAGES_PUSH=1
+        HOMELAB_PUSH_TOKEN=${config.sops.placeholder.homelab-push-token}
       '';
     };
   };
