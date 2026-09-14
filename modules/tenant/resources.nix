@@ -351,9 +351,17 @@ in
 
       # Evaluation-time only -- costs nothing in the closure -- so it runs
       # unconditionally, independent of homelab.enforce.slices (enforce.nix).
+      #
+      # The budget is compared with a tolerance far below any share anyone
+      # would write (a thousandth of a percent of the machine) because the
+      # shares are doubles: 0.02 + 0.02 + 0.81 + 0.05 is 0.9000000000000001,
+      # and the raw comparison refused ac-box's real table on 14 Sep 2026
+      # with the message "Got 0.900000" -- toString rounds to six places, so
+      # the failure was invisible in its own output. tests/eval-resources.nix
+      # holds that table as floatBudget.
       assertions = [
         {
-          assertion = totalMemoryShare <= 0.9;
+          assertion = totalMemoryShare <= 0.9 + 1.0e-6;
           message = ''
             homelab.tiers: memoryShare must sum to <= 0.9 across all tiers
             (critical + interactive + background + batch), leaving headroom

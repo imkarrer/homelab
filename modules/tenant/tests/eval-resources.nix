@@ -208,6 +208,14 @@ in
     ];
   };
 
+  # Shares that sum to 0.9 on paper and to 0.9000000000000001 as doubles
+  # (fixtures/resources-float-budget.nix). The budget assertion must accept
+  # a sum that is over by rounding noise and reject one that is over by a
+  # share -- brokenBudget above is the other side of that line.
+  floatBudget = mkCase {
+    extraModules = [ ./fixtures/resources-float-budget.nix ];
+  };
+
   # Case name -> whether `<case>.checked` must evaluate cleanly (false for
   # brokenBudget, which exists to prove the 0.9 memoryShare budget assertion
   # fires). Read by modules/tenant/tests/check.nix, which is what makes
@@ -215,6 +223,7 @@ in
   expected = {
     good = true;
     allFalseNoSlicesEmitted = true;
+    floatBudget = true;
     brokenBudget = false;
   };
 }
