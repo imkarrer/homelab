@@ -374,6 +374,15 @@ in
       # just that one.
       concurrent = [ [ "coder" "instruct" ] ];
 
+      # nginx in front, so http://<lan>:8100/ is a page that lists chat
+      # models and image models apart and opens each in its own UI.
+      # llama-swap's /ui cannot: it shows every model on every playground
+      # tab, and the first person to try it picked the image model on the
+      # Chat tab. llama-swap itself moves to 127.0.0.1:8100; nginx.service
+      # joins this tenant's units in tenants.nix so it lives in the same
+      # slice.
+      landingPage = true;
+
       extraArgs = [
         # Run-time repack: at load, rewrite the Q8_0 tensors into the
         # row-interleaved layout the fork's GEMM wants. Worth ~6 % prefill

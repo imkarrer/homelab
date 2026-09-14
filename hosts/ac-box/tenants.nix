@@ -466,7 +466,14 @@
       # the tier that opts out of resource control entirely.
       tier = "background";
 
-      units = [ "agent-hub-llm.service" ];
+      # nginx: the landing page in front of llama-swap (services.agent-hub
+      # .llm.landingPage in configuration.nix). Nothing else on this box runs
+      # nginx; if something ever does, this claim relocates it -- see the
+      # AGENTS.md note on `units` being an authoritative claim.
+      units = [
+        "agent-hub-llm.service"
+        "nginx.service"
+      ];
 
       ports = {
         # NOT the module's own default (8091) -- that falls inside assetto's
