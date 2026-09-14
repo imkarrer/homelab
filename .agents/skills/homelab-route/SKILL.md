@@ -10,10 +10,11 @@ backend, decides.
 
 | | Frontier (the supervisor's own model) | agent-hub (`agent-hub-llm` on ac-box) |
 | --- | --- | --- |
-| Model | whatever the harness runs | Qwen3-Coder-Next 80B-A3B, Q8_0, ctx 32k |
+| Model | whatever the harness runs | `coder`: Qwen3-Coder-Next 80B-A3B, Q8_0, ctx 32k; `instruct`: its general-purpose sibling for prose and judgement; both behind llama-swap, one loaded at a time (`hub-ask.sh -M`) |
 | Cost | per token, external | zero, and nothing leaves the LAN |
-| Prefill | fast | **~13 tok/s** — 4k tokens ≈ 5 min before the first output token |
-| Generation | fast | ~4.8 tok/s — 500 tokens ≈ 2 min |
+| Prefill | fast | **~140 tok/s** (measured 14 Sep 2026 on the live unit; was 13 the day before — agent-hub `docs/prefill-tuning.md`) — 4k tokens ≈ 30 s before the first output token, the full 32k ≈ 4 min |
+| Generation | fast | ~13 tok/s — 500 tokens ≈ 40 s |
+| Swap | — | ~20-60 s the first call after naming a model that is not the one loaded |
 | Reach | tools, files, ssh | text in, text out; no tools |
 | Reliability of *facts* | good | **poor** — asked what `mkOverride 90` means, it said `mkForce` is 100 and `mkDefault` 50; both are wrong (50 and 1000; lower wins) |
 
@@ -24,7 +25,9 @@ until then that agent drives `hub-ask.sh` itself.
 
 ## Route local when all four hold
 
-1. **The prompt fits in ~6k tokens** including every file it needs. `hub-ask.sh`
+1. **The prompt fits in ~6k tokens** including every file it needs (that budget
+   is now ~45 s of prefill, not 8 min; it stays because a task needing more
+   context than that is usually a task needing `grep`, not a bigger prompt). `hub-ask.sh`
    counts and refuses above budget; a task that needs the whole module tree
    to reason about is not a local task, however simple the edit.
 2. **The output is bounded** — a function, a test case, a doc section, a
