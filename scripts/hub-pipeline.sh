@@ -117,8 +117,8 @@ agents() {
   code=$(bk GET "$API/organizations/$ORG/agents?per_page=100")
   [ "$code" = 200 ] || { echo "  GET /agents: HTTP $code"; cat "$TMP/body"; echo; return 2; }
   echo "  name / connection_state / cluster / queue"
-  jq -r '.[] | "  \(.name) / \(.connection_state) / \(.cluster.id // .cluster // "null") / \((.meta_data // []) | map(select(startswith("queue="))) | join(",") | if . == "" then "-" else . end)"' "$TMP/body"
-  jq -e --arg c "$CLUSTER" '[.[] | select(.connection_state == "connected" and ((.cluster.id // .cluster) == $c))] | length > 0' "$TMP/body" >/dev/null
+  jq -r '.[] | "  \(.name) / \(.connection_state) / \(.cluster_url // "" | split("/") | last // "unclustered") / \((.meta_data // []) | map(select(startswith("queue="))) | join(",") | if . == "" then "-" else . end)"' "$TMP/body"
+  jq -e --arg c "$CLUSTER" '[.[] | select(.connection_state == "connected" and ((.cluster_url // "" | split("/") | last) == $c))] | length > 0' "$TMP/body" >/dev/null
 }
 hazard() {
   echo "== the cluster: $BUILDKITE_CLUSTER_NAME $CLUSTER =="
