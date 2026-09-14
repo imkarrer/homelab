@@ -4,6 +4,7 @@
   "description": "Object managed by homelab scripts/hub-pipeline.sh from hub/pipelines/home-arcade.json; the steps are home-arcade/.buildkite/pipeline.yml. Do not edit here.",
   "repository": "https://github.com/imkarrer/home-arcade.git",
   "default_branch": "main",
+  "cluster_id": "9c1e5f56-22de-42cf-aa00-4b91d5583922",
   "configuration": "agents:\n  queue: self\nsteps:\n  - label: \":pipeline: upload .buildkite/pipeline.yml\"\n    command: buildkite-agent pipeline upload\n",
   "provider_settings": {
     "trigger_mode": "code",

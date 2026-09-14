@@ -15,11 +15,13 @@
 # Usage: hub-cluster-token.sh [description]     default: "ac-box <date>"
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
-# shellcheck source=lib/buildkite-token.sh
+# shellcheck source=scripts/lib/buildkite-token.sh
 . "$ROOT/scripts/lib/buildkite-token.sh"
+# shellcheck source=scripts/lib/buildkite-cluster.sh
+. "$ROOT/scripts/lib/buildkite-cluster.sh"
 
 ORG=isaac-karrer
-CLUSTER=9c1e5f56-22de-42cf-aa00-4b91d5583922   # "Default cluster", the only one; hub-pipeline.sh pins the same id
+CLUSTER="$BUILDKITE_CLUSTER_ID"   # lib/buildkite-cluster.sh; hub-pipeline.sh reads the same file
 DESC="${1:-ac-box $(date +%F)}"
 
 export NIX_CONFIG="experimental-features = nix-command flakes"

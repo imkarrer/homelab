@@ -23,12 +23,37 @@
 # It creates; when Buildkite answers 422 "already taken" it updates the slug
 # with the same body. Both are write_pipelines. Which path ran is printed.
 #
-# The agent. The only agent, `ac-box` (modules/ci), is registered UNCLUSTERED
-# with tag queue=self. The org's "Default cluster" has a `self` queue too, but
-# the agent is not in it, so a pipeline created with a cluster_id would wait
-# for an agent forever. Definitions therefore carry no cluster_id and their
-# bootstrap step targets `agents: {queue: self}` -- the shape ac-host's
-# pipeline has worked with since 12 Sep. Verified against the live API 13 Sep.
+# THE CLUSTER, AND THE ORDERING HAZARD. Buildkite no longer creates an
+# unclustered pipeline: the first real run, 13 Sep, got 422 "Cluster must be
+# specified". So every definition carries cluster_id = the Default cluster
+# (lib/buildkite-cluster.sh, one constant shared with hub-cluster-token.sh),
+# the validator requires exactly that id, and the three ac-host* objects that
+# predate the rule -- grandfathered, unclustered, definitions not in git and
+# not readable with this token -- are moved in by `adopt`, a PATCH of only
+# {"cluster_id": ...}.
+#
+# A clustered pipeline is served ONLY by an agent registered with a token
+# minted for that cluster. The `ac-box` agent registered unclustered
+# (`cluster: null`, tag queue=self); the cluster has a `self` queue the tag
+# lands in once the agent reconnects with the cluster token, and until then
+# nothing serves a clustered pipeline. So between `adopt ac-host` and the
+# agent's reconnect, ac-host jobs queue and do not run. That is the ci
+# tenant, drainable (AGENTS.md), minutes -- but it is an outage if the
+# reconnect never comes, and the reconnect is a homelab switch (the token in
+# the agent's env, bead .39.1) plus `systemctl restart ac-host-ci` from ssh,
+# NEVER from a job on that agent (modules/ci HAZARD 2: the job would kill
+# itself). The order is therefore:
+#
+#   1. switch the closure that renders the cluster token into the agent's env
+#   2. ssh ac-box sudo systemctl restart ac-host-ci
+#   3. hub-pipeline.sh agents         -> `ac-box` connected, cluster non-null
+#   4. hub-pipeline.sh adopt ac-host; adopt ac-host-ops; adopt ac-host-series
+#   5. hub-pipeline.sh homelab; hub-pipeline.sh home-arcade
+#   6. push to homelab; watch the agent log for homelab/builds/1
+#
+# `adopt` and the create path both run step 3's check first and say so when
+# no connected agent is in the cluster; they do not refuse, because the
+# operator may be sequencing deliberately, but the line is there to be read.
 #
 # GitHub. Buildkite's GitHub App is installed on the imkarrer account (ac-host
 # builds on push); whether it covers a given repo is not readable through the
@@ -36,26 +61,39 @@
 # object exists the script prints the pipeline's webhook URL and the manual
 # fallback, and the proof is the first build.
 #
-# Usage: hub-pipeline.sh <tree> [--dry-run]     tree from hub/repos.psv
-#        hub-pipeline.sh --token-check          scopes only; nothing written
-# The dry run needs no token and sends nothing.
+# Usage: hub-pipeline.sh <tree> [--dry-run]      ensure from hub/pipelines/<tree>.json
+#        hub-pipeline.sh adopt <slug> [--dry-run] move an existing object into the cluster
+#        hub-pipeline.sh agents                   name / state / cluster / queue, read-only
+#        hub-pipeline.sh --token-check            scopes only; nothing written
+# A dry run needs no token and sends nothing.
 set -uo pipefail
 ORG=isaac-karrer
 API="https://api.buildkite.com/v2"
 HUB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REG="${HUB_REGISTRY:-$HUB/hub/repos.psv}"
 export NIX_CONFIG="experimental-features = nix-command flakes"
+# shellcheck source=scripts/lib/buildkite-cluster.sh
+. "$HUB/scripts/lib/buildkite-cluster.sh"
+CLUSTER="$BUILDKITE_CLUSTER_ID"
 
-TREE=""; DRY=0; TOKEN_CHECK=0
-for a in "$@"; do
-  case "$a" in
+USAGE="usage: $0 <tree> [--dry-run] | $0 adopt <slug> [--dry-run] | $0 agents | $0 --token-check"
+MODE=ensure; TREE=""; SLUG=""; DRY=0
+while [ $# -gt 0 ]; do
+  case "$1" in
     --dry-run) DRY=1 ;;
-    --token-check) TOKEN_CHECK=1 ;;
-    -*) echo "usage: $0 <tree> [--dry-run] | $0 --token-check"; exit 2 ;;
-    *) TREE="$a" ;;
+    --token-check) MODE=tokencheck ;;
+    adopt) MODE=adopt; SLUG="${2:-}"; shift ;;
+    agents) MODE=agents ;;
+    -*) echo "$USAGE"; exit 2 ;;
+    *) TREE="$1" ;;
   esac
+  shift
 done
-[ -n "$TREE" ] || [ $TOKEN_CHECK -eq 1 ] || { echo "usage: $0 <tree> [--dry-run] | $0 --token-check"; exit 2; }
+case "$MODE" in
+  ensure) [ -n "$TREE" ] || { echo "$USAGE"; exit 2; } ;;
+  adopt)  [ -n "$SLUG" ] || { echo "$USAGE"; exit 2; }
+          case "$SLUG" in *[!a-z0-9-]*) echo "slug must be [a-z0-9-]: $SLUG"; exit 2 ;; esac ;;
+esac
 
 # jq is not on PATH here or on the agent; nix brings it, as hub-gates.sh does
 # for flox. One wrapper so every jq call below is the same pinned binary.
@@ -71,8 +109,39 @@ bk() {  # bk <method> <url> [body-file]  -> prints http code, body in $TMP/body
     curl -sS -X "$method" -H @- "${data[@]}" -o "$TMP/body" -w '%{http_code}' "$url"
 }
 
+# ---- the agents, as Buildkite sees them (read_agents) ------------------------
+# Prints one line per agent and returns 0 only when a CONNECTED agent is in
+# $CLUSTER -- the fact steps 3-5 of the sequence above depend on.
+agents() {
+  local code
+  code=$(bk GET "$API/organizations/$ORG/agents?per_page=100")
+  [ "$code" = 200 ] || { echo "  GET /agents: HTTP $code"; cat "$TMP/body"; echo; return 2; }
+  echo "  name / connection_state / cluster / queue"
+  jq -r '.[] | "  \(.name) / \(.connection_state) / \(.cluster.id // .cluster // "null") / \((.meta_data // []) | map(select(startswith("queue="))) | join(",") | if . == "" then "-" else . end)"' "$TMP/body"
+  jq -e --arg c "$CLUSTER" '[.[] | select(.connection_state == "connected" and ((.cluster.id // .cluster) == $c))] | length > 0' "$TMP/body" >/dev/null
+}
+hazard() {
+  echo "== the cluster: $BUILDKITE_CLUSTER_NAME $CLUSTER =="
+  echo "  Only an agent registered with a token minted for this cluster serves a"
+  echo "  pipeline in it. While ac-box's agent is unclustered, every job on a"
+  echo "  clustered pipeline queues and does not run: ci tenant, drainable, but"
+  echo "  it stays that way until the closure with the cluster token has been"
+  echo "  switched AND \`systemctl restart ac-host-ci\` has run from ssh (never"
+  echo "  from a job -- modules/ci HAZARD 2). Header of this script has the order."
+}
+agent_check() {  # after hazard(); needs TOKEN
+  echo "== agents (GET /v2/organizations/$ORG/agents) =="
+  if agents; then
+    echo "  a connected agent is in the cluster: jobs will run"
+  else
+    echo "  NO CONNECTED AGENT IN THE CLUSTER: anything clustered queues until the"
+    echo "  agent reconnects with the cluster token. Proceeding because you asked;"
+    echo "  the order in this script's header is what makes that a minutes-long gap."
+  fi
+}
+
 # ---- the definition, checked against what the agent and the tenants assume --
-if [ -n "$TREE" ]; then
+if [ "$MODE" = ensure ]; then
   REMOTE=$(awk -F'|' -v r="$TREE" '$1==r{print $3}' "$REG")
   [ -n "$REMOTE" ] || { echo "unknown tree: $TREE (see $REG)"; exit 2; }
   DEF="$HUB/hub/pipelines/$TREE.json"
@@ -83,10 +152,10 @@ if [ -n "$TREE" ]; then
   WANT_REPO="https://github.com/$GH.git"
 
   echo "== definition: ${DEF#"$HUB"/} =="
-  if ! jq -e --arg t "$TREE" --arg repo "$WANT_REPO" '
+  if ! jq -e --arg t "$TREE" --arg repo "$WANT_REPO" --arg c "$CLUSTER" '
       (.name == $t and .slug == $t)
       and (.repository == $repo)
-      and ((.cluster_id // null) == null)
+      and (.cluster_id == $c)
       and (.configuration | test("buildkite-agent pipeline upload"))
       and (.configuration | test("queue: *\"?self\"?"))
       and (.provider_settings.trigger_mode == "code")
@@ -94,13 +163,13 @@ if [ -n "$TREE" ]; then
     echo "  REJECTED. Every definition must have, and this one does not:"
     echo "    name == slug == \"$TREE\"      (ac-host's and home-arcade's \`trigger: homelab\` steps assume the slug)"
     echo "    repository == \"$WANT_REPO\"   (from $REG; https, as the agent clones)"
-    echo "    no cluster_id                (the agent is unclustered; a clustered pipeline never gets it)"
+    echo "    cluster_id == \"$CLUSTER\"   (lib/buildkite-cluster.sh: the one cluster the agent joins; Buildkite refuses none, and any other never gets the agent)"
     echo "    configuration with \`buildkite-agent pipeline upload\` under \`queue: self\`"
     echo "    provider_settings.trigger_mode == \"code\"   (build on push)"
     jq . "$DEF" 2>&1 | sed 's/^/    /' | head -20
     exit 1
   fi
-  echo "  name/slug $TREE, repository $WANT_REPO, unclustered, queue=self, upload step: OK"
+  echo "  name/slug $TREE, repository $WANT_REPO, cluster $CLUSTER, queue=self, upload step: OK"
   echo "  configuration, decoded:"
   jq -r .configuration "$DEF" | sed '/^$/d; s/^/    | /'
 fi
@@ -109,15 +178,29 @@ fi
 if [ $DRY -eq 1 ]; then
   echo
   echo "== dry run: nothing sent, no token read =="
-  echo "POST $API/organizations/$ORG/pipelines"
-  echo "Authorization: Bearer <token: not read in a dry run>"
-  echo "Content-Type: application/json"
-  jq . "$DEF"
-  echo
-  echo "on 422 (name or slug already taken):"
-  echo "PATCH $API/organizations/$ORG/pipelines/$TREE   (same body)"
-  echo
-  echo "then, read-only: GET $API/organizations/$ORG/repository_connections"
+  case "$MODE" in
+    ensure)
+      echo "POST $API/organizations/$ORG/pipelines"
+      echo "Authorization: Bearer <token: not read in a dry run>"
+      echo "Content-Type: application/json"
+      jq . "$DEF"
+      echo
+      echo "on 422 (name or slug already taken):"
+      echo "PATCH $API/organizations/$ORG/pipelines/$TREE   (same body)"
+      echo
+      echo "before either: GET $API/organizations/$ORG/agents   (is a connected agent in the cluster?)"
+      echo "after, read-only: GET $API/organizations/$ORG/repository_connections" ;;
+    adopt)
+      hazard
+      echo "PATCH $API/organizations/$ORG/pipelines/$SLUG"
+      echo "Authorization: Bearer <token: not read in a dry run>"
+      echo "Content-Type: application/json"
+      printf '{"cluster_id": "%s"}\n' "$CLUSTER"
+      echo
+      echo "before: GET $API/organizations/$ORG/agents   (is a connected agent in the cluster?)"
+      echo "then the response's slug and cluster_id are checked: slug == $SLUG, cluster_id == $CLUSTER" ;;
+    *) echo "$USAGE"; exit 2 ;;
+  esac
   exit 0
 fi
 
@@ -132,13 +215,39 @@ if [ "$code" != 200 ]; then
 fi
 SCOPES=$(jq -r '.scopes | join(" ")' "$TMP/body")
 echo "  scopes: $SCOPES"
-case " $SCOPES " in
-  *" write_pipelines "*) ;;
-  *) echo "  write_pipelines is not among them; this token cannot create or update a pipeline"; exit 1 ;;
+need() { case " $SCOPES " in *" $1 "*) ;; *) echo "  $1 is not among them; this token cannot $2"; exit 1 ;; esac; }
+case "$MODE" in
+  tokencheck) exit 0 ;;
+  agents) need read_agents "list agents"
+          echo "== agents (GET /v2/organizations/$ORG/agents) =="
+          if agents; then echo "  a connected agent is in cluster $CLUSTER"; exit 0
+          else echo "  no connected agent in cluster $CLUSTER ($BUILDKITE_CLUSTER_NAME)"; exit 1; fi ;;
 esac
-[ $TOKEN_CHECK -eq 1 ] && exit 0
+need write_pipelines "create or update a pipeline"
+
+# ---- adopt: an existing, unreadable object gets the cluster and nothing else -
+if [ "$MODE" = adopt ]; then
+  hazard
+  agent_check
+  printf '{"cluster_id": "%s"}' "$CLUSTER" > "$TMP/adopt.json"
+  echo "== adopt $SLUG: PATCH $API/organizations/$ORG/pipelines/$SLUG {\"cluster_id\": \"$CLUSTER\"} =="
+  code=$(bk PATCH "$API/organizations/$ORG/pipelines/$SLUG" "$TMP/adopt.json")
+  if [ "$code" != 200 ]; then
+    echo "  HTTP $code"; jq . "$TMP/body" 2>/dev/null || cat "$TMP/body"; echo
+    [ "$code" = 404 ] && echo "  404: no pipeline with slug '$SLUG' in $ORG (adopt does not create; \`$0 <tree>\` does)"
+    exit 1
+  fi
+  GOT_SLUG=$(jq -r .slug "$TMP/body"); GOT_CLUSTER=$(jq -r '.cluster_id // "null"' "$TMP/body")
+  echo "  slug $GOT_SLUG, cluster_id $GOT_CLUSTER  $(jq -r .web_url "$TMP/body")"
+  [ "$GOT_SLUG" = "$SLUG" ] || { echo "  SLUG MISMATCH: Buildkite answered for '$GOT_SLUG'"; exit 1; }
+  [ "$GOT_CLUSTER" = "$CLUSTER" ] || { echo "  CLUSTER DID NOT TAKE: Buildkite holds '$GOT_CLUSTER', wanted $CLUSTER"; exit 1; }
+  echo "  adopted: $SLUG is in $BUILDKITE_CLUSTER_NAME; its steps' queue=self resolves to the cluster's self queue"
+  exit 0
+fi
 
 # ---- create, or update the slug that already exists -------------------------
+hazard
+agent_check
 echo "== $TREE: POST $API/organizations/$ORG/pipelines =="
 code=$(bk POST "$API/organizations/$ORG/pipelines" "$DEF")
 PATHRAN=""
@@ -165,14 +274,14 @@ fi
 # agent and the trigger steps depend on back out of it rather than trusting
 # the request.
 SLUG=$(jq -r .slug "$TMP/body"); WEB=$(jq -r .web_url "$TMP/body")
-CLUSTER=$(jq -r '.cluster_id // "null"' "$TMP/body")
+GOT_CLUSTER=$(jq -r '.cluster_id // "null"' "$TMP/body")
 HOOK=$(jq -r '.provider.webhook_url // "?"' "$TMP/body")
 PREPO=$(jq -r '.provider.settings.repository // "?"' "$TMP/body")
 PMODE=$(jq -r '.provider.settings.trigger_mode // "?"' "$TMP/body")
 echo "  $PATHRAN: $SLUG  $WEB"
-echo "  cluster_id $CLUSTER; provider repository $PREPO, trigger_mode $PMODE"
+echo "  cluster_id $GOT_CLUSTER; provider repository $PREPO, trigger_mode $PMODE"
 [ "$SLUG" = "$TREE" ] || { echo "  SLUG MISMATCH: Buildkite holds '$SLUG', the trigger steps say '$TREE'"; exit 1; }
-[ "$CLUSTER" = null ] || { echo "  CLUSTERED: $CLUSTER -- the ac-box agent is not in any cluster and will never take this pipeline's jobs"; exit 1; }
+[ "$GOT_CLUSTER" = "$CLUSTER" ] || { echo "  WRONG CLUSTER: Buildkite holds '$GOT_CLUSTER', the agent joins $CLUSTER"; exit 1; }
 
 # ---- what the operator may still owe on the GitHub side ---------------------
 echo
