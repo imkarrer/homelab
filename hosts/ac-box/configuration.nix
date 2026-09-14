@@ -220,6 +220,15 @@ in
     llm = {
       enable = true;
 
+      # ik_llama.cpp, not nixpkgs' llama-cpp. On this CPU-only box the fork's
+      # matrix kernels are a 4-5x, measured 14 Sep 2026 on this model, these
+      # cores and this memory placement: prefill 121 vs 30 tok/s, generation
+      # 12.5 vs 5.8 (agent-hub docs/prefill-tuning.md has every run). The
+      # deployed unit before this change measured 17 / 4.5; the validated
+      # unit below measures 140 / 13.3 on the same 1707-token request, first
+      # token in 12 s instead of 99.
+      engine = "ik-llama-cpp";
+
       # Qwen3-Coder-Next, 80B total / 3B active MoE (512 experts, 10 routed
       # per token), Q8_0, ~85 GB across four shards. Point llama.cpp at shard
       # 1; it finds the rest in the same directory.
@@ -267,27 +276,22 @@ in
       # constraint on CPU is PREFILL, not RAM: prompt processing is
       # compute-bound, this is Broadwell (no AVX-512), and ingesting a
       # six-figure-token prompt would take longer than the answer is worth.
-      # Raise it once a measured prefill rate says it is affordable.
+      # Raise it once a measured prefill rate says it is affordable. As of
+      # 14 Sep 2026 one does -- 128 tok/s at 4k, 119 at 8k with the engine
+      # below -- so the full 32k is under five minutes and more is a routing
+      # decision (homelab-route) rather than a hardware one. Not raised in
+      # the same change that swapped the engine; one variable at a time.
       contextSize = 32768;
 
       extraArgs = [
-        # THE flag on this box. Two NUMA nodes (dual E5-2680 v4); without
-        # it llama.cpp allocates on whichever node loaded the model and the
-        # other socket's threads pay remote-memory latency on every token.
-        "--numa" "distribute"
-
-        # Prompt processing is compute-bound rather than bandwidth-bound, so
-        # unlike --threads it does benefit from the SMT siblings: 23 physical
-        # cores x 2 threads inside the fence.
-        "--threads-batch" "46"
-
-        # Swap is 0 on this box, so an evicted model page is a disk re-read
-        # in the middle of a token. Pinning is safe here only because
-        # background.slice's MemoryMax (0.65 * 251 GiB ~= 163 GiB) is far
-        # above the model + KV cache -- mlock'd pages cannot be reclaimed,
-        # so a model sized near the ceiling turns a slowdown into an OOM
-        # kill. Needs LimitMEMLOCK below; systemd's default is 8 MiB.
-        "--mlock"
+        # Run-time repack: at load, rewrite the Q8_0 tensors into the
+        # row-interleaved layout the fork's GEMM wants. Worth ~6 % prefill
+        # (137 vs 128 tok/s at 4k), and it disables mmap, which is the point:
+        # the model is then anonymous memory allocated under THIS unit's
+        # NUMAPolicy below, so its placement across the two sockets is
+        # decided by this file rather than by whichever node the page cache
+        # happened to hold the file on. Load is ~20 s from a warm page cache.
+        "-rtr"
 
         "--flash-attn" "on"
 
@@ -295,16 +299,52 @@ in
         # agent-hub tenant's `metrics = null` in tenants.nix for why
         # (metrics.nix scrapes 127.0.0.1 and this binds the LAN address).
         "--metrics"
+
+        # Gone, with the measurement that removed each:
+        #
+        #   --numa distribute   Was called "THE flag on this box" here. It
+        #                       spreads THREADS across nodes and sets no
+        #                       memory policy -- numa_maps showed all 85 GB
+        #                       on node 1 regardless -- and its per-node
+        #                       pinning fights the cgroup fence: 30 -> 16
+        #                       tok/s prefill at 23 threads, and at 46
+        #                       threads generation collapsed to 0.15 tok/s.
+        #                       Placement is NUMAPolicy=interleave below.
+        #   --threads-batch 46  Prefill does NOT benefit from the SMT siblings
+        #                       here; threads landing on them cost ~20 %.
+        #                       The cpuset below holds 23 CPUs, so batch
+        #                       threads default to --threads.
+        #   --mlock             Nothing to pin: -rtr means no file-backed
+        #                       pages, and the box has no swap.
       ];
     };
   };
 
-  # --mlock is a no-op-with-a-warning without this: systemd's default
-  # LimitMEMLOCK is 8 MiB, and llama.cpp will fail to pin a 100+ GiB model
-  # against it. Set here rather than in the agent-hub module because it is a
-  # consequence of THIS host's extraArgs choice, not a property of the module.
-  # Merges with the module's own serviceConfig -- different keys, no conflict.
-  systemd.services.agent-hub-llm.serviceConfig.LimitMEMLOCK = "infinity";
+  # Where the model server's threads and memory go. Set here rather than in
+  # the agent-hub module because every value is a fact about THIS host's
+  # sockets and fence, not a property of the module. Merges with the
+  # module's own serviceConfig -- different keys, no conflict.
+  systemd.services.agent-hub-llm.serviceConfig = {
+    # Physical cores only: the fence background.slice gets from resources.nix
+    # is 3-25 plus SMT siblings 31-53, and a child cgroup's cpuset must be a
+    # subset of its parent's -- this is that subset. With the siblings
+    # available the scheduler lands some of the 23 compute threads on them
+    # and prefill drops ~20 % (99 -> 122 tok/s with this line, batch 2 in
+    # agent-hub docs/prefill-tuning.md). Coupled to `threads = 23` above and
+    # to the tier shares below exactly as that option's comment says: if the
+    # fence moves, this moves with it.
+    AllowedCPUs = "3-25";
+
+    # Spread the model over both sockets' memory controllers. Without a
+    # policy the 85 GB landed wherever the loading thread ran -- 100 % on
+    # node 1, measured -- and half the cores read every weight across QPI.
+    # Interleave is what lets a two-socket thread set beat a one-socket one
+    # with these kernels (121 vs 78 tok/s prefill, 12.5 vs 8.5 generation).
+    # -rtr in extraArgs makes this the policy for the model itself, not just
+    # for what the page cache happens to fault under it.
+    NUMAPolicy = "interleave";
+    NUMAMask = "0-1";
+  };
 
   # ---------------------------------------------------------------------------
   # Tier shares, rebalanced to point this machine at the model server.
