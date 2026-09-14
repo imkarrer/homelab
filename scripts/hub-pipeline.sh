@@ -55,11 +55,14 @@
 # no connected agent is in the cluster; they do not refuse, because the
 # operator may be sequencing deliberately, but the line is there to be read.
 #
-# GitHub. Buildkite's GitHub App is installed on the imkarrer account (ac-host
-# builds on push); whether it covers a given repo is not readable through the
-# API -- repository_connections lists the App, not its repos. So after the
-# object exists the script prints the pipeline's webhook URL and the manual
-# fallback, and the proof is the first build.
+# GitHub. A pipeline object builds nothing on its own: what turns a push into
+# a build here is a REPO WEBHOOK on the pipeline's own deliver URL. Buildkite's
+# GitHub App is installed on this account and does NOT do it -- homelab had App
+# access, no hook, and nine hours of pushes that created no build (bead
+# homelab-pxk, 14 Sep 2026). So this script converges the hook the same way it
+# converges the pipeline, from the deliver URL the pipeline object returns, and
+# prints GitHub's own recent deliveries as the proof. That step needs `gh auth
+# login` once per machine; without it the hook is reported, not changed.
 #
 # Usage: hub-pipeline.sh <tree> [--dry-run]      ensure from hub/pipelines/<tree>.json
 #        hub-pipeline.sh adopt <slug> [--dry-run] move an existing object into the cluster
@@ -189,6 +192,11 @@ if [ $DRY -eq 1 ]; then
       echo "PATCH $API/organizations/$ORG/pipelines/$TREE   (same body)"
       echo
       echo "before either: GET $API/organizations/$ORG/agents   (is a connected agent in the cluster?)"
+      echo
+      echo "then, from the pipeline's provider.webhook_url, the repo hook is converged:"
+      echo "  gh api repos/<owner/repo>/hooks                  (is a webhook.buildkite.com hook there?)"
+      echo "  gh api -X POST|PATCH repos/<owner/repo>/hooks    (url, push + pull_request, json, active)"
+      echo "  gh api repos/<owner/repo>/hooks/<id>/deliveries  (what GitHub says it delivered)"
       echo "after, read-only: GET $API/organizations/$ORG/repository_connections" ;;
     adopt)
       hazard
@@ -283,25 +291,103 @@ echo "  cluster_id $GOT_CLUSTER; provider repository $PREPO, trigger_mode $PMODE
 [ "$SLUG" = "$TREE" ] || { echo "  SLUG MISMATCH: Buildkite holds '$SLUG', the trigger steps say '$TREE'"; exit 1; }
 [ "$GOT_CLUSTER" = "$CLUSTER" ] || { echo "  WRONG CLUSTER: Buildkite holds '$GOT_CLUSTER', the agent joins $CLUSTER"; exit 1; }
 
-# ---- what the operator may still owe on the GitHub side ---------------------
+# ---- the GitHub side: the webhook, converged like the pipeline --------------
+# A pipeline object alone builds nothing. What turns a push into a build on
+# this account is a REPO WEBHOOK pointing at the pipeline's own deliver URL --
+# not Buildkite's GitHub App, which is installed here and does not do it: on
+# 14 Sep 2026 homelab had App access and no hook, and nine hours of pushes
+# created no build while ac-host, the one tree with a hook, kept building
+# (bead homelab-pxk). The App may cover a repo and the pushes still go
+# nowhere, so "it is in the installation list" is not a check, and the hook
+# is not an operator chore to be printed and remembered. It is derived from
+# the pipeline object we just read, so this script owns it exactly as it owns
+# the pipeline.
+#
+# gh, not curl: the GitHub token stays in gh's own store and never passes
+# through this script's environment or argv. `gh auth login` once per machine
+# is the only manual step, and its absence is reported rather than guessed at.
 echo
-echo "== GitHub side =="
-echo "  Buildkite's GitHub App is what turns a push into a build. It is installed"
-echo "  on the imkarrer account (ac-host builds today); whether it may see"
-echo "  $GH is not readable here, so the proof is the first push:"
-echo "    watch: ssh ac-box docker logs -f ac-host-ci-agent-1     (a $SLUG/builds/1 job)"
-echo "  If the first push does not build, add this as a GitHub webhook on"
-echo "  https://github.com/$GH/settings/hooks -- content type json, events push +"
-echo "  pull_request -- or grant the App the repo at"
-echo "  https://github.com/settings/installations (Buildkite -> Repository access):"
-echo "    $HOOK"
+echo "== GitHub webhook on $GH =="
+gh() { nix shell nixpkgs#gh -c gh "$@"; }
+
+if [ "$HOOK" = "?" ] || [ -z "$HOOK" ]; then
+  echo "  the pipeline object carries no provider.webhook_url; nothing to converge."
+  echo "  (a pipeline whose provider is not GitHub, or a response shape that moved)"
+  exit 0
+fi
+
+if ! gh auth status >/dev/null 2>&1; then
+  echo "  gh is not authenticated on this machine, so the hook cannot be checked."
+  echo "  Either run once:  gh auth login --hostname github.com --git-protocol https --web"
+  echo "  or add this by hand at https://github.com/$GH/settings/hooks"
+  echo "  -- content type json, events push + pull_request:"
+  echo "    $HOOK"
+  exit 1
+fi
+
+# Match on the deliver PATH, not the whole URL: a pipeline that is deleted and
+# re-created gets a new deliver id, and the hook to fix is the one already
+# pointing at webhook.buildkite.com, not a second one beside it.
+HOOKS="$TMP/hooks.json"
+if ! gh api "repos/$GH/hooks" > "$HOOKS" 2>"$TMP/hookerr"; then
+  echo "  GET repos/$GH/hooks failed:"; sed 's/^/    /' "$TMP/hookerr"
+  echo "  (the gh token needs admin:repo_hook, which the 'repo' scope includes)"
+  exit 1
+fi
+EXISTING=$(jq -r --arg u "$HOOK" '
+  [ .[] | select(.config.url // "" | startswith("https://webhook.buildkite.com/")) ]
+  | (map(select(.config.url == $u)) + .) | first | .id // ""' "$HOOKS")
+CUR=$(jq -r --arg i "$EXISTING" '.[] | select((.id|tostring) == $i) | .config.url // ""' "$HOOKS")
+
+if [ -z "$EXISTING" ]; then
+  echo "  no Buildkite hook on this repo; creating one"
+  if gh api -X POST "repos/$GH/hooks" -f name=web -F active=true \
+       -f 'events[]=push' -f 'events[]=pull_request' \
+       -f "config[url]=$HOOK" -f 'config[content_type]=json' -f 'config[insecure_ssl]=0' \
+       > "$TMP/hookout" 2>"$TMP/hookerr"; then
+    echo "  created hook $(jq -r .id "$TMP/hookout") -> $HOOK"
+  else
+    echo "  create failed:"; sed 's/^/    /' "$TMP/hookerr"; exit 1
+  fi
+else
+  echo "  hook $EXISTING exists -> $CUR"
+  # One PATCH, whether or not the URL moved: active and the two events matter
+  # as much as the URL -- a hook that is inactive, or subscribed to nothing
+  # this pipeline reacts to, is the same outage with a row in the UI. The
+  # whole config goes every time because GitHub rejects a config patch that
+  # omits url ("url cannot be blank", 422), so there is no partial form to
+  # prefer.
+  [ "$CUR" = "$HOOK" ] || echo "  it points at a different pipeline's deliver URL; repointing to $HOOK"
+  gh api -X PATCH "repos/$GH/hooks/$EXISTING" -F active=true \
+    -f 'events[]=push' -f 'events[]=pull_request' \
+    -f "config[url]=$HOOK" -f 'config[content_type]=json' -f 'config[insecure_ssl]=0' \
+    >/dev/null 2>"$TMP/hookerr" || { echo "  update failed:"; sed 's/^/    /' "$TMP/hookerr"; exit 1; }
+  echo "  active, events push + pull_request, content type json, url $HOOK: OK"
+fi
+
+# What GitHub says it did with the last few deliveries. This is the one place
+# the whole chain is visible from: a 2xx here with no build means Buildkite
+# dropped it, a non-2xx means the URL or the pipeline is wrong, and nothing
+# listed means the hook has never fired.
+echo "  recent deliveries:"
+if gh api "repos/$GH/hooks/${EXISTING:-$(jq -r '.[0].id // ""' "$TMP/hookout" 2>/dev/null)}/deliveries" \
+     > "$TMP/deliv" 2>/dev/null; then
+  jq -r '.[0:3][] | "    \(.delivered_at)  \(.event) -> \(.status) \(.status_code)"' "$TMP/deliv"
+  jq -e 'length > 0' "$TMP/deliv" >/dev/null || echo "    none yet -- the next push is the proof"
+else
+  echo "    none yet -- the next push is the proof"
+fi
+
 # read_organization_repository_connections: lists the App(s), not their repos.
+# Kept because a repo reachable BOTH ways is worth seeing; the hook above is
+# what actually delivers.
+echo
+echo "== GitHub App connections the org has (informational) =="
 code=$(bk GET "$API/organizations/$ORG/repository_connections")
 if [ "$code" = 200 ]; then
-  echo "  connections the org has (the API lists Apps, not which repos each covers):"
   for id in $(jq -r '.[].id' "$TMP/body"); do
     if [ "$(bk GET "$API/organizations/$ORG/repository_connections/$id")" = 200 ]; then
-      jq -r '"    \(.type): \(.display_name), account \(.service_account.login // "-"), \(.host.url // "-")"' "$TMP/body"
+      jq -r '"  \(.type): \(.display_name), account \(.service_account.login // "-"), \(.host.url // "-")"' "$TMP/body"
     fi
   done
 else
