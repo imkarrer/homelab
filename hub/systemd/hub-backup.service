@@ -1,0 +1,34 @@
+# The nightly backup of ac-box's declared state, run on the OPERATOR'S WSL
+# machine -- not on ac-box. Deliberately not part of ac-box's closure: the
+# whole point of row 22's backup is that it survives the box, so the machine
+# that holds the copy must also be the machine that decides to take it. Nothing
+# in modules/ imports this file, and nothing should.
+#
+# It runs as root because the box's state is owned by several service accounts
+# and only root can reproduce those owners locally (scripts/hub-backup.sh says
+# more). It reaches the box outbound, with the operator's existing key, and
+# never writes there.
+#
+# Install: docs/runbook-restore.md, "Installing the timer". This machine is
+# NixOS, so /etc/systemd/system is a read-only symlink into /etc/static and
+# these files are installed through /etc/nixos/configuration.nix rather than
+# copied in.
+[Unit]
+Description=Back ac-box's declared state up into the local restic repo (homelab row 22)
+Documentation=file:///home/nixos/src/homelab/docs/runbook-restore.md
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# The registry checkout (hub/repos.psv), not a worktree: worktrees come and go
+# with the beads that created them, and a timer pointed at one would stop
+# working the day it is removed.
+ExecStart=/usr/bin/env bash /home/nixos/src/homelab/scripts/hub-backup.sh
+# The box is a shared machine and this is the operator's desktop: the backup
+# yields to anything a human is doing. It has all night.
+Nice=10
+IOSchedulingClass=idle
+TimeoutStartSec=6h
+# No [Install] section: the timer starts it, and a backup that also ran at
+# every boot would be a surprise, not a feature.

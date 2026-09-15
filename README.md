@@ -14,6 +14,12 @@ so they can be corrected in the same diff as the code that invalidates them.
 What is deployed right now, and every service classified:
 [`docs/current-state.md`](docs/current-state.md).
 
+Where the box's state is copied to, and how to get it back:
+[`docs/runbook-restore.md`](docs/runbook-restore.md). `scripts/hub-backup.sh`
+pulls every directory a tenant declares with `state.backup = true` onto the
+operator's machine nightly; it runs there, not on ac-box, and the far side is
+read-only.
+
 Design rationale and the full migration plan (hosted, outside version control):
 <https://claude.ai/code/artifact/61c15556-ccc7-4cc5-994d-a213c669556c>
 

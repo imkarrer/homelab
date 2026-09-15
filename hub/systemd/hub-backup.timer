@@ -1,0 +1,27 @@
+# Nightly, at 04:30 in the BOX'S timezone. The time is chosen, not arbitrary:
+# ac-host's DOWNTIME build applies the tenant tree at 03:00 box-local and
+# homelab-deploy.timer switches the closure at 03:30 (ADR 0006). Backing up
+# after both means a snapshot reflects a settled box rather than one mid-switch.
+#
+# The timezone suffix is load-bearing and is why this is not plain "04:30:00":
+# the operator's machine runs UTC and the box runs America/Chicago, so a bare
+# 04:30 here would fire at 23:30 box-local -- BEFORE the windows it is meant to
+# follow, and it would drift by an hour twice a year relative to them.
+# systemd >= 252 parses the suffix; `systemd-analyze calendar` on this machine
+# (systemd 260) normalises it to 09:30 UTC.
+#
+# Persistent=true because this machine is a laptop-shaped thing that is not
+# always on: a missed 04:30 fires shortly after the next boot instead of being
+# skipped in silence. That plus hub-status.sh's staleness line is the whole
+# "did the backup happen?" story.
+[Unit]
+Description=Nightly backup of ac-box's declared state
+
+[Timer]
+OnCalendar=*-*-* 04:30:00 America/Chicago
+Persistent=true
+RandomizedDelaySec=5m
+AccuracySec=1m
+
+[Install]
+WantedBy=timers.target

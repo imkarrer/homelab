@@ -62,6 +62,33 @@ while IFS='|' read -r name path remote deploy push; do
     END{ if (w!="" && b!="") { i++; if (i>1) print w " " b } }')
 done < "$REG"
 
+# The backup lives HERE, not on the box. scripts/hub-backup.sh pulls ac-box's
+# declared state onto this machine nightly (hub/systemd/hub-backup.timer) and
+# leaves a KEY=VALUE status file behind; every other line in this script asks
+# the box or asks git, so nothing else can see whether it ran. A backup that
+# quietly stopped is invisible until the day it is needed -- which is the whole
+# failure mode row 22 exists to close -- so its age is a verdict, not a display.
+# Three days: a laptop off over a long weekend is normal (Persistent=true fires
+# the run at the next boot), four nights of nothing is not.
+BSTATUS="${HUB_BACKUP_STATUS:-/home/nixos/backup/status}"
+if [ -r "$BSTATUS" ]; then
+  bwhen=$(grep '^LAST_SUCCESS=' "$BSTATUS" | cut -d= -f2-)
+  bepoch=$(grep '^LAST_SUCCESS_EPOCH=' "$BSTATUS" | cut -d= -f2-)
+  bsnaps=$(grep '^SNAPSHOTS=' "$BSTATUS" | cut -d= -f2-)
+  bsize=$(grep '^REPO_SIZE=' "$BSTATUS" | cut -d= -f2-)
+  bresult=$(grep '^LAST_RESULT=' "$BSTATUS" | cut -d= -f2-)
+  bdays=$(( ( $(date +%s) - ${bepoch:-0} ) / 86400 ))
+  printf "%-18s last success %s (%s snapshots, %s)\n" "backup" "${bwhen:-never}" "${bsnaps:-0}" "${bsize:-?}"
+  if [ -z "$bepoch" ]; then
+    note "backup: scripts/hub-backup.sh has never completed - the restic repo has no usable snapshot"
+  elif [ "$bdays" -gt 3 ]; then
+    note "backup: last success was $bdays day(s) ago ($bwhen) - the nightly pull is not running (systemctl status hub-backup.timer; journalctl -u hub-backup)"
+  fi
+  case "$bresult" in ok|'') ;; *) note "backup: last attempt $bresult" ;; esac
+else
+  note "backup: no status file at $BSTATUS - hub-backup.timer is not installed here (docs/runbook-restore.md)"
+fi
+
 echo
 echo "===== BOX: $BOX ====="
 # One round trip, one KEY=VALUE per line: robust to any JSON contents.
