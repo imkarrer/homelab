@@ -136,6 +136,7 @@ BOXTXT=$("${SSH[@]}" '
   echo "CLPENDING=$(grep -oE "[0-9a-f]{40}" $h/pending-closure.json 2>/dev/null | head -1)"
   echo "CLAPPLIED=$(grep -oE "[0-9a-f]{40}" $h/last-applied-closure.json 2>/dev/null | head -1)"
   echo "CLTIMER=$(systemctl is-enabled homelab-deploy.timer 2>/dev/null)"
+  echo "CLPATH=$(systemctl is-enabled homelab-deploy.path 2>/dev/null)"
 ' 2>/dev/null)
 
 get() { echo "$BOXTXT" | grep "^$1=" | head -1 | cut -d= -f2-; }
@@ -288,7 +289,11 @@ else
     note "box switched since boot - kernel/initrd are still generation-at-boot, a reboot is owed"
   fi
   echo "config rev : ${SYSREV:-(unstamped - system.configurationRevision is not set)}"
-  CLPENDING=$(get CLPENDING); CLAPPLIED=$(get CLAPPLIED); CLTIMER=$(get CLTIMER)
+  CLPENDING=$(get CLPENDING); CLAPPLIED=$(get CLAPPLIED); CLTIMER=$(get CLTIMER); CLPATH=$(get CLPATH)
+  # ADR 0008: with the path unit enabled the schedule is continuous -- a staged
+  # rev lands within minutes, or when the lobbies clear -- and the timer is only
+  # its retry. Without it, ADR 0006's one firing at the window.
+  if [ "$CLPATH" = enabled ]; then CLWHEN="within minutes, or when the lobbies clear (ADR 0008)"; else CLWHEN="at the next window"; fi
   # "Behind HEAD" means three different things depending on what will move it,
   # and the verdict has to name the right one or the operator does the wrong
   # thing (a hand switch over a staged rev is how the cache-stale no-op of
@@ -297,7 +302,7 @@ else
     if [ "$CLTIMER" != "enabled" ]; then
       note "system closure is $1 - homelab-deploy.timer is ${CLTIMER:-absent}, so only a human nixos-rebuild switch moves it"
     elif [ -n "$CLPENDING" ] && [ "$CLPENDING" = "$HEADSHA" ]; then
-      echo "  HEAD is staged; homelab-deploy.timer applies it at the next window (nothing to do)"
+      echo "  HEAD is staged; homelab-deploy applies it $CLWHEN (nothing to do)"
     elif [ -n "$CLPENDING" ] && [ "$CLPENDING" != "$CLAPPLIED" ]; then
       note "system closure is $1 - ${CLPENDING:0:7} is staged, HEAD is not: push, or wait for HEAD's build to stage it"
     else
@@ -305,7 +310,7 @@ else
     fi
   }
   case "$CLTIMER" in
-    enabled) echo "deploy     : homelab-deploy.timer enabled (ADR 0006 live) - queued ${CLPENDING:-none}, applied ${CLAPPLIED:-none}" ;;
+    enabled) echo "deploy     : homelab-deploy.timer enabled$( [ "$CLPATH" = enabled ] && echo ", path enabled (ADR 0008 continuous)" || echo " (ADR 0006 window)") - queued ${CLPENDING:-none}, applied ${CLAPPLIED:-none}" ;;
     *)       echo "deploy     : homelab-deploy.timer ${CLTIMER:-absent} - queued ${CLPENDING:-none}, applied ${CLAPPLIED:-none}" ;;
   esac
   # Queued-but-not-applied is a state, not a failure, while the timer exists:
@@ -314,7 +319,7 @@ else
   # version of "deploy queued but not applied - needs DOWNTIME=1" above.
   if [ -n "$CLPENDING" ] && [ "$CLPENDING" != "$CLAPPLIED" ]; then
     if [ "$CLTIMER" = "enabled" ]; then
-      echo "             closure ${CLPENDING:0:7} is staged; homelab-deploy.timer applies it at the next window"
+      echo "             closure ${CLPENDING:0:7} is staged; homelab-deploy applies it $CLWHEN"
     else
       note "closure ${CLPENDING:0:7} is staged but homelab-deploy.timer is ${CLTIMER:-absent} - nothing will apply it"
     fi

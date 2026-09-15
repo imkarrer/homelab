@@ -57,11 +57,27 @@ let
 
   inventory = cfg.inventoryFile;
 
+  # "03:00" + 30 -> "03:30". One arithmetic, two consumers: the window
+  # schedule's OnCalendar (the only firing) and the continuous schedule's
+  # blackout end (the moment ordinary firing resumes). They are the same
+  # instant for the same reason, so they are the same expression.
+  windowEnd =
+    let
+      parts = lib.splitString ":" host.maintenance.window;
+      h = lib.toIntBase10 (builtins.elemAt parts 0);
+      m = lib.toIntBase10 (builtins.elemAt parts 1);
+      total = h * 60 + m + cfg.windowOffsetMinutes;
+      hh = lib.fixedWidthNumber 2 ((total / 60) - 24 * (total / 1440));
+      mm = lib.fixedWidthNumber 2 (total - 60 * (total / 60));
+    in
+    "${hh}:${mm}";
+
   deployScript = pkgs.writeShellApplication {
     name = "homelab-deploy";
     runtimeInputs = [
       pkgs.jq
       pkgs.coreutils
+      config.nix.package
       config.system.build.nixos-rebuild
     ];
     text = ''
@@ -70,10 +86,33 @@ let
       inventory=${lib.escapeShellArg inventory}
       flake=${lib.escapeShellArg cfg.flake}
       host=${lib.escapeShellArg host.name}
+      # Empty under the window schedule: the timer already fires only once,
+      # after the window, so there is nothing for a blackout to exclude.
+      blackoutStart=${lib.escapeShellArg (if cfg.schedule == "continuous" then host.maintenance.window else "")}
+      blackoutEnd=${lib.escapeShellArg windowEnd}
 
       if [ ! -e "$pending" ]; then
         echo "homelab-deploy: nothing staged at $pending; nothing to do."
         exit 0
+      fi
+
+      # The one time of day this unit stays out of: the tenant tree's own
+      # deploy. At the window's start the bot queues DOWNTIME=1, and that
+      # build drains the lobbies, applies the tree, recycles the lobbies and
+      # resumes -- minutes of docker work. Under ADR 0006's single firing the
+      # offset kept the two apart by construction; under the continuous
+      # schedule nothing does, and the drain is precisely what makes
+      # busyCheck say "not busy" while the box is at its most occupied.
+      # So the window is a blackout, and the offset that used to be the only
+      # firing time is now the moment the blackout lifts.
+      if [ -n "$blackoutStart" ]; then
+        now=$(date +%H:%M)
+        if [ "$now" ">" "$blackoutStart" ] || [ "$now" = "$blackoutStart" ]; then
+          if [ "$now" "<" "$blackoutEnd" ]; then
+            echo "homelab-deploy: $now is inside the tenant tree's window ($blackoutStart-$blackoutEnd); deferring."
+            exit 0
+          fi
+        fi
       fi
 
       rev=$(jq -r '.rev // empty' "$pending")
@@ -111,20 +150,50 @@ let
       # switch to the next firing.
       #
       # busyCheck's contract (schema.nix): exit 0 means BUSY.
-      while IFS=$'\t' read -r name check; do
-        [ -n "$name" ] || continue
-        if sh -c "$check"; then
-          echo "homelab-deploy: $name is busy; deferring $rev to the next window."
-          exit 0
-        fi
-      done < <(
-        jq -r '
-          .tenants[]
-          | select(.quiet.drainable == false)
-          | select(.quiet.busyCheck != null)
-          | "\(.name)\t\(.quiet.busyCheck)"
-        ' "$inventory"
-      )
+      #
+      # A function, not a straight-line loop, because it is asked TWICE: once
+      # before the build and once in the last moment before the switch. Under
+      # ADR 0008's continuous schedule the build can run at 19:00 and take
+      # minutes, and "nobody was racing when this started" is not the question
+      # -- "nobody is racing now" is.
+      busy() {
+        local name check
+        while IFS=$'\t' read -r name check; do
+          [ -n "$name" ] || continue
+          if sh -c "$check"; then
+            echo "homelab-deploy: $name is busy; deferring $rev."
+            return 0
+          fi
+        done < <(
+          jq -r '
+            .tenants[]
+            | select(.quiet.drainable == false)
+            | select(.quiet.busyCheck != null)
+            | "\(.name)\t\(.quiet.busyCheck)"
+          ' "$inventory"
+        )
+        return 1
+      }
+
+      busy && exit 0
+
+      # Build first, switch second, and ask again in between.
+      #
+      # `nixos-rebuild switch` would do both in one step, and under ADR 0006's
+      # single 03:30 firing that was right: the lobbies were empty for the
+      # whole of it. Under the continuous schedule the build is the long part
+      # (minutes, if MinIO does not already have the closure) and it is exactly
+      # when someone can join a lobby. Splitting them means the race between
+      # the check and the switch is a `switch-to-configuration` against a warm
+      # store -- seconds -- instead of a whole build.
+      #
+      # --no-link: nothing here should own a gcroot. The store path lives
+      # until the next GC, and the switch below re-resolves it in seconds
+      # rather than trusting a path this script passed along.
+      echo "homelab-deploy: building $rev"
+      nix build --no-link "$flake/$rev#nixosConfigurations.$host.config.system.build.toplevel"
+
+      busy && exit 0
 
       echo "homelab-deploy: switching to $rev"
       nixos-rebuild switch --flake "$flake/$rev#$host"
@@ -186,12 +255,62 @@ in
       '';
     };
 
+    schedule = mkOption {
+      type = types.enum [ "window" "continuous" ];
+      default = "window";
+      description = ''
+        WHEN a staged revision is applied. ADR 0008.
+
+        "window" (ADR 0006, the default): once a night, at
+        homelab.host.maintenance.window + windowOffsetMinutes. Everything
+        waits for 03:30 -- a firewall rule, a tier share, a dashboard --
+        and the operator can say "nothing on this box changes outside the
+        window" and be right. Latency from push to live is up to 27 hours.
+
+        "continuous": apply as soon as CI stages it, and defer ONLY while a
+        tenant says it is busy. On ac-box that means: switch now unless
+        someone is racing, and when the last driver leaves, apply whatever
+        is staged by then. The operator decided this 15 Sep 2026, and the
+        decision is not about racing -- the lobbies are out of the
+        closure's reach either way (ADR 0008's Context) -- but about
+        arcade's file share and game servers, and the observability stack,
+        being allowed to bounce at any hour rather than at 03:30 only.
+
+        Two things follow, both handled here rather than left to the
+        operator: the build now happens while people may be using the box,
+        so the unit is niced and the busy question is asked again after it;
+        and the tenant tree's own window becomes a blackout, because a
+        drained lobby reads as "not busy" exactly when the box is busiest.
+      '';
+    };
+
+    retryInterval = mkOption {
+      type = types.str;
+      default = "10min";
+      description = ''
+        schedule = "continuous" only: how often a deferred revision is
+        retried, as a systemd time span. The path unit applies a staged
+        revision the moment CI writes it, so this interval is not the
+        latency of an ordinary deploy -- it is how long after the last
+        driver leaves the lobby that the waiting revision lands, and how
+        long a firing missed over a reboot waits.
+
+        Ten minutes rather than one: each firing runs every tenant's
+        busyCheck, and assetto's shells out to python against the racing
+        tree. A minute would make that a background process on the box
+        forever; ten makes it invisible and is still well inside "nobody
+        noticed it was waiting".
+      '';
+    };
+
     windowOffsetMinutes = mkOption {
       type = types.ints.between 0 120;
       default = 30;
       description = ''
         Minutes after homelab.host.maintenance.window at which the timer
-        fires. Default 30, and not 0, because the window is already taken:
+        fires -- and, under schedule = "continuous", the minute at which the
+        blackout over that window lifts. Default 30, and not 0, because the
+        window is already taken:
         at 03:00 sharp the Discord bot queues DOWNTIME=1, and that build
         drains the lobbies, applies the tenant tree, recycles the lobbies
         once and resumes -- a few minutes of docker work. Firing the
@@ -200,6 +319,25 @@ in
         two operators in one room. Thirty minutes later the recycle is done,
         the lobbies are empty, and drivers_online.py says so. Set to 0 only
         on a host with no tenant-tree downtime job of its own.
+      '';
+    };
+
+    scriptPackage = mkOption {
+      type = types.package;
+      readOnly = true;
+      default = deployScript;
+      defaultText = lib.literalMD "the generated homelab-deploy script";
+      description = ''
+        Read-only: the script the unit runs, so the decisions baked into it
+        at evaluation time can be read without switching a box --
+
+          nix eval --raw .#nixosConfigurations.ac-box.config.homelab.deploy.scriptPackage
+          cat <that>/bin/homelab-deploy
+
+        Same purpose as agent-hub's llm.swapConfigFile. It is also what lets
+        the eval harness assert that the blackout is present under one
+        schedule and absent under the other, which is otherwise a fact no
+        test can see and no operator can check short of 03:00.
       '';
     };
 
@@ -236,37 +374,74 @@ in
         # for it -- so any non-zero here is a real problem worth a failed unit
         # and an alert, rather than noise the operator learns to ignore.
         SuccessExitStatus = [ 0 ];
+      }
+      // lib.optionalAttrs (cfg.schedule == "continuous") {
+        # The build has moved into the day (ADR 0008's Consequences), so it
+        # yields to everything: races on the unfenced cores, the model server
+        # at CPUWeight 700, the kid arcade. Nice and an idle IO class rather
+        # than Slice=batch.slice, deliberately -- batch's MemoryMax is 12.5
+        # GiB on ac-box and a toplevel build under it would be OOM-killed
+        # mid-deploy, turning a resource guard into an outage. Weight and
+        # priority slow the build down; a ceiling would end it.
+        Nice = 19;
+        IOSchedulingClass = "idle";
+        CPUWeight = 10;
+      };
+    };
+
+    # Apply the moment CI stages one, rather than waiting for a clock. The
+    # file is written by hub-queue-closure.sh on the agent; PathChanged fires
+    # on the rename that replaces it, which is the same event hub-status.sh
+    # reads. The service's own guards do the rest -- already-applied, busy,
+    # blackout -- so a spurious trigger is a no-op and a log line.
+    systemd.paths.homelab-deploy = mkIf (cfg.schedule == "continuous") {
+      description = "Watch for a newly staged homelab system closure";
+      wantedBy = [ "paths.target" ];
+      pathConfig = {
+        PathChanged = pendingFile;
+        Unit = "homelab-deploy.service";
       };
     };
 
     systemd.timers.homelab-deploy = {
-      description = "Apply the staged homelab system closure, in the window";
+      description =
+        if cfg.schedule == "continuous" then
+          "Retry a deferred homelab system closure"
+        else
+          "Apply the staged homelab system closure, in the window";
       wantedBy = [ "timers.target" ];
-      timerConfig = {
-        # window + offset, computed rather than a second literal. "03:00" and
-        # 30 give "*-*-* 03:30:00"; the arithmetic carries past the hour.
-        OnCalendar =
-          let
-            parts = lib.splitString ":" host.maintenance.window;
-            h = lib.toIntBase10 (builtins.elemAt parts 0);
-            m = lib.toIntBase10 (builtins.elemAt parts 1);
-            total = h * 60 + m + cfg.windowOffsetMinutes;
-            hh = lib.fixedWidthNumber 2 ((total / 60) - 24 * (total / 1440));
-            mm = lib.fixedWidthNumber 2 (total - 60 * (total / 60));
-          in
-          "*-*-* ${hh}:${mm}:00";
+      timerConfig =
+        if cfg.schedule == "continuous" then
+          {
+            # The path unit is what applies an ordinary deploy; this timer
+            # exists for the two cases a file event cannot cover -- a
+            # revision deferred because someone was racing (nothing will
+            # write the file again when they leave) and a firing missed
+            # across a reboot.
+            OnBootSec = cfg.retryInterval;
+            OnUnitActiveSec = cfg.retryInterval;
+            AccuracySec = "1min";
+          }
+        else
+          {
+            # window + offset, computed rather than a second literal.
+            OnCalendar = "*-*-* ${windowEnd}:00";
 
-        # Persistent = false, deliberately. Persistent fires a missed timer at
-        # boot, which is the one moment guaranteed NOT to be inside the
-        # maintenance window -- and a switch outside the window is the exact
-        # thing the window exists to prevent. A missed night simply waits for
-        # the next one; the staged revision does not expire.
-        Persistent = false;
+            # Persistent = false, deliberately. Persistent fires a missed timer
+            # at boot, which is the one moment guaranteed NOT to be inside the
+            # maintenance window -- and a switch outside the window is the exact
+            # thing the window exists to prevent. A missed night simply waits for
+            # the next one; the staged revision does not expire.
+            #
+            # Under the continuous schedule this reverses: firing after a
+            # reboot is wanted, which is why that branch has no Persistent
+            # and an OnBootSec instead.
+            Persistent = false;
 
-        # No RandomizedDelaySec: this is one box, there is no thundering herd
-        # to spread, and jitter would only blur the window's edges.
-        AccuracySec = "1min";
-      };
+            # No RandomizedDelaySec: this is one box, there is no thundering herd
+            # to spread, and jitter would only blur the window's edges.
+            AccuracySec = "1min";
+          };
     };
 
     systemd.tmpfiles.rules = [

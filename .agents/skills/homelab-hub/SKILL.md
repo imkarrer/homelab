@@ -56,8 +56,10 @@ Each line names a distinct failure, and they are not interchangeable:
   by hand. Those edits exist nowhere else; an rsync deploy destroys them.
 - **system closure N commits behind homelab HEAD** — the platform layer has
   its own path (ADR 0006): a green homelab build stages the sha in
-  `/var/lib/homelab/pending-closure.json`, and `homelab-deploy.timer`
-  switches to it at 03:30, deferring if anyone is racing. The `deploy` line
+  `/var/lib/homelab/pending-closure.json`, and `homelab-deploy.path`
+  switches to it within minutes (ADR 0008), deferring while anyone is racing
+  and retrying every 10 minutes; 03:00–03:30 is a blackout for the DOWNTIME
+  build. The `deploy` line
   above the verdict says what is queued and what was last applied. *Behind
   and nothing staged* means HEAD's build never reached `queue-closure`:
   unpushed, a red gate, or the CI agent lacking its `/var/lib/homelab` mount.

@@ -168,6 +168,37 @@ in
   # without undoing the switch.
   homelab.deploy.enable = true;
 
+  # ADR 0008, decided 15 Sep 2026: a staged revision is applied as soon as CI
+  # stages it, and the only thing that postpones it is somebody racing.
+  #
+  # The question the ADR left open was never about the lobbies -- they are out
+  # of the closure's reach by construction (ac-host-static is
+  # restartIfChanged = false; the sidecars are compose-owned; a slice limit
+  # moves no process). It was whether arcade's file share and game servers and
+  # the observability stack may bounce at any hour instead of at 03:30. The
+  # operator's answer is yes, which is what makes this one line rather than
+  # the `windowOnly` policy word and dry-activate parser option 2 sketched:
+  # with no blast radius to distinguish, assetto's busyCheck is the whole gate,
+  # and the deploy script already had it.
+  #
+  # What changes on this box, concretely:
+  #   - a green push is live in minutes rather than up to 27 hours;
+  #   - `systemctl disable --now homelab-deploy.path` is now half of stopping
+  #     deploys -- the timer alone is no longer the arming switch;
+  #   - between 03:00 and 03:30 nothing switches, because the tenant tree's
+  #     DOWNTIME build owns that window and its drain makes the lobbies read
+  #     as empty precisely when they are not free (the module's blackout);
+  #   - the build runs at Nice 19 with idle IO, and the lobbies are re-checked
+  #     after it and before the switch, so the exposure between "nobody is
+  #     racing" and the switch is seconds rather than a whole build.
+  #
+  # hub/repos.psv keeps homelab at agent-push = ask, and more firmly than
+  # before: under this schedule an agent pushing green is switching the box in
+  # minutes, not scheduling something for 03:30. ADR 0008's Consequences says
+  # to leave it at ask until the deferral has been watched working against a
+  # real race.
+  homelab.deploy.schedule = "continuous";
+
   # ---------------------------------------------------------------------------
   # Tenants, reproducing ac-box's live configuration exactly.
   # ---------------------------------------------------------------------------

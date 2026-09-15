@@ -67,9 +67,13 @@ code however green the badge looks.
 
 - `ac-host`: the ops pipeline (`DOWNTIME=1`), started by a human, recycles
   the practice lobbies. Ask before triggering it, and check nobody is driving.
-- `homelab`: `homelab-deploy.timer` on the box switches to the staged sha at
-  03:30, deferring to the next window if a race is on. Nothing to do but
-  watch: `ssh ac-box 'journalctl -u homelab-deploy --since "-1d" --no-pager'`
-  the next morning, then `HUB_STATUS_EXACT=1 bash scripts/hub-status.sh`.
-  A human may switch sooner by full sha, once it is on origin — the migration
-  exception in `AGENTS.md`.
+- `homelab`: `homelab-deploy.path` on the box switches to the staged sha
+  within minutes of CI staging it (ADR 0008), deferring while anyone is
+  racing and retrying every 10 minutes until they leave; between 03:00 and
+  03:30 it stays out of the tenant tree's DOWNTIME build. So a green push is
+  live before you have finished reading the build log. Check:
+  `ssh ac-box 'journalctl -u homelab-deploy --since "-1h" --no-pager'`,
+  then `HUB_STATUS_EXACT=1 bash scripts/hub-status.sh`. A `deferring` line
+  is a race in progress, not a failure. There is no longer a reason to
+  switch by hand; the migration exception in `AGENTS.md` is for a box whose
+  path unit is broken, not for impatience.

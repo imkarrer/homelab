@@ -1,7 +1,9 @@
 # ADR 0008: Switch At Push Time When The Blast Radius Excludes Racing
 
-**Status:** Proposed, 13 Sep 2026. Not decided. Nothing is built for it and
-nothing should be until the operator answers the one question in "Decision".
+**Status:** Accepted, 15 Sep 2026. Option 2, with the question this ADR left
+open answered "any hour is fine" — so the parser and the policy word it was
+sketched with are not built, and the schedule alone is. Implemented as
+`homelab.deploy.schedule = "continuous"`; ac-box sets it.
 
 ## Context
 
@@ -79,42 +81,112 @@ script changes live immediately.
   is live immediately too. The tree is less inert than it looks, and the
   separation would need to be by path, not by "sidecar or not".
 
+
 ## Decision
 
-Not taken. Options 2 and 3 are independent and either can be adopted alone.
-The question that decides option 2 is not about racing at all:
+**Option 2, adopted 15 Sep 2026**, with the open question answered "any hour is
+fine". The operator's words: *full automation that always does a switch and
+only waits / batches if there are people racing.*
 
-> Is it acceptable for `arcade`'s file share and game servers, and the
-> observability stack, to restart at any hour on a change to them — or should
-> those keep the window while only the *unsliced* remainder switches at push
-> time?
+That answer is what makes this small. Option 2 was sketched as
+`dry-activate` parsing plus a `windowOnly` policy word, and both existed for
+one purpose: telling blast radii apart, so that a change touching `arcade`
+could be held back while an unsliced change went early. Deciding that arcade
+and observability may bounce at any hour removes the distinction, and with it
+the parser, the new policy word, and the "two switch times, two reports"
+problem in this ADR's own Consequences. What is left is the question
+`busyCheck` already answers — *is anyone racing?* — asked on a loop instead of
+once a night. The deploy script has had that branch since ADR 0006; it simply
+never ran outside 03:30.
 
-If the answer is "keep the window for them", option 2 needs the
-`windowOnly` policy word before it needs anything else, and the allowlist is
-then derived from the inventory rather than written by hand — the same shape
-`busyCheck` already has. If the answer is "any hour is fine", option 2 is
-mostly `dry-activate` parsing and a second timer.
+So the change is a schedule, not a mechanism: `homelab.deploy.schedule =
+"continuous"` (`modules/deploy/default.nix`), which replaces the single
+calendar firing with
 
-Option 3 is decided by whether a bot fix landing at push time is worth the
-tree being live-read by a race in progress. Today the answer is probably no:
-the bot's one time-critical job is at 03:00, and a fix that misses one night
-misses one countdown.
+- a **path unit** on `pending-closure.json`, so a revision is applied the
+  moment CI stages it rather than at the next tick; and
+- a **retry timer** (`retryInterval`, 10 min) for the only two cases a file
+  event cannot cover: a revision deferred because someone was racing — nothing
+  will rewrite the file when they leave — and a firing missed across a reboot.
 
-## Consequences (if adopted)
+**Batching falls out of the existing design rather than being built.** While a
+deferral is in force, later pushes overwrite `pending-closure.json` with newer
+revisions; the retry reads whatever is there when the lobbies clear. Five
+pushes during a race are one switch afterwards, at the newest revision, and
+nothing accumulates a queue that has to be drained in order.
 
-- **Two switch times, two reports.** `hub-status.sh` must say *which* firing
-  applied a rev and why the other did not, or "staged" becomes ambiguous
-  again — the reporting gap ADR 0006 exists to close.
-- **`dry-activate` output becomes a contract.** Its "would restart" list is
-  free text from `switch-to-configuration`; a parser that misses a unit name
-  because the format shifted would switch when it should have deferred. The
-  parse must fail closed: an unparseable plan is a deferral, never a switch.
-- **The build moves into the day.** ADR 0006 keeps the build on the box (a
-  failure surfaces against the box's own store). At push time that is a
-  `nix build` in `system.slice` at weight 100 against `background.slice` at
-  700, while racing is unfenced in the same slice. It needs `Nice=` and
-  probably its own scope under `batch.slice` before it is run at 19:00.
-- **`agent-push=ask` gets sharper, not looser.** Under option 2 an agent
-  pushing green to homelab is scheduling a switch in minutes, not at 03:30.
-  The flag should stay `ask` at least until the push-time path has been
-  watched deferring correctly on a change that touches `arcade`.
+Three things the decision does *not* license, each handled rather than
+assumed:
+
+1. **The build moved into the day.** This ADR's Consequences called for `Nice=`
+   before running a toplevel build at 19:00. The unit now carries `Nice = 19`,
+   `IOSchedulingClass = idle` and `CPUWeight = 10`. Deliberately NOT
+   `Slice = batch.slice`: batch's `MemoryMax` on ac-box is 12.5 GiB and a
+   toplevel build under it would be OOM-killed mid-deploy, which converts a
+   resource guard into an outage. Weight and priority slow a build down; a
+   ceiling ends it.
+2. **"Nobody was racing when this started" is not the question.** The build is
+   the long part, and it is exactly when someone joins a lobby. The script now
+   builds first (`nix build`, no gcroot), asks the busy question again, and
+   only then switches — so the exposure between the last check and the switch
+   is a `switch-to-configuration` against a warm store, seconds, instead of a
+   whole build.
+3. **A drained lobby reads as empty.** At the window's start the bot queues
+   `DOWNTIME=1`, and that build *drains the lobbies* before applying the
+   tenant tree. To `drivers_online.py` that is indistinguishable from a quiet
+   night, so the continuous schedule would happily switch into the middle of
+   the tenant deploy — the "two operators in one room" the 30-minute offset
+   was invented to prevent, arriving by a door the offset does not cover. The
+   window is therefore a **blackout** under this schedule: nothing switches
+   between `maintenance.window` and `window + windowOffsetMinutes`, and the
+   offset that used to be the only firing time is now the moment the blackout
+   lifts.
+
+Option 3 (splitting the tenant tree's apply from its recycle) is still **not
+taken**, and this decision does not bear on it. Its costs are unchanged: the
+`plugin` sidecar bind-mounts `../catalog` read-only from the tree and
+`acctl.py` is read from the tree by live units, so a push-time tree apply is
+read by a race in progress. That is a different question about a different
+delivery path, and it is still answered "probably no".
+
+## Consequences
+
+- **One switch time, not two.** The draft of this ADR worried that a
+  push-time path beside the window would make "staged" ambiguous again —
+  the reporting gap ADR 0006 exists to close. Adopting the schedule as a
+  *replacement* rather than an addition avoids it: `pending-closure.json` is
+  applied by whichever of the path unit or the retry timer gets there first,
+  and both run the same script with the same guards. `hub-status.sh` needs no
+  new vocabulary; "staged" still means exactly one thing.
+- **`dry-activate` never becomes a contract.** The draft's second consequence
+  was that parsing `switch-to-configuration`'s free-text "would restart" list
+  makes a fragile thing load-bearing. Answering the open question removed the
+  parser, so this consequence is retired rather than accepted.
+- **The build moved into the day, and yields.** `Nice = 19`,
+  `IOSchedulingClass = idle`, `CPUWeight = 10`; not `Slice = batch.slice`,
+  because that slice's 12.5 GiB ceiling would OOM-kill a toplevel build
+  mid-deploy. The box substitutes most of the closure from MinIO, so the
+  common case is a fetch rather than a compile, but the guards are sized for
+  the day it is not.
+- **The window still means something, and it means the opposite.** It is no
+  longer *the* time the closure switches; it is the one time it will not. The
+  tenant tree's DOWNTIME build owns 03:00–03:30, and its drain makes the
+  lobbies read as empty, so the blackout is what stops a closure switch from
+  landing in the middle of it.
+- **`agent-push=ask` gets sharper, not looser.** An agent pushing green to
+  `homelab` is now switching the box in minutes rather than scheduling
+  something for 03:30. `hub/repos.psv` keeps `ask`, and the reason is now
+  stronger than when it was written.
+- **The lobbies are the only brake.** If `drivers_online.py` breaks, or the
+  racing tenant's tree is mid-rsync when it is read, the busy question gets
+  the wrong answer — and unlike the window schedule, there is no clock behind
+  it as a second line of defence. `busyCheck` failing *closed* matters more
+  under this schedule than it did under ADR 0006: the script's inventory check
+  already refuses to switch when `/etc/homelab/tenants.json` is unreadable,
+  and that refusal is now the thing standing between a green push and three
+  live race servers.
+- **Latency is now a property of CI, not of the clock.** Push to live is the
+  pipeline's own duration plus at most the path unit's reaction — minutes.
+  Anything that makes the pipeline slow or silent (a dead trigger, as on
+  14 Sep) is now the whole of the delay, which raises the value of
+  `hub-status.sh` being able to see build state (bead `homelab-g49`).
