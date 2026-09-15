@@ -258,6 +258,33 @@ in
     ];
   };
 
+  # The racing gate, on either schedule. Found failing OPEN on 15 Sep 2026:
+  # the unit's PATH had no `sh`, so `sh -c "$check"` exited 127, and the
+  # `if` read 127 as "not busy" and switched. These are the two halves of
+  # the fix, and each is a fact only the unit shape or the script text holds.
+  busyCheckCanRunAndFailsClosed = mkCase {
+    extraModules = enabled [ ];
+    checks = cfg: [
+      {
+        assertion = builtins.elem "/run/current-system/sw" cfg.systemd.services.homelab-deploy.path;
+        message = ''
+          the unit must carry the system profile on its PATH. A tenant's
+          busyCheck is written for the box's shell (assetto's needs sh and
+          python3), and a NixOS unit's default PATH has neither -- which is
+          how the check silently never ran.
+        '';
+      }
+      {
+        assertion = has cfg "-eq 126 ]" && has cfg "-eq 127 ]" && has cfg "could not run";
+        message = ''
+          a busyCheck that cannot run (126, 127) must DEFER, not switch. An
+          unanswered question is not a "no", and this is the only brake the
+          continuous schedule has.
+        '';
+      }
+    ];
+  };
+
   # The import is a no-op until someone flips enable. Same discipline
   # modules/ci was imported under, and the same proof: nothing in the closure.
   inert = mkCase {
@@ -290,6 +317,7 @@ in
     continuous = true;
     continuousCustomInterval = true;
     windowWrapsMidnight = true;
+    busyCheckCanRunAndFailsClosed = true;
     inert = true;
   };
 }

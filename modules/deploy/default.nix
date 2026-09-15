@@ -157,11 +157,21 @@ let
       # minutes, and "nobody was racing when this started" is not the question
       # -- "nobody is racing now" is.
       busy() {
-        local name check
+        local name check rc
         while IFS=$'\t' read -r name check; do
           [ -n "$name" ] || continue
-          if sh -c "$check"; then
+          # Exit 0 is busy. Everything else used to be "not busy", which is
+          # how `sh: command not found` (127) switched a box on 15 Sep 2026
+          # without ever asking the lobbies. A check that could not RUN --
+          # 126 (not executable) or 127 (not found) -- is an unanswered
+          # question, and an unanswered question is a deferral, not a
+          # switch. The same fail-closed rule as the inventory check above.
+          if sh -c "$check"; then rc=0; else rc=$?; fi
+          if [ "$rc" -eq 0 ]; then
             echo "homelab-deploy: $name is busy; deferring $rev."
+            return 0
+          elif [ "$rc" -eq 126 ] || [ "$rc" -eq 127 ]; then
+            echo "homelab-deploy: $name's busyCheck could not run (exit $rc: $check); deferring $rev rather than guessing." >&2
             return 0
           fi
         done < <(
@@ -359,6 +369,19 @@ in
 
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
+
+      # The busy question is a tenant's own command, written for the box's
+      # shell: assetto's is `python3 /var/lib/ac-host/src/scripts/...; test
+      # $? -ne 1`. It runs under THIS unit's PATH, and a systemd unit's PATH
+      # on NixOS is coreutils, findutils, grep, sed and systemd -- no sh, no
+      # python3. Found 15 Sep 2026, in the journal of the first hand-started
+      # firing: `line 56: sh: command not found`, exit 127, which the `if`
+      # read as "not busy". The racing gate had been failing OPEN since ADR
+      # 0006 was written; it never mattered at 03:30 with the lobbies empty,
+      # and under ADR 0008 it is the only brake. So the unit gets the system
+      # profile, which is the PATH the tenant wrote its command against, and
+      # the script refuses (fails closed) if a check cannot be run at all.
+      path = [ "/run/current-system/sw" ];
 
       # The self-reference hazard, one level in from HAZARD 2. A switch that
       # changes this unit would otherwise restart it mid-run -- i.e. kill the

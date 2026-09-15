@@ -24,6 +24,7 @@ in
             after = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
             wants = lib.mkOption { type = lib.types.listOf lib.types.str; default = [ ]; };
             restartIfChanged = lib.mkOption { type = lib.types.bool; default = true; };
+            path = lib.mkOption { type = lib.types.listOf lib.types.unspecified; default = [ ]; };
             serviceConfig = lib.mkOption { type = unitFile; default = { }; };
           };
         }
