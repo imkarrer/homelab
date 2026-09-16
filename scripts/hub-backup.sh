@@ -132,8 +132,18 @@ step() { printf '\n== %s ==\n' "$*"; }
 # (the contract's dirSet is types.path), and if that ever stops being true the
 # read below breaks loudly rather than quietly mis-splitting.
 declared_dirs() {
+  # The unit runs this script as root, but the checkout belongs to the
+  # operator, and Nix (libgit2) refuses a git repository "not owned by current
+  # user" -- the 16 Sep run failed here before touching anything. Evaluation
+  # needs no privilege, so it runs as the checkout's owner; the nix-daemon
+  # serves any user. Everything after this point still needs root (owners).
+  local owner; owner=$(stat -c %U "$ROOT")
+  local -a as_owner=()
+  if [ "$(id -u)" = 0 ] && [ "$owner" != root ]; then
+    as_owner=(runuser -u "$owner" -- env "NIX_CONFIG=$NIX_CONFIG" "HOME=$(getent passwd "$owner" | cut -d: -f6)")
+  fi
   # shellcheck disable=SC2016  # the ${n} below is Nix syntax, not a shell expansion
-  nix eval --raw "$ROOT#nixosConfigurations.ac-box.config.homelab.tenants" --apply '
+  "${as_owner[@]}" nix eval --raw "$ROOT#nixosConfigurations.ac-box.config.homelab.tenants" --apply '
     ts:
       let
         wanted = builtins.filter (n: ts.${n}.state.backup) (builtins.attrNames ts);

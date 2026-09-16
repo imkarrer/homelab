@@ -24,7 +24,15 @@ Type=oneshot
 # The registry checkout (hub/repos.psv), not a worktree: worktrees come and go
 # with the beads that created them, and a timer pointed at one would stop
 # working the day it is removed.
-ExecStart=/usr/bin/env bash /home/nixos/src/homelab/scripts/hub-backup.sh
+# A systemd service has no PATH on NixOS: the first timer run (15 Sep 09:35
+# UTC) died in env with "bash: No such file or directory" before the script
+# could even record a failure. Absolute interpreter, and the system profile
+# on PATH for what the script calls (nix, ssh, rsync, sudo, coreutils).
+# ExecStartPre marks the attempt, so a unit that never reaches the script
+# still leaves a trace hub-status.sh can read (LAST_RESULT=started).
+Environment=PATH=/run/wrappers/bin:/run/current-system/sw/bin
+ExecStartPre=/run/current-system/sw/bin/bash -c 'mkdir -p /home/nixos/backup; test -f /home/nixos/backup/status && sed -i "s/^LAST_RESULT=.*/LAST_RESULT=started/" /home/nixos/backup/status; true'
+ExecStart=/run/current-system/sw/bin/bash /home/nixos/src/homelab/scripts/hub-backup.sh
 # The box is a shared machine and this is the operator's desktop: the backup
 # yields to anything a human is doing. It has all night.
 Nice=10
