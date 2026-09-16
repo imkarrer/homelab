@@ -340,18 +340,25 @@ in
         # models so an embedding request evicts nothing. The module puts
         # llama-server in embedding mode and raises both batch sizes to the
         # context, so a chunk up to 8k tokens embeds in one call; the KV for
-        # that context on a 0.6B model is under a GiB. Four threads: the
-        # model is 0.6 GB, and it shares the fence with the two Qwens
-        # rather than competing with them for all 23 cores. The pooling is
-        # in the GGUF (last token), verified 14 Sep 2026 on the WSL box:
-        # 1842-token input, 1024-dim output, nearest-neighbour smoke green
-        # (agent-hub scripts/vectors-smoke.sh).
+        # that context on a 0.6B model is under a GiB. The pooling is in the
+        # GGUF (last token), verified 14 Sep 2026 on the WSL box: 1842-token
+        # input, 1024-dim output, nearest-neighbour smoke green (agent-hub
+        # scripts/vectors-smoke.sh).
+        #
+        # Threads: the unit-wide 23, not the 4 this shipped with. Embedding
+        # is prefill, and prefill is compute-bound: at 4 threads a 938-token
+        # chunk took 6.7 s (140 tok/s, measured 16 Sep 2026, and four chunks
+        # in one request took four times as long -- CPU batching buys
+        # nothing). "Small model, few threads" was the wrong instinct; the
+        # model being small is what makes 23 threads cheap, not what makes
+        # them unnecessary. The cost of the share is only paid when an
+        # embedding batch and a chat request are busy at the same moment,
+        # which is what `concurrent` already means for coder and instruct.
         embed = {
           kind = "embedding";
           modelPath = "/srv/agent-hub/models/Qwen3-Embedding-0.6B-Q8_0.gguf";
           description = "Qwen3-Embedding-0.6B Q8_0 -- 1024-dim embeddings for Qdrant on :6333. POST /v1/embeddings.";
           contextSize = 8192;
-          threads = 4;
         };
 
         # Image generation: Z-Image-Turbo (6B DiT, distilled to 8 steps with
