@@ -32,16 +32,16 @@
 # operator already uses (~/.ssh/id_ed25519_ac-host), and the far side is
 # READ-ONLY -- rsync's sender never writes. Nothing here can damage ac-box.
 #
-# ROOT, here, and why: the state is owned by three different service accounts
-# on the box (root:root under /var/lib/ac-host, arcade:arcade, agent-hub, and
-# root:monitoring under /var/lib/monitoring). Only root can reproduce those
-# owners locally, and --numeric-ids keeps them as UIDs rather than resolving
-# them against THIS machine's passwd, where uid 993 is somebody else entirely.
-# A backup that silently flattens ownership restores a service that cannot read
-# its own state. We ssh AS root to the box because that is the account the
-# operator's key already has there (~/.ssh/config: root@192.168.1.50), so no
-# `sudo rsync` on the far side is needed; verified read-only before this script
-# was written.
+# ROOT, here, and why: the state is owned by five different service accounts
+# on the box (root:root under /var/lib/ac-host, arcade:arcade, agent-hub,
+# grafana:grafana at 0700 and prometheus:prometheus at 0700). Only root can
+# reproduce those owners locally, and --numeric-ids keeps them as UIDs rather
+# than resolving them against THIS machine's passwd, where uid 993 is somebody
+# else entirely. A backup that silently flattens ownership restores a service
+# that cannot read its own state. We ssh AS root to the box because that is the
+# account the operator's key already has there (~/.ssh/config:
+# root@192.168.1.50), so no `sudo rsync` on the far side is needed; verified
+# read-only before this script was written.
 #
 # NOT ATOMIC, and it says so rather than pretending: rsync copies a live tree.
 # A file written during the copy is captured mid-write. The state here is JSON
@@ -50,6 +50,19 @@
 # of quiescing the box (a window, a drain of live race servers) is far higher
 # than the risk. If a tenant ever grows a real database, it gets a dump hook
 # and this comment gets a sibling.
+#
+# The sibling (16 Sep 2026, homelab-bqo.58): observability now declares two
+# real databases, and neither gets a dump hook yet. Grafana's is one sqlite
+# file (data/grafana.db, ~2 M) written on dashboard saves, logins and alert
+# state changes -- at 04:30 that is nearly idle, a torn copy needs a write to
+# land inside the ~1 s the file takes to read, and the previous night's
+# snapshot is the fallback. Prometheus' TSDB is append-only in the way that
+# suits this: the
+# two-hour blocks under data/ are immutable once cut, and only wal/ and
+# chunks_head/ are live; Prometheus repairs or truncates a torn WAL segment at
+# startup, so the worst case is the last <2 h of samples, not the 14 d. The
+# proper hooks -- `sqlite3 .backup` for Grafana, the TSDB snapshot API for
+# Prometheus -- are the day either of those exposures stops being acceptable.
 #
 # ---------------------------------------------------------------------------
 # WHAT IS DELIBERATELY NOT COPIED, and what deliberately IS

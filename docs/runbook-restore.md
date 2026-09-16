@@ -37,10 +37,11 @@ The directory list is not written down anywhere except the contract. Ask:
 bash scripts/hub-backup.sh --list      # ~1s, no root, no network
 ```
 
-On 14 Sep 2026 that is `/var/lib/ac-host` (assetto), `/var/lib/arcade`,
-`/var/lib/agent-hub`, `/var/lib/qdrant` (declared, absent on the box) and
-`/var/lib/monitoring` (observability). A tenant is added to the backup by
-setting `state.backup = true` in `hosts/ac-box/tenants.nix` and nothing else.
+On 16 Sep 2026 that is `/var/lib/ac-host` (assetto), `/var/lib/arcade`,
+`/var/lib/agent-hub`, `/var/lib/qdrant` (declared, absent on the box),
+`/var/lib/grafana` and `/var/lib/prometheus2` (observability). A tenant is
+added to the backup by setting `state.backup = true` in
+`hosts/ac-box/tenants.nix` and nothing else.
 
 ### What is NOT in it — read this before assuming a file is recoverable
 
@@ -48,13 +49,23 @@ setting `state.backup = true` in `hosts/ac-box/tenants.nix` and nothing else.
   excluded on purpose: 7.9 GB of the 12 GB, all of it in git or rebuildable
   from it. `src` is a checkout of ac-host at the sha in `last-applied.json`;
   `scripts/hub-status.sh` compares it to git file by file. Restore it from git.
-- `/var/lib/grafana` (94 MB, the dashboards and their history) and
-  `/var/lib/prometheus2` (70 MB, the TSDB) are **not declared by any tenant**,
-  so they are not backed up. `observability` declares only
-  `/var/lib/monitoring`, which holds four secret files that are now in git.
-  This is a gap in the declaration, not in the backup.
+- `/var/lib/monitoring` — declared until 16 Sep 2026 (`homelab-bqo.58`), and
+  the only thing observability declared. Its `secrets/` holds four symlinks
+  into `/run/secrets`, installed at every switch by `modules/platform/
+  secrets.nix` from the sops file in git; a copy of it is four dangling links.
+  Restore it by switching, not from here.
 - Anything outside the declared state directories: `/etc`, the Docker images,
   the Nix store. The box is rebuildable from git; its state is not.
+
+### What is in it only as a live copy
+
+`/var/lib/grafana/data/grafana.db` (sqlite) and `/var/lib/prometheus2/data`
+(the TSDB) are copied while their services run; neither has a dump hook. A
+restored `grafana.db` from a night when nobody was saving dashboards is the
+file as it was; the TSDB's immutable two-hour blocks restore cleanly and
+Prometheus repairs or drops a torn `wal/` segment at startup, so a restore
+can be short the last two hours of samples and nothing else. The header of
+`scripts/hub-backup.sh` has the reasoning.
 
 ---
 
@@ -125,7 +136,8 @@ Always restore to a scratch target and compare before putting anything back.
 | `assetto` | `/var/lib/ac-host` | **Never outside a window.** `quiet.drainable = false`; `ac-host-static`'s `ExecStop` is `docker rm -f` on live race servers. Drain with `acctl.py` first. |
 | `arcade` | `/var/lib/arcade` | Freely (standing authority, 9 Sep 2026). |
 | `agent-hub` | `/var/lib/agent-hub` | Freely. |
-| `observability` | `/var/lib/monitoring` | Freely. |
+| `observability` | `/var/lib/grafana` | Freely — `systemctl stop grafana`. The dir is `0700 grafana:grafana` (uid 196); the staged copy carries that. |
+| `observability` | `/var/lib/prometheus2` | Freely — `systemctl stop prometheus`. `0700 prometheus:prometheus` (uid 255). Restoring the TSDB is rarely worth a window: 14 d of samples, and the box regrows them. |
 
 A service must not be running while its state directory is replaced. Replacing
 it underneath a live process is how a partial restore becomes a corrupt one.
