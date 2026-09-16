@@ -1,0 +1,70 @@
+# Caliper spec for the five project skills in .agents/skills/.
+#
+#   bash scripts/hub-evals.sh          # from any homelab tree; k=3, sandboxed
+#   bash scripts/hub-evals.sh . --k 1  # one attempt per task, to sanity-check an edit
+#
+# Every attempt is a real `claude -p` run in an empty temporary home with only
+# these five skills installed, so the questions a probe asks are the ones a
+# fresh session would ask. Mostly trigger probes: the skills' descriptions
+# overlap (hub / verify / land all mention pushing), and the cheapest thing to
+# measure is whether the right one fires and the others stay quiet.
+skills:
+  - ../skills/homelab-hub/SKILL.md
+  - ../skills/homelab-land/SKILL.md
+  - ../skills/homelab-route/SKILL.md
+  - ../skills/homelab-supervise/SKILL.md
+  - ../skills/homelab-verify/SKILL.md
+
+tasks:
+  - name: What is live belongs to homelab-hub
+    prompt: "What's actually running on ac-box right now, and does it match what's on origin?"
+    activates: [homelab-hub]
+
+  - name: Is my change green belongs to homelab-verify
+    prompt: "I edited modules/tenant/ports.nix in the homelab tree. How do I check it's green before I call it done?"
+    activates: [homelab-verify]
+
+  - name: Push it to the box belongs to homelab-land
+    prompt: "Ship this ac-host change to the box."
+    activates: [homelab-land]
+
+  - name: Could the local model do this belongs to homelab-route
+    prompt: "Could agent-hub's local Qwen on ac-box write this commit message instead of you?"
+    activates: [homelab-route]
+
+  # Asked as a question, not an order. The imperative form — "pick the ready
+  # beads and dispatch workers" — sent the agent off to actually run a session
+  # and hit the 120s timeout, scoring UNUSABLE rather than measuring anything.
+  #
+  # Judged, not trigger-probed. `activates:` is an exact set, and supervise is
+  # the one skill that is an index of the others — its baseline step is
+  # homelab-hub, its dispatch step homelab-route, its landing step
+  # homelab-land — so an agent answering from it follows a link in about one
+  # attempt in three and the exact match fails on a skill working as written.
+  # What can be asserted is the substance: the answer is the loop, and the
+  # agent describes it rather than starting it. Whether supervise fires when
+  # it should NOT is still measured, by every other task's `activates:`.
+  # (It carries `disable-model-invocation: true`, so the Skill tool cannot
+  # fire it; a plain read of its SKILL.md is what the scoreboard counts.)
+  - name: A work-session question is answered from homelab-supervise
+    prompt: "Is there a set procedure here for running a work session — baseline, pick a bead, then merge and land what comes back?"
+    expect: >
+      The answer lays out the supervisor loop from homelab-supervise: a
+      baseline with hub-status.sh, picking a bead with bd ready / bd show,
+      one worktree and one worker per bead, merging fast-forward into the
+      registry checkout and gating there, landing through homelab-land,
+      then bd close. It describes the loop; it does not start running it.
+
+  - name: Unrelated refactor, nothing should fire
+    prompt: "Rename `resolved_model` to `engine_model` across this repo."
+    activates: []
+
+  - name: Explains the no-op proof from the skill, not from memory
+    prompt: "I moved a comment in modules/tenant/resources.nix in the homelab tree. How do I prove that changed nothing on ac-box?"
+    expect: >
+      The answer says to compare the drvPath of
+      nixosConfigurations.ac-box's system.build.toplevel before and after
+      the change (byte-identical means no-op), via `nix eval --raw`. It
+      does not claim a green gate alone proves it, and it does not claim
+      the local check proves the change activates cleanly on the box.
+    activates: [homelab-verify]

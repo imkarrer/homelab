@@ -36,3 +36,6 @@ hub/trees/
 # Per-machine Claude Code permission grants (the ssh ac-box rule, for the migration).
 # Never tracked: a grant belongs to the operator who made it, not to every agent that clones this repo.
 .claude/settings.local.json
+
+# Caliper skill-eval results and transcripts (.agents/evals/*.eval.yaml is the spec; runs are per-machine).
+.caliper/
