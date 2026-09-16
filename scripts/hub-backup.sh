@@ -231,6 +231,10 @@ RESTIC_PASSWORD=$(hub_sops_secret restic-repo-password) \
   || die "could not read restic-repo-password from secrets/ac-box.yaml"
 export RESTIC_PASSWORD
 export RESTIC_REPOSITORY="$REPO"
+# restic keeps an index cache under $XDG_CACHE_HOME or $HOME; a systemd
+# service has neither (16 Sep, the first run under the timer stopped here).
+# Beside the repo, so it lives with the thing it caches and is never in /root.
+export RESTIC_CACHE_DIR="${RESTIC_CACHE_DIR:-$BACKUP_ROOT/.restic-cache}"
 say "read (sha256 $(printf '%s' "$RESTIC_PASSWORD" | sha256sum | cut -c1-8), never printed)"
 
 step "tools"

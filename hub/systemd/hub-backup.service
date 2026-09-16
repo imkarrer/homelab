@@ -31,6 +31,8 @@ Type=oneshot
 # ExecStartPre marks the attempt, so a unit that never reaches the script
 # still leaves a trace hub-status.sh can read (LAST_RESULT=started).
 Environment=PATH=/run/wrappers/bin:/run/current-system/sw/bin
+# No HOME either; ssh and nix both want one for their own state.
+Environment=HOME=/root
 ExecStartPre=/run/current-system/sw/bin/bash -c 'mkdir -p /home/nixos/backup; test -f /home/nixos/backup/status && sed -i "s/^LAST_RESULT=.*/LAST_RESULT=started/" /home/nixos/backup/status; true'
 ExecStart=/run/current-system/sw/bin/bash /home/nixos/src/homelab/scripts/hub-backup.sh
 # The box is a shared machine and this is the operator's desktop: the backup
