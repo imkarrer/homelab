@@ -10,6 +10,14 @@ BOX="${HOMELAB_BOX:-ac-box}"
 SSH=(ssh -o BatchMode=yes -o ConnectTimeout=8 "$BOX")
 PROBLEMS=()
 note() { PROBLEMS+=("$1"); }
+ago() {  # ago <epoch> -> "47 min" / "6 h" / "3 d": the age the operator reads
+  local s=$(( $(date +%s) - ${1:-0} ))
+  if [ "$s" -lt 3600 ]; then echo "$(( s / 60 )) min"
+  elif [ "$s" -lt 172800 ]; then echo "$(( s / 3600 )) h"
+  else echo "$(( s / 86400 )) d"; fi
+}
+# origin/main per tree, as the DEV loop fetches it: what CI should have built.
+declare -A OHEAD OHEADT; TREES=()
 
 # Paths rsync never copies (pending_deploy.RSYNC_EXCLUDES + PRESERVE_LOCAL),
 # so they are not drift when they differ. Kept as an array: no eval, no quoting trap.
@@ -32,7 +40,12 @@ while IFS='|' read -r name path remote deploy push; do
   br=$(git -C "$path" branch --show-current 2>/dev/null || echo '?')
   dirty=$(git -C "$path" diff --name-only 2>/dev/null | wc -l)
   untrk=$(git -C "$path" ls-files --others --exclude-standard 2>/dev/null | wc -l)
-  [ "$remote" != none ] && git -C "$path" fetch -q origin 2>/dev/null
+  if [ "$remote" != none ]; then
+    git -C "$path" fetch -q origin 2>/dev/null
+    OHEAD[$name]=$(git -C "$path" rev-parse origin/main 2>/dev/null)
+    OHEADT[$name]=$(git -C "$path" log -1 --format=%ct origin/main 2>/dev/null)
+    TREES+=("$name")
+  fi
   ub=$(git -C "$path" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null)
   if [ -n "$ub" ]; then
     ah=$(git -C "$path" rev-list --count "$ub..HEAD" 2>/dev/null || echo 0)
@@ -90,6 +103,104 @@ else
 fi
 
 echo
+echo "===== CI: newest main build per pipeline, against origin's HEAD ====="
+# What Buildkite did with the push origin holds. Until 16 Sep 2026 the only
+# CI fact here was the exit status of the last job in the agent's docker log,
+# and that line cannot tell apart the three cases that each want a different
+# action: NO build was created (the webhook did not fire -- nine hours of
+# pushes on 14 Sep, architecture.md row 34, and this script said "wait for
+# HEAD's build" the whole time), a build is RUNNING (wait), the build FAILED
+# (nothing can stage; push again all you like). So each is its own line,
+# read from the API: the newest build on main per pipeline, its commit held
+# against origin/main as the DEV loop just fetched it. Origin's HEAD with no
+# build is the verdict that would have caught 14 Sep in one run; a build in
+# flight is a state, printed as one. ac-host-ops is the tenant tree's apply
+# path (the bot's DOWNTIME=1 build, BOX section) and is shown with the tree;
+# its commit is whatever was pending at 03:00, not HEAD, so it is compared
+# to nothing and only its result is a verdict -- a failed apply was
+# invisible before this. The token is lib/buildkite-token.sh's (three
+# sources, sops last); without one the section is a line, not a failure,
+# because nothing below needs it. Cost: the token read plus five requests in
+# parallel inside one nix shell (jq): 0.8 s measured 16 Sep, next to the
+# ssh round trip and the git fetches that make up the rest of the ~2 s.
+# shellcheck source=scripts/lib/buildkite-token.sh
+. "$HUB/scripts/lib/buildkite-token.sh"
+BKLOG=$(mktemp)
+if TOKEN=$(buildkite_token 2>"$BKLOG"); then
+  BKSRC=$(tail -1 "$BKLOG")
+  SLUGS=()
+  for t in "${TREES[@]}"; do SLUGS+=("$t"); [ "$t" = ac-host ] && SLUGS+=(ac-host-ops); done
+  # One nix shell, the requests backgrounded inside it, one line per slug
+  # out: slug|http|number|state|commit|created|finished|url. The header goes
+  # in on stdin (-H @-) and the token in the environment, never in argv.
+  # shellcheck disable=SC2016  # the quoted script is for the child bash
+  BKTXT=$(TOKEN="$TOKEN" NIX_CONFIG="experimental-features = nix-command flakes" \
+    nix shell nixpkgs#jq -c bash -c '
+      set -u
+      d=$(mktemp -d); trap "rm -rf \"$d\"" EXIT
+      for s in "$@"; do
+        printf "Authorization: Bearer %s\n" "$TOKEN" |
+          curl -sS -m 8 -H @- -o "$d/$s.json" -w "%{http_code}" \
+            "https://api.buildkite.com/v2/organizations/isaac-karrer/pipelines/$s/builds?branch=main&per_page=1" \
+            > "$d/$s.code" 2>/dev/null &
+      done
+      wait
+      for s in "$@"; do
+        printf "%s|%s|%s\n" "$s" "$(cat "$d/$s.code")" \
+          "$(jq -r ".[0] | [.number, .state, .commit, .created_at, .finished_at, .web_url] | map(. // \"\") | join(\"|\")" "$d/$s.json" 2>/dev/null)"
+      done
+    ' _ "${SLUGS[@]}")
+  printf "%-18s %-22s %s\n" PIPELINE "NEWEST MAIN BUILD" "VS ORIGIN HEAD"
+  while IFS='|' read -r s code num state commit created finished url; do
+    [ -n "$s" ] || continue
+    tree="$s"; [ "$s" = ac-host-ops ] && tree=ac-host
+    h="${OHEAD[$tree]:-}"; hs="${h:0:7}"; hage=$(ago "${OHEADT[$tree]:-}")
+    if [ "$code" != 200 ]; then
+      printf "%-18s %-22s %s\n" "$s" "HTTP ${code:-none}" "build state unknown"
+      case "$code" in
+        404) note "$s: no Buildkite pipeline - nothing builds this tree (scripts/hub-pipeline.sh $s creates it and its webhook)" ;;
+        # One token, one verdict: a refusal is the same fact for every slug.
+        401|403) [ -n "${BKREFUSED:-}" ] || note "Buildkite refuses the token (HTTP $code; $BKSRC) - build state of every pipeline unknown, not fine"; BKREFUSED=1 ;;
+        *) note "$s: Buildkite answered HTTP ${code:-nothing} - build state unknown, not fine" ;;
+      esac
+      continue
+    fi
+    when=$([ -n "$finished" ] && echo "finished $(ago "$(date -d "$finished" +%s 2>/dev/null)") ago" \
+         || echo "$state since $(ago "$(date -d "$created" +%s 2>/dev/null)") ago")
+    if [ "$s" = ac-host-ops ]; then
+      if [ -z "$num" ]; then printf "%-18s %-22s %s\n" "$s" "none" "no DOWNTIME apply has ever run"; continue; fi
+      printf "%-18s %-22s %s\n" "$s" "build $num $state" "DOWNTIME apply of ${commit:0:7}, $when"
+      case "$state" in failed|canceled|waiting_failed)
+        note "ac-host-ops: DOWNTIME build $num $state for ${commit:0:7} - the pending tree was not applied; the box still runs the one before ($url)" ;;
+      esac
+      continue
+    fi
+    if [ -z "$h" ]; then
+      printf "%-18s %-22s %s\n" "$s" "build ${num:-none} $state" "origin HEAD unknown (no checkout here)"
+    elif [ -z "$num" ]; then
+      printf "%-18s %-22s %s\n" "$s" "none" "origin HEAD $hs (committed $hage ago) has NO build"
+      note "$s: push did not build - origin HEAD $hs (committed $hage ago) has no build on main, ever; the webhook did not fire (scripts/hub-pipeline.sh $s converges it and prints GitHub's deliveries; then a new push, or a build started by hand)"
+    elif [ "$commit" != "$h" ]; then
+      printf "%-18s %-22s %s\n" "$s" "build $num $state" "for ${commit:0:7}; origin HEAD $hs (committed $hage ago) has NO build"
+      note "$s: push did not build - origin HEAD $hs (committed $hage ago) has no build; the newest is $num for ${commit:0:7}; the webhook did not fire (scripts/hub-pipeline.sh $s converges it and prints GitHub's deliveries; then a new push, or a build started by hand)"
+    else
+      printf "%-18s %-22s %s\n" "$s" "build $num $state" "for origin HEAD $hs, $when"
+      case "$state" in
+        failed|canceled|waiting_failed)
+          note "$s: build $num $state for origin HEAD $hs - nothing downstream runs (no stage, no bump-lock) until a build of this tree passes ($url)" ;;
+        # passed needs no line; running, scheduled, creating, blocked, failing
+        # are states, printed above, and a verdict only once they settle.
+      esac
+    fi
+  done <<< "$BKTXT"
+else
+  # The lib's whole stderr, one line: the specific cause first, the three
+  # sources last. Not a verdict: the token is this section's, not the box's.
+  echo "skipped (build state per pipeline unknown): $(paste -sd';' "$BKLOG" | sed 's/;/; /g')"
+fi
+rm -f "$BKLOG"
+
+echo
 echo "===== BOX: $BOX ====="
 # One round trip, one KEY=VALUE per line: robust to any JSON contents.
 BOXTXT=$("${SSH[@]}" '
@@ -100,7 +211,6 @@ BOXTXT=$("${SSH[@]}" '
   echo "CONTAINERS=$(docker ps -q 2>/dev/null | wc -l)"
   echo "DISK=$(df -h / | awk "NR==2{print \$5}")"
   echo "LOAD=$(cut -d" " -f1-3 /proc/loadavg)"
-  echo "CIEXIT=$(docker logs --tail 400 ac-host-ci-agent-1 2>&1 | grep -oE "Exit Status: [0-9]+" | tail -1 | grep -oE "[0-9]+$")"
   # Whether the 03:00 DOWNTIME=1 build has something to queue it. bot/downtime.py
   # posts it at mark 0 (ac-host bot/bot.py, fire_downtime_mark); with the bot
   # down at 02:59 a queued tree waits, and nothing says so. `docker ps` rather
@@ -148,9 +258,7 @@ else
   echo "applied    : ${APPLIED:-none}"
   echo "pending    : ${PENDING:-none}"
   echo "failed=$(get FAILED) containers=$(get CONTAINERS) disk=$(get DISK) load=$(get LOAD)"
-  echo "last CI job: exit $(get CIEXIT)"
   [ "$(get FAILED)" != 0 ] && note "box has $(get FAILED) failed systemd unit(s)"
-  ce=$(get CIEXIT); [ -n "$ce" ] && [ "$ce" != 0 ] && note "last CI job exited $ce - queue-prod blocked, nothing can deploy"
   # Queued-but-not-applied is a STATE while the bot is up: it queues the
   # DOWNTIME=1 build at 03:00 (ac-host bot/downtime.py, mark 0) and that build
   # applies the tree and recycles the lobbies once. Until 13 Sep 2026 this

@@ -49,9 +49,26 @@ Each line names a distinct failure, and they are not interchangeable:
 - **last-downtime.json is unreadable** — a tree is pending and the file is
   missing or has no `date`; whether the build runs at all is unknown, which is
   not the same as fine.
-- **last CI job exited non-zero** — `queue-prod` and `queue-closure` both sit
-  behind `wait: ~`, so a red test or lint gate blocks **every** deploy in that
-  tree. Nothing reaches the box until it is green, however many times you push.
+- **push did not build** — origin's HEAD for that tree has no Buildkite build
+  on `main`: the newest build (the CI section names it) is for an older
+  commit, or there has never been one. The webhook did not fire, and no
+  amount of waiting changes that — on 14 Sep 2026 this looked like a slow
+  build for nine hours. `scripts/hub-pipeline.sh <tree>` converges the hook
+  and prints GitHub's deliveries; then a new push, or a build started by
+  hand. A build that is *running* is not this: the CI section prints it as a
+  state (`build N running`), and it is a verdict only once it settles.
+- **build N failed for origin HEAD** — `queue-prod`, `queue-closure` and the
+  tenants' `trigger: homelab` step all sit behind `wait: ~`, so a red test or
+  lint gate blocks **every** deploy and lock bump in that tree. Nothing
+  reaches the box until a build passes, however many times you push. The
+  `ac-host-ops` line is the DOWNTIME apply itself: failed there means the
+  pending tree was not applied and the box still runs the one before.
+- **Buildkite refuses the token / no Buildkite pipeline** — the CI section
+  could not read a state, which is unknown, not fine. A 401 names the token's
+  source (`scripts/lib/buildkite-token.sh`, three sources); a 404 is a
+  registry tree with no pipeline object, which `hub-pipeline.sh <tree>`
+  creates. No token source at all skips the section in one line and is not a
+  verdict.
 - **box tree differs from its own sha** — someone edited `/var/lib/ac-host/src`
   by hand. Those edits exist nowhere else; an rsync deploy destroys them.
 - **system closure N commits behind homelab HEAD** — the platform layer has
