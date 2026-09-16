@@ -26,7 +26,11 @@ names the server), the relay below collapses into a normal worker turn.
 2. Build one question. The stable system prompt is
    `.agents/skills/homelab-route/system.md`; the user message is the brief's
    "done when" line plus the smallest set of `-f` files that make it
-   answerable. Ask for the whole file back when the edit is small enough
+   answerable. When the brief does not name every file the answer needs,
+   `bash scripts/hub-search.sh -k 3 "<what the brief is about>"` names the
+   chunks that do -- pass those, not whole trees: the 6k-token budget is
+   prefill on a CPU, and the index exists so it is spent on the right lines.
+   Ask for the whole file back when the edit is small enough
    that a diff would be longer than the file.
 
    ```bash

@@ -23,10 +23,24 @@ ssh ac-box 'systemctl list-units "*.slice" --no-pager'
 ssh ac-box 'docker ps --format "{{.Names}}\t{{.Status}}"'
 ```
 
-For "where is X defined", the four trees are linked under `hub/trees/`;
-`hub/repos.psv` is the registry. `docs/current-state.md` classifies every
-service; `docs/architecture.md` Part III is the delta narrative — cite a row
-number when it answers the question.
+For "where is X defined" or "where was X decided", ask the index before
+grepping: it holds every tracked `.md .nix .sh .py .yml .psv` of the four
+trees plus every bead, embedded on the box, and answers with `tree/path:lines`
+and a snippet -- three hits to open instead of four trees to read.
+
+```bash
+bash scripts/hub-search.sh "how does a tenant push reach the box"
+bash scripts/hub-search.sh -k 3 -t beads "buildkite webhook"      # -t: one tree, or beads
+```
+
+A score above ~0.5 is usually the right file; below ~0.35 is noise -- read
+the snippet, then `Read` the file at those lines. Grep is still right for an
+exact identifier. The index is rebuilt by `bash scripts/hub-index.sh` (seconds
+when little changed); if a hit looks stale, that is why. The four trees are
+also linked under `hub/trees/`; `hub/repos.psv` is the registry.
+`docs/current-state.md` classifies every service; `docs/architecture.md`
+Part III is the delta narrative -- cite a row number when it answers the
+question.
 
 Report the fact, the command that produced it, and the timestamp. Say when a
 question cannot be settled read-only, and what would settle it.
