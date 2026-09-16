@@ -474,6 +474,25 @@ in
 
         "--flash-attn" "on"
 
+        # Tool calling, step one. Without this, llama-server answers any
+        # request that carries `tools` with HTTP 500 "tools param requires
+        # --jinja flag", which is every request a coding agent sends -- found
+        # 16 Sep 2026 pointing opencode at this port. With it, the prompt is
+        # rendered by the GGUF's own chat template and tool calls are parsed
+        # server-side. The embedding backend inherits the flag and ignores
+        # it: it serves no chat endpoint.
+        #
+        # Step two is not settled. The ik build (agent-hub nix/ik-llama-cpp.nix,
+        # 3bb386e) has only the generic template-derived parser, which needs
+        # the literal <tool_call> to open a call. Qwen3-Coder-30B-A3B on the
+        # WSL box omitted that token in 7 of 7 samples, so every call came
+        # back as content; mainline llama.cpp newer than nixpkgs' b9190 has a
+        # Qwen3-Coder parser that tolerates the omission, and the WSL box
+        # serves that model with it (b11007). Whether Qwen3-Coder-Next does
+        # the same is untested here -- check the first opencode session's
+        # replies before trusting `coder` behind an agent.
+        "--jinja"
+
         # Each llama backend serves /metrics on its loopback port; the LAN
         # port's /metrics is llama-swap's own. Neither is scraped yet --
         # see the agent-hub tenant's `metrics = null` in tenants.nix for
