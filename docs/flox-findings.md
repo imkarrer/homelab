@@ -146,3 +146,54 @@ Also settled: the lock written by flox 1.14.0 is read by 1.14.1 unchanged
 path of the fork's `llama-server` differs between the environment and the
 closure — same source and options, different nixpkgs `stdenv` — which is a
 fact for the generation stamp (§3), not a bug.
+
+## Beyond the six — from `homelab-ybm` (the bot and sidecar images by `flox containerize`, 17 Sep)
+
+`flox containerize` of ac-host's existing manifest, with the pinned 1.14.0,
+produced the image compose now runs for the bot and the three sidecars.
+Proven in the image: every entrypoint imports, DejaVu resolves through the
+environment's `XDG_DATA_DIRS`, `auth.py` serves `/health` from the committed
+compose definition. What the step taught, each verified by the worker and
+independently by the reviewer (who containerized the branch a second time):
+
+- **Size.** 2.07 GB uncompressed on disk, 100 layers (Docker Desktop reports
+  4.2 GB, double-counting the snapshotter), against `python:3.12-slim` at
+  179 MB and the box's previous `ac-host-bot` 539 MB + `ac-host-auth` 177 MB.
+  Where it goes: nixpkgs' `discordpy` propagates a full ffmpeg for voice
+  (1.0 GB closure — gtk4, pipewire, gstreamer), scipy + numpy + openblas
+  ~520 MB, and git/gh/nixfmt ~490 MB ride along because **one manifest
+  serves three roles** (dev shell, CI, prod) and a package's optional
+  propagated dependencies cannot be dropped from it. Layers are shared per
+  lock, so repeated builds cost tags, not disk; the box has 619 GB free.
+  Not a blocker here; a real cost for anyone shipping to a registry.
+- **Code inclusion is a bind mount.** In 1.14 a `[build]` output reaches an
+  environment only through `flox publish` and `flox install` — a network and
+  account dependency per commit — and a second `COPY` layer is a Dockerfile.
+  So the four services mount the tree at `/repo:ro` (the bot already did) and
+  the manifest's `[profile]` derives `PYTHONPATH` from
+  `${FLOX_ENV_PROJECT:-${AC_REPO:-/repo}}`. A code change is a tree sync and
+  `--force-recreate`; the image changes only when the manifest does.
+- **`FLOX_ENV_PROJECT` is empty inside the image**, so a `[profile]` that
+  builds paths from it needs the fallback above.
+- **`--mode run` drops site-packages from `PYTHONPATH`**: `import discord`
+  fails; the image is dev mode, which is also what CI tests under, for a
+  4 MB saving foregone.
+- **The activation's `bash --noprofile --norc -s` is PID 1** in the
+  container. It forwards neither `SIGTERM` (`docker stop` = 10 s, then
+  `SIGKILL`, exit 137) nor stdin. `init: true` in compose gives 185 ms and
+  exit 143 — python still never sees the signal, it dies with the namespace,
+  which is what the old images did too. A manifest `[hook]` cannot `exec`
+  the command, so the fix is compose-side. For the CI smoke test, stdin is
+  worked around with `docker create` + `docker cp` + `docker start -a`.
+- **`flox activate -- cmd` skips `[profile]`; `-c` sources it.** The gate and
+  CI both use `-c` for anything that needs `PYTHONPATH`.
+- Containerizing a path environment needs no FloxHub login.
+- `pillow`/`numpy`/`scipy` are not dev-only: the bot runs
+  `generate_series_liveries.py` with `sys.executable` inside its own
+  container when the Buildkite trigger is unavailable. They stay.
+
+**Consequence for the tenant tree path:** the image is loaded into the
+box's daemon by CI (`image` on every branch before the wait, `promote-image`
+on `main` after it, `queue-prod` behind promote); `ci_downtime.py` and
+`acctl.py` never build, and a missing image is a loud skip of the sidecars,
+never a missing lobby. 03:00 no longer reaches PyPI or Docker Hub.
