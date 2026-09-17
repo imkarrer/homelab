@@ -3,16 +3,13 @@
 #
 # Do not add derivation logic here. This file declares the vocabulary only;
 # ports.nix, resources.nix, metrics.nix, quiet.nix and environment.nix
-# consume it.
-{ config, lib, ... }:
+# consume it (environment.nix also supplies environment.dir's derived
+# default, by mkDefault -- the vocabulary says "null = derived", the
+# consumer derives).
+{ lib, ... }:
 
 let
   inherit (lib) mkOption types;
-
-  # Read for ONE default: environment.dir falls back to the host's state
-  # root when a tenant declares no state dir. The contract otherwise reads
-  # no host fact -- its consumers do -- and this stays the exception.
-  hostPaths = config.homelab.host.paths;
 
   # A single port claim. `scope` decides how the platform opens it, and is the
   # only thing a tenant is allowed to say about the network.
@@ -196,7 +193,7 @@ in
   options.homelab.tenants = mkOption {
     default = { };
     description = "Everything sharing this host, declared. One entry per tenant.";
-    type = types.attrsOf (types.submodule ({ name, config, ... }: {
+    type = types.attrsOf (types.submodule ({ name, ... }: {
       options = {
         enable = mkOption { type = types.bool; default = true; };
 
@@ -278,25 +275,25 @@ in
               };
 
               dir = mkOption {
-                type = types.path;
+                type = types.nullOr types.path;
+                # null means derived: `<first state dir>/env`, else
+                # `<homelab.host.paths.state>/<tenant>/env`. The derivation
+                # lives in environment.nix (a mkDefault on this option), the
+                # way every other derived value in this contract lives in a
+                # consumer -- this file reads no host fact and computes
+                # nothing. Readers see the resolved path wherever
+                # environment.nix is imported; null only where it is not.
+                #
                 # The root of a CHECKOUT of the tenant tree, not a bare
                 # .flox: `<dir>/.flox` is the environment and `<dir>/<file>`
                 # is anything the tenant reads at run time (agent-hub's
                 # llama-swap.yaml and nix/sd-ui.html). A FloxHub generation
                 # carries the manifest and lock only, so a bare environment
                 # would leave those files with no home. Under the tenant's
-                # declared state path because it is state: written by the
-                # pull unit, read by the stub, owned by the tenant's user,
-                # and not worth a backup slot on its own (it is a git sha).
-                default = "${
-                  toString (
-                    if config.state.dirs != [ ] then
-                      lib.head config.state.dirs
-                    else
-                      "${toString hostPaths.state}/${name}"
-                  )
-                }/env";
-                defaultText = lib.literalMD "`<first state dir>/env`, or `<homelab.host.paths.state>/<tenant>/env` when none is declared";
+                # state path because it is state: written by the pull unit,
+                # read by the stub, owned by the tenant's user, and not worth
+                # a backup slot on its own (it is a git sha).
+                default = null;
                 description = ''
                   Where the environment lives on the host: the root of a
                   checkout of the tenant tree, `.flox/` inside it. The

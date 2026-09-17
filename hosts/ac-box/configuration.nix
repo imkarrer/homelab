@@ -590,9 +590,10 @@ in
     in
     {
       enable = false;
-      # dir: the default, <state dir>/env = /var/lib/agent-hub/env, is right
-      # and is left as the default so the option's derivation is what a
-      # second flox tenant gets too.
+      # dir: left null, i.e. derived by modules/tenant/environment.nix to
+      # <state dir>/env = /var/lib/agent-hub/env, which is right; `env.dir`
+      # above reads the resolved value, so the -config path and the
+      # activation share one spelling.
       units."agent-hub-llm.service" = {
         command = [
           "llama-swap"

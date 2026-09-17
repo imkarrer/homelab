@@ -44,10 +44,25 @@
 # FLOX_DISABLE_METRICS: activation forks a metrics POST otherwise. It fails
 # soft, but a production unit has no business phoning home, and this is the
 # same variable hub-gates.sh sets for the CI reproduction.
+#
+# environment.dir's DEFAULT is derived here, not in schema.nix. The schema
+# says `null = derived` and stays config-free (vocabulary only, its header);
+# this file, which already reads the host, supplies the value with mkDefault
+# at the submodule level -- `<first state dir>/env`, else
+# `<homelab.host.paths.state>/<tenant>/env`, the same derivation dirSet
+# documents for the state dir itself. A submodule-level definition rather
+# than a `homelab.tenants = mapAttrs ...` over config.homelab.tenants,
+# because the latter derives the attribute NAMES from the option being
+# defined and is an infinite recursion. Unconditional on purpose: the
+# resolved path must be readable (hosts/ac-box/configuration.nix builds the
+# stub's -config path from it) whether or not the stub is on, and an option
+# value on homelab.tenants reaches nothing in the closure by itself.
 { config, lib, ... }:
 
 let
-  inherit (lib) mkForce mkIf;
+  inherit (lib) mkDefault mkForce mkIf types;
+
+  hostPaths = config.homelab.host.paths;
 
   flox = config.homelab.flox.package;
 
@@ -96,6 +111,22 @@ let
   );
 in
 {
+  options.homelab.tenants = lib.mkOption {
+    type = types.attrsOf (
+      types.submodule (
+        { name, config, ... }:
+        {
+          config.environment.dir = mkDefault (
+            if config.state.dirs != [ ] then
+              "${toString (lib.head config.state.dirs)}/env"
+            else
+              "${toString hostPaths.state}/${name}/env"
+          );
+        }
+      )
+    );
+  };
+
   # mkIf on the whole block: with no enabled environment this contributes
   # no key at all to systemd.services, not an empty override -- the
   # difference between "drvPath unchanged" and "drvPath unchanged, probably".
