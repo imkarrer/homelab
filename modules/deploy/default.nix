@@ -200,13 +200,22 @@ let
       # --no-link: nothing here should own a gcroot. The store path lives
       # until the next GC, and the switch below re-resolves it in seconds
       # rather than trusting a path this script passed along.
+      #
+      # --accept-flake-config: honour the substituters flake.nix declares in
+      # its nixConfig. This unit runs as root (a trusted user), so the flag
+      # is sufficient, and it matters exactly once per new cache: the build
+      # of the closure that ADDS a substituter to nix.conf runs under the
+      # nix.conf that does not have it yet. Without the flag, the closure
+      # that first carried flox (modules/platform/flox.nix) would have
+      # compiled flox from source here, in the window. A cache the flake
+      # names and the box does not trust is a warning, never an error.
       echo "homelab-deploy: building $rev"
-      nix build --no-link "$flake/$rev#nixosConfigurations.$host.config.system.build.toplevel"
+      nix build --no-link --accept-flake-config "$flake/$rev#nixosConfigurations.$host.config.system.build.toplevel"
 
       busy && exit 0
 
       echo "homelab-deploy: switching to $rev"
-      nixos-rebuild switch --flake "$flake/$rev#$host"
+      nixos-rebuild switch --accept-flake-config --flake "$flake/$rev#$host"
 
       # Written only after a successful switch, so a failed one leaves the
       # pending record intact and the next firing retries it rather than

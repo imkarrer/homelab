@@ -37,7 +37,12 @@ steps:
   - label: ":nix: flake check (ac-box + module eval harnesses)"
     if: build.env("HOMELAB_BUMP_INPUT") == null
     command: |
-      nix --extra-experimental-features "nix-command flakes" flake check -L
+      nix --extra-experimental-features "nix-command flakes" flake check -L --accept-flake-config
+    # --accept-flake-config: the agent runs as root in its own container
+    # with its own /nix, where cache.flox.dev is a TRUSTED substituter
+    # (flox.conf) but not a default one. flake.nix names it in nixConfig so
+    # this build can substitute flox (modules/platform/flox.nix) instead of
+    # compiling it -- a Rust program with a bundled nix -- in batch.slice.
     # checks.${system}.ac-box (flake.nix) IS
     # nixosConfigurations.ac-box.config.system.build.toplevel -- the same
     # cheap gate flake.nix's own comment describes: catches a port
