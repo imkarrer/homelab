@@ -70,7 +70,10 @@ elif [ -f .flox/env/manifest.toml ]; then
 
   # A manifest whose lock does not resolve it is the trap that stalled the
   # pipeline for 13h: the dependency is declared but CI never gets it.
-  for pkg in $(grep -oE '^[a-zA-Z0-9_]+\.pkg-path' .flox/env/manifest.toml | cut -d. -f1); do
+  # `.flake` descriptors (a custom derivation installed by flake ref, as
+  # agent-hub does for its llama.cpp fork -- ADR 0009) lock the same way and
+  # are checked the same way; only `.pkg-path` was matched until 17 Sep 2026.
+  for pkg in $(grep -oE '^[a-zA-Z0-9_-]+\.(pkg-path|flake)' .flox/env/manifest.toml | cut -d. -f1); do
     if ! grep -q "\"install_id\": \"$pkg\"" .flox/env/manifest.lock 2>/dev/null; then
       echo "LOCK GAP: $pkg is in manifest.toml but not manifest.lock"; RC=1
     fi
