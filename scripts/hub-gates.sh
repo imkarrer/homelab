@@ -19,14 +19,28 @@ if [ -n "${2:-}" ]; then
 fi
 cd "$PATHX" || exit 2
 
-# flox pinned to the version in the CI agent container: a lock written by a
-# newer flox can be unreadable there, which breaks CI instead of fixing it.
-FLOX_PIN="github:flox/flox/v1.14.0#packages.x86_64-linux.flox"
+# flox at ONE pinned version (ADR 0009, question 6): the `flox` input of the
+# hub's flake.lock, which modules/platform/flox.nix installs on ac-box. This
+# script used to carry its own copy of the tag ("v1.14.0", because a lock
+# written by a newer flox was unreadable in the CI agent container); a second
+# spelling of a pin is the drift README forbids, so the tag now lives in
+# flake.nix alone and this reads the rev the lock resolved it to. The CI
+# agent container's own flox (from ac-host's compose file) is the third
+# copy, still by hand -- `flox --version` in a CI log is the check.
+# No jq/python3 on the CI agent's PATH; nix parses its own JSON.
+flox_pin() {
+  nix eval --impure --raw --expr "
+    let l = builtins.fromJSON (builtins.readFile $HUB/flake.lock);
+        n = l.nodes.\${l.nodes.root.inputs.flox}.locked;
+    in \"github:\${n.owner}/\${n.repo}/\${n.rev}#packages.x86_64-linux.flox\"" 2>/dev/null
+}
 # Prefer the pin over whatever is on PATH: this box carries a newer flox than
 # the agent container, and the point is to match the box, not the laptop.
 find_flox() {
-  local p
-  p=$(nix build --no-link --print-out-paths --accept-flake-config "$FLOX_PIN" 2>/dev/null | tail -1)
+  local pin p
+  pin=$(flox_pin)
+  [ -n "$pin" ] || { echo "no flox input in $HUB/flake.lock; the pin has moved" >&2; return; }
+  p=$(nix build --no-link --print-out-paths --accept-flake-config "$pin" 2>/dev/null | tail -1)
   if [ -n "$p" ]; then echo "$p/bin/flox"; return; fi
   command -v flox 2>/dev/null
 }
