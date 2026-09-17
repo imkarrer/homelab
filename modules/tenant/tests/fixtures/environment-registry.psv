@@ -1,0 +1,5 @@
+# Registry fixture for eval-environment.nix: one tree with a remote, one
+# without. environment-pull.nix must accept the first and refuse the second.
+# Fields as hub/repos.psv: name|path|remote|deploy|agent-push
+agent-hub|/nowhere/agent-hub|git@github.com:imkarrer/agent-hub|none|yes
+bare|/nowhere/bare||none|ask

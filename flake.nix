@@ -167,6 +167,14 @@
           # Inert until a tenant sets environment.enable (none does yet);
           # proven a no-op on import by an unchanged toplevel drvPath.
           ./modules/tenant/environment.nix
+          # ADR 0009's deploy edge, applying half: for every tenant with a
+          # stub declared, a path/timer-driven unit that checks the staged
+          # sha out, activates it once online and restarts the stub under
+          # the tenant's quiet policy. Emits nothing for a host without a
+          # stub declared; with one declared and enable = false it adds the
+          # pull units and /etc/homelab/environments.json and touches no
+          # other unit (homelab-158.3's drvPath proof).
+          ./modules/tenant/environment-pull.nix
 
           # L0: the platform. Reproduces what ac-box already runs, deliberately
           # without improving it.

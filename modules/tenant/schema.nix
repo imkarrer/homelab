@@ -311,6 +311,37 @@ in
                   spells them. Every key must also appear in `units`:
                   a stub the contract does not know about would run
                   outside the tenant's slice. environment.nix asserts it.
+
+                  Declaring one is also what puts the environment ON the
+                  box: environment-pull.nix keeps a checkout of `tree` at
+                  `dir` for every tenant with a stub declared, whether or
+                  not `enable` is on -- so the checkout is pulled and
+                  warmed BEFORE the stub is switched to it, which is the
+                  only order in which flipping `enable` cannot break the
+                  unit (environment-pull.nix's header has the sequence).
+                '';
+              };
+
+              # Where the environment comes from: a git sha of a tree in
+              # hub/repos.psv, staged by that tree's CI into
+              # <stateDir>/pending-environment-<tenant>.json and checked
+              # out by the pull unit. A FloxHub-sourced environment
+              # (`owner/env`, a generation) is homelab-158.5's job and will
+              # be a sibling option here; for agent-hub a generation is not
+              # enough, because the environment reads llama-swap.yaml and
+              # nix/sd-ui.html from the tree at run time
+              # (docs/flox-findings.md, "Beyond the six").
+              tree = mkOption {
+                type = types.str;
+                default = name;
+                defaultText = lib.literalMD "the tenant's name";
+                description = ''
+                  The registry name (hub/repos.psv, first column) of the
+                  tree whose checkout is this environment. Defaults to
+                  the tenant's name, right for agent-hub; arcade's tree is
+                  home-arcade. environment-pull.nix reads the tree's
+                  remote from the registry at evaluation time and refuses
+                  a name the registry does not carry.
                 '';
               };
             };

@@ -1,4 +1,5 @@
-# Eval harness for modules/tenant/environment.nix -- ADR 0009's unit stub.
+# Eval harness for modules/tenant/environment.nix -- ADR 0009's unit stub --
+# and modules/tenant/environment-pull.nix, the pull unit beside it.
 #
 # What it is for. The stub's whole contract is "off: the unit is its
 # module's; on: only ExecStart and the variables change, and the slice the
@@ -9,17 +10,25 @@
 # the two things the module must REJECT (a stub outside the tenant's
 # `units`, a stub that is not a .service), which no real host has.
 #
+# The pull unit's contract is the first-switch order in its header: it
+# EXISTS whenever a stub is declared (enable on or off), it is a oneshot in
+# the tenant's slice with the path unit on the pending file and the timer
+# for retries, it restarts the stub only when enable is on, and it refuses
+# a tree the registry does not carry. The restart decision is baked into
+# the script at evaluation time, so the script text is read the way
+# modules/deploy/tests/eval.nix reads homelab-deploy's.
+#
 # Usage:
 #   nix --extra-experimental-features "nix-command flakes" eval \
 #     -f modules/tenant/tests/eval-environment.nix enabled.summary --json
 #
 # Same shape as the other harnesses: pinned lib/pkgs, stubs for the option
 # surface the modules write to, the REAL schema/enforce/resources/
-# environment modules and the REAL modules/platform/flox.nix (with a fake
-# package for homelab.flox.package, so the ExecStart prefix under test is a
-# path this harness chose and not whatever flox happens to be), one
-# attribute per case with `.checked` and `.messages`, and an `expected` map
-# check.nix reads.
+# environment/environment-pull modules and the REAL modules/platform/
+# flox.nix (with a fake package for homelab.flox.package, so the ExecStart
+# prefix under test is a path this harness chose and not whatever flox
+# happens to be), one attribute per case with `.checked` and `.messages`,
+# and an `expected` map check.nix reads.
 {
   lib ? (import ./pinned-nixpkgs.nix).lib,
   pkgs ? (import ./pinned-nixpkgs.nix).pkgs,
@@ -33,9 +42,14 @@ let
   enforce = ../enforce.nix;
   resources = ../resources.nix;
   environment = ../environment.nix;
+  environmentPull = ../environment-pull.nix;
   stubSystemd = ./stub-systemd.nix;
   stubNix = ./stub-nix.nix;
+  stubEtc = ./stub-etc.nix;
   tenants = ./fixtures/environment-tenants.nix;
+  # A registry with one tree that has a remote and one that has none, so
+  # both refusals are reachable; the real hub/repos.psv has no bare row.
+  registry = ./fixtures/environment-registry.psv;
 
   # Never built; only its store path is read. A runCommand rather than a
   # real package so the prefix asserted below is unmistakably the
@@ -44,6 +58,13 @@ let
 
   # The module's ExecStart, verbatim from the fixture -- the "off" answer.
   moduleExecStart = (import tenants).systemd.services.agent-hub-llm.serviceConfig.ExecStart;
+
+  # The pull script's text, through the module's own readOnly `pull` map;
+  # the remote, the owner and the restart set are decided at evaluation
+  # and only visible here.
+  pullScript = cfg: name: (cfg.homelab.environments.pull.${name} or null);
+  pullText = cfg: name: (pullScript cfg name).text or "";
+  pullHas = cfg: name: needle: lib.hasInfix needle (pullText cfg name);
 
   sevenVars = [
     "AGENT_HUB_MODELS"
@@ -66,6 +87,7 @@ let
         modules = [
           stubSystemd
           stubNix
+          stubEtc
           hostOptions
           hostFacts
           floxModule
@@ -74,6 +96,8 @@ let
           enforce
           resources
           environment
+          environmentPull
+          { homelab.environments.registry = registry; }
           tenants
           # Slices on, so `Slice` is a real answer and not an absent key.
           { homelab.enforce.slices = true; }
@@ -88,6 +112,7 @@ let
       failedMessages = map (a: a.message) failedAssertions ++ map (c: c.message) failedChecks;
 
       unit = cfg.systemd.services.agent-hub-llm;
+      pull = cfg.systemd.services.agent-hub-environment-pull or null;
     in
     {
       inherit (evaluated) config;
@@ -100,6 +125,20 @@ let
         user = unit.serviceConfig.User or null;
         environment = unit.environment;
         dir = cfg.homelab.tenants.agent-hub.environment.dir;
+        pull = {
+          exists = pull != null;
+          serviceConfig = if pull == null then null else pull.serviceConfig;
+          restartIfChanged = if pull == null then null else pull.restartIfChanged;
+          pathConfig = (cfg.systemd.paths.agent-hub-environment-pull or { }).pathConfig or null;
+          timerConfig = (cfg.systemd.timers.agent-hub-environment-pull or { }).timerConfig or null;
+          restartUnitsLine = lib.findFirst (lib.hasPrefix "restartUnits=") "<none>" (lib.splitString "\n" (pullText cfg "agent-hub"));
+          remoteLine = lib.findFirst (lib.hasPrefix "remote=") "<none>" (lib.splitString "\n" (pullText cfg "agent-hub"));
+          environmentsJson =
+            if cfg.environment.etc ? "homelab/environments.json" then
+              builtins.fromJSON cfg.environment.etc."homelab/environments.json".text
+            else
+              null;
+        };
       };
 
       checked =
@@ -133,31 +172,119 @@ let
       message = "the stub must leave Restart= (the module's) in place";
     }
   ];
+  # What the pull unit must look like whenever a stub is DECLARED, enable
+  # on or off: the shape environment-pull.nix's header promises. `restart`
+  # is the one thing enable changes -- the units the script bounces.
+  pullShape =
+    cfg: restart:
+    let
+      pull = cfg.systemd.services.agent-hub-environment-pull or null;
+      pathUnit = cfg.systemd.paths.agent-hub-environment-pull or null;
+      timer = cfg.systemd.timers.agent-hub-environment-pull or null;
+      text = pullText cfg "agent-hub";
+      envs = builtins.fromJSON cfg.environment.etc."homelab/environments.json".text;
+    in
+    [
+      {
+        assertion = pull != null;
+        message = "a tenant with a stub declared must have agent-hub-environment-pull.service, enable on or off (the first-switch order)";
+      }
+      {
+        assertion = (pull.serviceConfig.Type or null) == "oneshot";
+        message = "the pull unit must be a oneshot";
+      }
+      {
+        assertion = (pull.serviceConfig.ExecStart or null) == lib.getExe (pullScript cfg "agent-hub");
+        message = "the pull unit must run homelab.environments.pull.agent-hub, the script the harness reads";
+      }
+      {
+        assertion = (pull.serviceConfig.Slice or null) == "background.slice";
+        message = "the pull runs in the tenant's slice: a clone and a warm are the tenant's CPU, got ${toString (pull.serviceConfig.Slice or null)}";
+      }
+      {
+        assertion = (pull.restartIfChanged or null) == false;
+        message = "the pull unit must be restartIfChanged = false (ADR 0006: a switch must not kill it mid-clone)";
+      }
+      {
+        assertion = pathUnit != null && (pathUnit.pathConfig.PathChanged or null) == "/var/lib/homelab/pending-environment-agent-hub.json";
+        message = "the path unit must watch pending-environment-agent-hub.json under homelab.environments.stateDir";
+      }
+      {
+        assertion = (pathUnit.pathConfig.Unit or null) == "agent-hub-environment-pull.service";
+        message = "the path unit must trigger the pull service";
+      }
+      {
+        assertion = timer != null && (timer.timerConfig.OnUnitActiveSec or null) == "10min" && (timer.timerConfig.OnBootSec or null) == "10min";
+        message = "the retry timer must fire every retryInterval and after boot";
+      }
+      {
+        assertion = lib.hasInfix "\nremote=https://github.com/imkarrer/agent-hub\n" text;
+        message = "the script must clone the registry's remote over https, got ${lib.findFirst (lib.hasPrefix "remote=") "<none>" (lib.splitString "\n" text)}";
+      }
+      {
+        assertion = lib.hasInfix "\nregistryRemote=git@github.com:imkarrer/agent-hub\n" text;
+        message = "the script must carry the registry's remote verbatim, to refuse a record for another tree";
+      }
+      {
+        assertion = lib.hasInfix "\nuser=agent-hub\n" text;
+        message = "the checkout's owner must be the stub unit's User=";
+      }
+      {
+        assertion = lib.hasInfix "\nrestartUnits=${lib.escapeShellArg (lib.concatStringsSep " " restart)}\n" text;
+        message = "the restart set must be ${builtins.toJSON restart}, got ${lib.findFirst (lib.hasPrefix "restartUnits=") "<none>" (lib.splitString "\n" text)}";
+      }
+      {
+        # Equality on the line rather than hasInfix: the needle carries a
+        # store-path context, and lib.hasInfix is a builtins.match, which
+        # refuses strings with context.
+        assertion =
+          lib.hasInfix "\"$flox\" activate -d \"$dir\" -- true" text
+          && lib.findFirst (lib.hasPrefix "flox=") "" (lib.splitString "\n" text) == "flox=${floxStub}/bin/flox";
+        message = "the script must activate once with homelab.flox.package -- the same flox the stub runs";
+      }
+      {
+        assertion = lib.hasInfix "\ndir=/var/lib/agent-hub/env\n" text;
+        message = "the pull's dir must be the stub's environment.dir";
+      }
+      {
+        assertion = envs.environments.agent-hub.enable == (restart != [ ]) && envs.environments.agent-hub.units == [ "agent-hub-llm.service" ];
+        message = "/etc/homelab/environments.json must say whether the stub is on and which units it covers";
+      }
+    ];
 in
 {
   # enable = false, the default and what ac-box carries: the stub is
   # declared in full and contributes NOTHING -- the unit's ExecStart is the
   # module's, and it has no variables. This is the harness's copy of the
-  # unchanged-drvPath proof.
+  # unchanged-drvPath proof. The pull unit, by contrast, IS present: it
+  # keeps the checkout warm so the flip to enable finds it, and restarts
+  # nothing.
   disabled = mkCase {
-    checks = cfg: [
-      {
-        assertion = cfg.systemd.services.agent-hub-llm.serviceConfig.ExecStart == moduleExecStart;
-        message = ''
-          environment.enable = false: ExecStart must be exactly the
-          module's. The stub is declared in the fixture with a command and
-          seven variables; none of it may reach the unit until enable.
-        '';
-      }
-      {
-        assertion = cfg.systemd.services.agent-hub-llm.environment == { };
-        message = "environment.enable = false: no variable may be set on the unit";
-      }
-      {
-        assertion = (cfg.systemd.services.agent-hub-llm.serviceConfig.Slice or null) == "background.slice";
-        message = "environment.enable = false: the slice is the contract's regardless";
-      }
-    ];
+    checks =
+      cfg:
+      pullShape cfg [ ]
+      ++ [
+        {
+          assertion = cfg.systemd.services.agent-hub-llm.serviceConfig.ExecStart == moduleExecStart;
+          message = ''
+            environment.enable = false: ExecStart must be exactly the
+            module's. The stub is declared in the fixture with a command and
+            seven variables; none of it may reach the unit until enable.
+          '';
+        }
+        {
+          assertion = cfg.systemd.services.agent-hub-llm.environment == { };
+          message = "environment.enable = false: no variable may be set on the unit";
+        }
+        {
+          assertion = (cfg.systemd.services.agent-hub-llm.serviceConfig.Slice or null) == "background.slice";
+          message = "environment.enable = false: the slice is the contract's regardless";
+        }
+        {
+          assertion = cfg.systemd.services.agent-hub-llm.description == "" && cfg.systemd.services.agent-hub-llm.restartIfChanged;
+          message = "environment.enable = false: the pull module must not touch the stub unit's own keys";
+        }
+      ];
   };
 
   # enable = true: ExecStart begins with THE flox (homelab.flox.package,
@@ -168,6 +295,7 @@ in
     checks =
       cfg:
       keptByStub cfg
+      ++ pullShape cfg [ "agent-hub-llm.service" ]
       ++ [
         {
           assertion = lib.hasPrefix "${floxStub}/bin/flox activate -d /var/lib/agent-hub/env -- llama-swap " cfg.systemd.services.agent-hub-llm.serviceConfig.ExecStart;
@@ -214,6 +342,10 @@ in
         assertion = lib.hasPrefix "${floxStub}/bin/flox activate -d /srv/agent-hub/checkout -- " cfg.systemd.services.agent-hub-llm.serviceConfig.ExecStart;
         message = "environment.dir must reach `flox activate -d`";
       }
+      {
+        assertion = pullHas cfg "agent-hub" "\ndir=/srv/agent-hub/checkout\n";
+        message = "environment.dir must reach the pull's checkout too -- one resolved value (environment.nix's mkDefault), two consumers";
+      }
     ];
   };
 
@@ -239,6 +371,10 @@ in
         assertion = cfg.homelab.tenants.agent-hub.environment.dir == "/var/lib/agent-hub/env";
         message = "environment.dir with state.dirs must be <first state dir>/env";
       }
+      {
+        assertion = !(cfg.systemd.services ? arcade-environment-pull) && !(cfg.homelab.environments.pull ? arcade);
+        message = "a tenant with no stub declared has no environment to pull: no arcade-environment-pull unit";
+      }
     ];
   };
 
@@ -254,6 +390,37 @@ in
       {
         assertion = cfg.systemd.services.agent-hub-llm.environment == { };
         message = "a disabled tenant's stub must set no variables";
+      }
+      {
+        assertion = !(cfg.systemd.services ? agent-hub-environment-pull) && !(cfg.environment.etc ? "homelab/environments.json");
+        message = "a disabled tenant has no pull unit and no entry to describe";
+      }
+    ];
+  };
+
+  # MUST THROW: a tree the registry does not carry. The pull clones the
+  # registry's remote; with no row there is nothing to clone and the
+  # module says so at evaluation rather than at the first firing.
+  treeNotInRegistry = mkCase {
+    extraModules = [ { homelab.tenants.agent-hub.environment.tree = "no-such-tree"; } ];
+  };
+
+  # MUST THROW: a registry row with an empty remote column. The fixture
+  # registry has one; hub/repos.psv does not, which is why this needs the
+  # fixture.
+  treeWithoutRemote = mkCase {
+    extraModules = [ { homelab.tenants.agent-hub.environment.tree = "bare"; } ];
+  };
+
+  # The real hub/repos.psv, not the fixture: agent-hub's default tree
+  # resolves against the registry the box is built with. If a rename there
+  # ever orphans the tenant, this is the case that says so.
+  realRegistry = mkCase {
+    extraModules = [ { homelab.environments.registry = lib.mkForce ../../../hub/repos.psv; } ];
+    checks = cfg: [
+      {
+        assertion = pullHas cfg "agent-hub" "\nremote=https://github.com/imkarrer/agent-hub\n";
+        message = "hub/repos.psv must resolve agent-hub to github.com/imkarrer/agent-hub";
       }
     ];
   };
@@ -293,5 +460,8 @@ in
     tenantDisabled = true;
     stubOutsideContract = false;
     stubNotAService = false;
+    treeNotInRegistry = false;
+    treeWithoutRemote = false;
+    realRegistry = true;
   };
 }
