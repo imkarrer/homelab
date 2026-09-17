@@ -103,11 +103,22 @@ store path is.
 
 ## 5. Host facts in the manifest — open
 
-## 6. Version coupling — open
+## 6. Version coupling — partial (answered for the box and dev; CI's copy is by hand)
 
-WSL has 1.14.1; `scripts/hub-gates.sh` pins 1.14.0 for CI. Nothing broke in
-the experiments above, but no lock written by 1.14.1 has been read by 1.14.0
-yet.
+**The pin is `flake.nix`'s `flox` input; everything else reads the lock.**
+From `homelab-158.2`: `modules/platform/flox.nix` installs the package that
+input resolves to (`v1.14.0`, substituted from `cache.flox.dev` — 110 paths,
+382 MB, 16 s on WSL; *not* built, which is why the input does not
+`follows` nixpkgs: with the host's nixpkgs the output is a different store
+path that no cache has, and the box would compile flox's Rust and bundled
+nix). `scripts/hub-gates.sh` reads the same lock node to reproduce the CI
+environment locally, so dev, the gate and the box agree by construction.
+What is still a hand-kept copy: the CI agent container's own flox
+(`ac-host` compose builds the image with 1.14.0), which `.6` retires when
+the agent runs from an environment.
+
+Also known: a lock written by 1.14.0 is read by 1.14.1 unchanged (§ Beyond
+the six, `.1`); the reverse has not been exercised.
 
 ## Beyond the six — from `homelab-158.1` (agent-hub as an environment, 17 Sep)
 

@@ -130,8 +130,9 @@ closure"; row 24 (`bump-lock`) applies only to trees that are still inputs.
 
 **Flox's own version becomes a host fact.** `hub-gates.sh` already pins
 `v1.14.0` because a lock written by a newer flox was unreadable in CI. With
-flox on the box, in CI and in dev, the pin lives in one place
-(`modules/platform`) and the three must agree.
+flox on the box, in CI and in dev, the pin lives in one place — the `flox`
+input in `flake.nix`, which `modules/platform/flox.nix` installs and
+`hub-gates.sh` reads from the lock — and the three must agree.
 
 **The gate per flox tenant is the tenant's, not the closure's.** `nix flake
 check` proved the whole box built. For a flox tenant the gate is the CI
