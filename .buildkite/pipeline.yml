@@ -10,19 +10,27 @@
 agents:
   queue: "self"
 
-# Two kinds of build run this file, told apart by HOMELAB_BUMP_INPUT:
+# Three kinds of build run this file, told apart by two variables:
 #
 #   - a push to homelab (the webhook): gates, then queue-closure. Every step
-#     below EXCEPT bump-lock.
-#   - a trigger from a tenant pipeline on green (ac-host, home-arcade; see
-#     their `trigger: homelab` steps): ONLY bump-lock, which moves that
-#     input in flake.lock, runs the gates on the result, and pushes. The
-#     pushed commit then arrives here as an ordinary push build and is
-#     staged like any other. Splitting the two keeps a trigger build from
-#     staging the pre-bump main sha over whatever was already queued.
+#     below EXCEPT the two trigger steps.
+#   - a trigger from a tenant pipeline on green carrying HOMELAB_BUMP_INPUT
+#     (ac-host, home-arcade; see their `trigger: homelab` steps): ONLY
+#     bump-lock, which moves that input in flake.lock, runs the gates on
+#     the result, and pushes. The pushed commit then arrives here as an
+#     ordinary push build and is staged like any other. Splitting the two
+#     keeps a trigger build from staging the pre-bump main sha over
+#     whatever was already queued.
+#   - a trigger from a flox tenant's pipeline on green carrying
+#     HOMELAB_STAGE_ENVIRONMENT (agent-hub; ADR 0009): ONLY
+#     queue-environment, which stages that tenant's sha as its
+#     environment on the box. No gate runs here -- the tenant's pipeline
+#     is the gate for a flox tenant (ADR 0009, "The gate per flox tenant
+#     is the tenant's") -- and nothing about the closure is staged.
 #
-# Part III row 24 in docs/architecture.md: this is the edge that makes
-# "push to tenant -> reaches the box" true for module-only trees.
+# Part III row 24 in docs/architecture.md: bump-lock is the edge that makes
+# "push to tenant -> reaches the box" true for module-only trees;
+# queue-environment is the same edge for a tenant that is an environment.
 
 steps:
   - label: ":arrow_up: bump-lock (a tenant went green)"
@@ -34,8 +42,19 @@ steps:
     # from .env.buildkite). Provisioning that token is the operator's
     # enabling step, in the same sense homelab.deploy.enable was.
 
+  # The staging half of ADR 0009's deploy edge (modules/tenant/
+  # environment-pull.nix is the applying half). Writes
+  # /var/lib/homelab/pending-environment-<tenant>.json and nothing else;
+  # same mount, same skip-when-absent posture, same HAZARD 2 discipline as
+  # queue-closure below. The tenant passes its own branch and build URL
+  # because in a trigger build BUILDKITE_BRANCH is homelab's.
+  - label: ":inbox_tray: queue-environment (a flox tenant went green)"
+    if: build.env("HOMELAB_STAGE_ENVIRONMENT") != null
+    command: |
+      bash scripts/hub-queue-environment.sh "$HOMELAB_STAGE_ENVIRONMENT" "$HOMELAB_STAGE_REV"
+
   - label: ":nix: flake check (ac-box + module eval harnesses)"
-    if: build.env("HOMELAB_BUMP_INPUT") == null
+    if: build.env("HOMELAB_BUMP_INPUT") == null && build.env("HOMELAB_STAGE_ENVIRONMENT") == null
     command: |
       nix --extra-experimental-features "nix-command flakes" flake check -L --accept-flake-config
     # --accept-flake-config: the agent runs as root in its own container
@@ -75,6 +94,6 @@ steps:
   # container is recreated. A green build stays green; the skip line is how
   # you know staging did not happen. Only main is staged (the script checks).
   - label: ":inbox_tray: queue-closure (stage rev for the 03:00 window)"
-    if: build.env("HOMELAB_BUMP_INPUT") == null
+    if: build.env("HOMELAB_BUMP_INPUT") == null && build.env("HOMELAB_STAGE_ENVIRONMENT") == null
     command: |
       bash scripts/hub-queue-closure.sh
