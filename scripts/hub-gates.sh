@@ -1,3 +1,17 @@
+  pin=$(flox_pin)
+  if [ -n "$pin" ]; then
+    p=$(nix build --no-link --print-out-paths --accept-flake-config "$pin" 2>/dev/null | tail -1)
+    if [ -n "$p" ]; then echo "$p/bin/flox"; return; fi
+  else
+    # A lock from before modules/platform/flox.nix has no flox node; that is
+    # this tree's age, not a moved pin. Fall through to PATH as the old
+    # script did, and say which version that is -- the output line below
+    # prints it too, but a fallback should announce itself.
+    echo "hub-gates: no flox input in $HUB/flake.lock (predates modules/platform/flox.nix); using flox from PATH" >&2
+  fi
+  p=$(command -v flox 2>/dev/null) || return
+  echo "hub-gates: flox from PATH: $p ($("$p" --version 2>&1 | tail -1))" >&2
+  echo "$p"
 #!/usr/bin/env bash
 # Run the gates Buildkite will run, locally, before pushing.
 # queue-prod sits behind `wait: ~`, so a red gate blocks every deploy --
@@ -39,10 +53,19 @@ flox_pin() {
 find_flox() {
   local pin p
   pin=$(flox_pin)
-  [ -n "$pin" ] || { echo "no flox input in $HUB/flake.lock; the pin has moved" >&2; return; }
-  p=$(nix build --no-link --print-out-paths --accept-flake-config "$pin" 2>/dev/null | tail -1)
-  if [ -n "$p" ]; then echo "$p/bin/flox"; return; fi
-  command -v flox 2>/dev/null
+  if [ -n "$pin" ]; then
+    p=$(nix build --no-link --print-out-paths --accept-flake-config "$pin" 2>/dev/null | tail -1)
+    if [ -n "$p" ]; then echo "$p/bin/flox"; return; fi
+  else
+    # A lock from before modules/platform/flox.nix has no flox node; that is
+    # this tree's age, not a moved pin. Fall through to PATH as the old
+    # script did, and say which version that is -- the output line below
+    # prints it too, but a fallback should announce itself.
+    echo "hub-gates: no flox input in $HUB/flake.lock (predates modules/platform/flox.nix); using flox from PATH" >&2
+  fi
+  p=$(command -v flox 2>/dev/null) || return
+  echo "hub-gates: flox from PATH: $p ($("$p" --version 2>&1 | tail -1))" >&2
+  echo "$p"
 }
 
 RC=0
@@ -235,7 +258,7 @@ if [ -f flake.nix ]; then
             && echo "    (input redirected off its pin onto this working tree)"
         else
           echo "  $h: EVAL FAILED with '$REPO' = $PATHX"
-          grep -vE "^warning: (Git tree|not writing)" /tmp/nixgate.$$ | tail -25 | sed 's/^/    /'
+          grep -vE "^warning: (Git tree|not writing|ignoring untrusted flake configuration setting)" /tmp/nixgate.$$ | tail -25 | sed 's/^/    /'
           RC=1
         fi
         rm -f /tmp/nixgate.$$
