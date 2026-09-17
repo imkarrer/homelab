@@ -95,8 +95,17 @@ fi
 
 # Tests run with PYTHONPATH spanning the whole repo, so every import resolves
 # on the host whatever the image actually contains. Only the container
-# disagrees, and it disagrees at runtime, in production, on restart. Compare
-# what each entrypoint imports against what its Dockerfile copies.
+# disagrees, and it disagrees at runtime, in production, on restart.
+#
+# Two shapes of image, two checks. A Dockerfile that COPYs files can leave a
+# local import behind: compare what each entrypoint imports against what the
+# Dockerfile copies. A flox-containerized image (ADR 0009 step 4; ac-host since
+# bead ybm) sees the whole tree bind-mounted, so the COPY gap is gone by
+# construction and the remaining gap is a package missing from the manifest --
+# which is what the tree's own scripts/ci_image_smoke.py proves by importing
+# every entrypoint. CI runs it inside the image; here it runs in the same
+# environment without docker, which is the same packages on the same
+# PYTHONPATH minus the layer format.
 for df in $(find . -name Dockerfile -not -path "*/node_modules/*" 2>/dev/null); do
   dir=$(dirname "$df")
   copied=$(grep -oE "[a-z_]+/[a-z_]+\.py" "$df" | xargs -n1 basename 2>/dev/null | sed "s/\.py$//" | sort -u)
@@ -114,6 +123,19 @@ for df in $(find . -name Dockerfile -not -path "*/node_modules/*" 2>/dev/null); 
   done
   [ $gap -eq 0 ] && echo "  every local import is copied"
 done
+if [ -f scripts/ci_image_smoke.py ] && [ -n "${FLOX:-}" ]; then
+  echo "== image imports: scripts/ci_image_smoke.py under flox =="
+  # -c, not --: `activate -- cmd` skips [profile], and [profile] is where the
+  # manifest builds PYTHONPATH (findings, "Beyond the six", bead ybm).
+  if AC_REPO="$PWD" FLOX_DISABLE_METRICS=true "$FLOX" activate -c "python3 scripts/ci_image_smoke.py" >/tmp/gate.$$ 2>&1; then
+    tail -3 /tmp/gate.$$ | sed 's/^/  /'; echo "  PASS"
+  else
+    tail -25 /tmp/gate.$$ | sed 's/^/  /'; echo "  FAIL"; RC=1
+  fi
+  rm -f /tmp/gate.$$
+elif [ -f scripts/ci_image_smoke.py ]; then
+  SKIPPED+=("image smoke: scripts/ci_image_smoke.py present but no flox environment to run it in")
+fi
 
 # Nix trees prove themselves by evaluating every host they declare. An eval
 # failure here is a box that cannot be rebuilt, which no test suite would catch.
