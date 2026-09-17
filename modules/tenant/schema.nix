@@ -2,11 +2,17 @@
 # tenant flake, is written against these exact option paths and types.
 #
 # Do not add derivation logic here. This file declares the vocabulary only;
-# ports.nix, resources.nix, metrics.nix and quiet.nix consume it.
-{ lib, ... }:
+# ports.nix, resources.nix, metrics.nix, quiet.nix and environment.nix
+# consume it.
+{ config, lib, ... }:
 
 let
   inherit (lib) mkOption types;
+
+  # Read for ONE default: environment.dir falls back to the host's state
+  # root when a tenant declares no state dir. The contract otherwise reads
+  # no host fact -- its consumers do -- and this stays the exception.
+  hostPaths = config.homelab.host.paths;
 
   # A single port claim. `scope` decides how the platform opens it, and is the
   # only thing a tenant is allowed to say about the network.
@@ -144,12 +150,53 @@ let
       };
     };
   };
+
+  # ADR 0009: a tenant whose contents are a flox environment keeps a unit
+  # stub per process in the closure -- the pinned unit name, the slice its
+  # tier gives it, and an ExecStart of `flox activate -d <dir> -- <command>`
+  # in place of whatever a NixOS module would have run. This is the shape
+  # of one such stub. Added 17 Sep 2026 (homelab-158.2); until then the
+  # contract had no vocabulary for HOW a tenant's unit is run, only for what
+  # the host owes it, and ADR 0009 makes "from an environment, at this
+  # path" a host fact about a tenant in the same sense a state path is.
+  #
+  # `command` runs with the environment's bin on PATH and the manifest's
+  # hook already sourced; its first word is a package the manifest
+  # installs, not a store path. `environment` is every host fact the
+  # manifest's hook defaults (`: "${X:=...}"`), set explicitly by the unit
+  # so a default in the manifest is never load-bearing on the box --
+  # docs/flox-findings.md, "Beyond the six": `[vars]` clobbers the caller,
+  # so the hook is the only channel, and a value the unit does not set is a
+  # value the tenant tree chose for it.
+  environmentUnit = types.submodule {
+    options = {
+      command = mkOption {
+        type = types.listOf types.str;
+        description = ''
+          argv after `flox activate -d <dir> --`. The first word resolves
+          on the environment's PATH (a package the manifest installs);
+          the rest are its flags. Not a store path: which build runs is
+          the environment's decision, which is the point.
+        '';
+      };
+      environment = mkOption {
+        type = types.attrsOf types.str;
+        default = { };
+        description = ''
+          Variables the unit exports before activation, one per host fact
+          the manifest's hook would otherwise default. Set every one the
+          hook names; a missing one is a tenant-tree default running on
+          the box unreviewed.
+        '';
+      };
+    };
+  };
 in
 {
   options.homelab.tenants = mkOption {
     default = { };
     description = "Everything sharing this host, declared. One entry per tenant.";
-    type = types.attrsOf (types.submodule ({ name, ... }: {
+    type = types.attrsOf (types.submodule ({ name, config, ... }: {
       options = {
         enable = mkOption { type = types.bool; default = true; };
 
@@ -207,6 +254,71 @@ in
           type = types.nullOr types.str;
           default = null;
           description = "Upstream flake ref, for provenance and drift reporting.";
+        };
+
+        # ADR 0009: this tenant's contents as a flox environment, and the
+        # unit stubs that run it. Inert unless `enable` -- with it false the
+        # tenant's units are whatever their NixOS modules make them, and
+        # modules/tenant/environment.nix contributes nothing (proven by an
+        # unchanged toplevel drvPath, homelab-158.2). With it true each
+        # stub's ExecStart is replaced with `flox activate -d <dir> --
+        # <command>` and its variables set; the unit's name, slice,
+        # restartIfChanged, hardening and dependencies stay whatever they
+        # were. The unit never fetches: the environment at `dir` must have
+        # been activated once online by whoever put it there (the pull
+        # unit, homelab-158.3), after which activation is offline and ~80 ms
+        # (docs/flox-findings.md section 1).
+        environment = mkOption {
+          type = types.submodule {
+            options = {
+              enable = mkOption {
+                type = types.bool;
+                default = false;
+                description = "Run this tenant's stub units from the flox environment at `dir` instead of from their modules' ExecStart.";
+              };
+
+              dir = mkOption {
+                type = types.path;
+                # The root of a CHECKOUT of the tenant tree, not a bare
+                # .flox: `<dir>/.flox` is the environment and `<dir>/<file>`
+                # is anything the tenant reads at run time (agent-hub's
+                # llama-swap.yaml and nix/sd-ui.html). A FloxHub generation
+                # carries the manifest and lock only, so a bare environment
+                # would leave those files with no home. Under the tenant's
+                # declared state path because it is state: written by the
+                # pull unit, read by the stub, owned by the tenant's user,
+                # and not worth a backup slot on its own (it is a git sha).
+                default = "${
+                  toString (
+                    if config.state.dirs != [ ] then
+                      lib.head config.state.dirs
+                    else
+                      "${toString hostPaths.state}/${name}"
+                  )
+                }/env";
+                defaultText = lib.literalMD "`<first state dir>/env`, or `<homelab.host.paths.state>/<tenant>/env` when none is declared";
+                description = ''
+                  Where the environment lives on the host: the root of a
+                  checkout of the tenant tree, `.flox/` inside it. The
+                  tenant's user must own it, because `flox activate`
+                  writes `.flox/run`, `.flox/cache` and `.flox/log` there.
+                '';
+              };
+
+              units = mkOption {
+                type = types.attrsOf environmentUnit;
+                default = { };
+                description = ''
+                  Stub units, keyed by unit name WITH its suffix
+                  ("agent-hub-llm.service"), exactly as `units` above
+                  spells them. Every key must also appear in `units`:
+                  a stub the contract does not know about would run
+                  outside the tenant's slice. environment.nix asserts it.
+                '';
+              };
+            };
+          };
+          default = { };
         };
       };
     }));

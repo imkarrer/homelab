@@ -554,6 +554,72 @@ in
   };
 
   # ---------------------------------------------------------------------------
+  # ADR 0009 step 1: the same unit, run from agent-hub's flox environment.
+  #
+  # OFF. With enable = false this block contributes nothing to the closure
+  # (modules/tenant/environment.nix emits no key; homelab-158.2 proved the
+  # toplevel drvPath unchanged with it declared). It is here, complete,
+  # so that flipping it is one line and every value it carries has already
+  # been reviewed against the unit the box runs today. Flipping it is
+  # homelab-158.3's step, and it has preconditions this file cannot meet: a
+  # checkout of agent-hub at `dir` (its `.flox/` beside its llama-swap.yaml
+  # and nix/sd-ui.html), owned by the agent-hub user, activated once online
+  # so the unit's own activation never fetches (docs/flox-findings.md 1).
+  #
+  # What the stub changes on agent-hub-llm.service: ExecStart becomes
+  # `flox activate -d <dir> -- llama-swap -config <dir>/llama-swap.yaml
+  # -listen 127.0.0.1:8100`, and the seven AGENT_HUB_* variables the
+  # manifest's hook would otherwise default are set here, from THIS file's
+  # values. Everything else -- the name, background.slice from tenants.nix,
+  # User=agent-hub, the cpuset and NUMA policy just above, Restart=,
+  # TimeoutStopSec=90, the nginx front and qdrant beside it -- is untouched.
+  #
+  # Every value below is the one modules/agent-hub.nix computes for the
+  # unit today, read from the same option where one exists so the two
+  # cannot drift while both are live. Two are literals the module has as
+  # constants rather than options, and say so. The manifest's hook defaults
+  # happen to equal these on the box; that is a coincidence this block
+  # exists to make irrelevant -- the .1 review's finding 1.
+  homelab.tenants.agent-hub.environment =
+    let
+      llm = config.services.agent-hub;
+      env = config.homelab.tenants.agent-hub.environment;
+      # The module's own expression: loopback when nginx owns the LAN side
+      # of the port (landingPage), the LAN address otherwise.
+      listen = "${if llm.llm.landingPage then "127.0.0.1" else llm.lanAddress}:${toString llm.llm.port}";
+    in
+    {
+      enable = false;
+      # dir: the default, <state dir>/env = /var/lib/agent-hub/env, is right
+      # and is left as the default so the option's derivation is what a
+      # second flox tenant gets too.
+      units."agent-hub-llm.service" = {
+        command = [
+          "llama-swap"
+          "-config"
+          "${toString env.dir}/llama-swap.yaml"
+          "-listen"
+          listen
+        ];
+        environment = {
+          AGENT_HUB_MODELS = "${toString llm.dataDir}/models";
+          AGENT_HUB_THREADS = toString llm.llm.threads;
+          AGENT_HUB_CTX = toString llm.llm.contextSize;
+          AGENT_HUB_LISTEN = listen;
+          # The module's swapConfig has `startPort = 18100` as a constant,
+          # not an option; the manifest's hook defaults the same number.
+          AGENT_HUB_BACKEND_PORT = "18100";
+          AGENT_HUB_SWAP_CONFIG = "${toString env.dir}/llama-swap.yaml";
+          # nix/sd-ui.html, the image backends' page, is a file of the
+          # tenant tree at `<dir>/nix` -- the module bakes it into the store
+          # (`${../nix/sd-ui.html}`), the environment reads it from the
+          # checkout.
+          AGENT_HUB_ASSETS = "${toString env.dir}/nix";
+        };
+      };
+    };
+
+  # ---------------------------------------------------------------------------
   # Tier shares, rebalanced to point this machine at the model server.
   #
   # The defaults in modules/tenant/resources.nix (critical 0.35/0.50,

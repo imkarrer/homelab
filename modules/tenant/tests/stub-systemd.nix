@@ -1,5 +1,6 @@
 # Minimal stand-in for the slice of NixOS's own option surface resources.nix
-# writes to: systemd.slices, systemd.services.<name>.serviceConfig,
+# (and, since 17 Sep 2026, environment.nix) writes to: systemd.slices,
+# systemd.services.<name>.{serviceConfig,environment},
 # system.activationScripts, and the assertions/warnings pair
 # nixos/modules/misc/assertions.nix normally declares.
 #
@@ -48,6 +49,12 @@
           options = {
             serviceConfig = lib.mkOption {
               type = lib.types.attrsOf lib.types.anything;
+              default = { };
+            };
+            # environment.nix (ADR 0009) sets a stub unit's variables here;
+            # nothing else in this directory reads or writes it.
+            environment = lib.mkOption {
+              type = lib.types.attrsOf lib.types.str;
               default = { };
             };
           };

@@ -155,6 +155,10 @@
           ./modules/tenant/resources.nix
           ./modules/tenant/metrics.nix
           ./modules/tenant/quiet.nix
+          # ADR 0009: the unit stub for a tenant that is a flox environment.
+          # Inert until a tenant sets environment.enable (none does yet);
+          # proven a no-op on import by an unchanged toplevel drvPath.
+          ./modules/tenant/environment.nix
 
           # L0: the platform. Reproduces what ac-box already runs, deliberately
           # without improving it.
