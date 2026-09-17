@@ -64,7 +64,7 @@ flowchart LR
     subgraph TENANT ["tenant tree — containers, scripts, content"]
         direction LR
         A1["ac-host"] --> A2["origin"]
-        A2 --> A3["Buildkite<br/>test · lint"]
+        A2 --> A3["Buildkite<br/>test · lint · image<br/><i>flox containerize → the box's daemon</i>"]
         A3 -- "wait: ~" --> A4["queue-prod<br/><i>stages a sha</i>"]
         A4 --> A5["the bot, at 03:00<br/>queues DOWNTIME=1<br/><i>bot/downtime.py mark 0</i>"]
         A5 -- "rsync + one recycle" --> A6["/var/lib/ac-host/src<br/><b>reaches the box</b>"]
@@ -228,7 +228,7 @@ SSH prompt on the path.** (ADR 0006, `README.md` goal 3.)
 flowchart LR
     subgraph TENANT ["tenant tree"]
         direction LR
-        A1["ac-host"] --> A2["origin"] --> A3["Buildkite<br/>test · lint"]
+        A1["ac-host"] --> A2["origin"] --> A3["Buildkite<br/>test · lint · image<br/><i>flox containerize → the box's daemon</i>"]
         A3 -- "wait: ~" --> A4["queue-prod<br/>stages sha"]
         A4 --> A6["03:00 window<br/>ci_downtime applies<br/>+ recycle once"]
     end
