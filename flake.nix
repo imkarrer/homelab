@@ -47,10 +47,50 @@
       url = "github:Mic92/sops-nix";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # flox, at ONE version for dev, CI and the box (ADR 0009, question 6).
+    # This tag is the version; flake.lock pins its rev, and that lock node is
+    # what scripts/hub-gates.sh builds to reproduce CI's environment locally
+    # and what modules/platform/flox.nix installs on ac-box. The CI agent
+    # container carries its own flox (1.14.0 today, from ac-host's compose
+    # file) and must agree with this tag by hand until that container is
+    # itself built from this pin.
+    #
+    # Deliberately NOT `inputs.nixpkgs.follows = "nixpkgs"`, and this is the
+    # one input in this file that breaks that rule. The rule exists so a
+    # TENANT cannot drag its own nixpkgs into the closure; flox is not a
+    # tenant, its nixpkgs (github:flox/nixpkgs/stable) builds exactly one
+    # package -- flox itself, ~380 MB with its bundled nix -- and nothing of
+    # it enters the module composition. Measured 17 Sep 2026 before deciding:
+    #
+    #   as pinned      /nix/store/rq6g47dw...-flox-1.14.0-gfbdabf6  in cache.flox.dev
+    #   with follows   /nix/store/3fcakfrz...-flox-1.14.0           in no cache
+    #
+    # Following would mean compiling a Rust program and a second nix on the
+    # box in the deploy window, every time this pin moves. The cost of not
+    # following is the lock carrying flox's inputs (crane, fenix, its
+    # nixpkgs) and the closure carrying a second glibc/nix -- accepted.
+    flox.url = "github:flox/flox/v1.14.0";
+  };
+
+  # flox's own flake declares these same two settings, and hub-gates.sh
+  # passes --accept-flake-config for them. Repeated here so a build of THIS
+  # flake can substitute flox too: the first closure to carry it is built by
+  # CI's agent (its own /nix, where cache.flox.dev is trusted but not a
+  # default substituter) and then by homelab-deploy on the box under the
+  # nix.conf of the closure BEFORE this one -- the one without
+  # modules/platform/flox.nix's substituter. Both run as root, so
+  # `--accept-flake-config` is enough there; an untrusted user (WSL) gets a
+  # warning and cache.nixos.org, which is what it had. Once the switch has
+  # happened the box's nix.conf carries the substituter permanently and this
+  # block is redundant on the box.
+  nixConfig = {
+    extra-substituters = [ "https://cache.flox.dev" ];
+    extra-trusted-public-keys = [ "flox-cache-public-1:7F4OyH7ZCnFhcze3fJdfyXYLQw/aV7GEed86nQ7IsOs=" ];
   };
 
   outputs =
-    { self, nixpkgs, ac-host, home-arcade, agent-hub, sops-nix }:
+    { self, nixpkgs, ac-host, home-arcade, agent-hub, sops-nix, flox }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -138,6 +178,12 @@
           ./modules/platform/nix.nix
           ./modules/platform/ssh.nix
           ./modules/platform/boot.nix
+          # flox on the box, at the version the flox input pins -- one pin for
+          # dev (hub-gates.sh reads the same lock node), CI and the box. The
+          # module declares the option; the package is handed in here because
+          # this is the only place the flake input is in scope.
+          ./modules/platform/flox.nix
+          { homelab.flox.package = flox.packages.${system}.flox; }
           sops-nix.nixosModules.sops
           ./modules/platform/secrets.nix
 
