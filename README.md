@@ -74,7 +74,12 @@ races, series, content and the player whitelist.
 inputs take `inputs.nixpkgs.follows = "nixpkgs"`; a tenant must not drag its
 own nixpkgs into the closure. `agent-hub` currently pins `nixos-unstable` and
 must be made to follow — `llama-cpp` on 26.05 is version `9190`, so verify any
-`llama-server` flag against that build, not against unstable.
+`llama-server` flag against that build, not against unstable. One input
+does not follow, and it is the only one: `flox`, a platform package rather than
+a tenant, whose flake builds exactly one package from its own nixpkgs and
+nothing of which enters the module composition. Following would change that
+package so it exists in no cache and compile flox's Rust and its bundled nix on
+the box at every pin move; `flake.nix`'s input comment carries the measurement.
 
 **`hardware-configuration.nix` and `ssh-keys.local.nix` are tracked.** A flake
 copies only git-tracked files into the store, so a build from
