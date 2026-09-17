@@ -84,6 +84,14 @@
   # warning and cache.nixos.org, which is what it had. Once the switch has
   # happened the box's nix.conf carries the substituter permanently and this
   # block is redundant on the box.
+  #
+  # An edit to this block is a PLATFORM change, reviewed like
+  # modules/platform/nix.nix. homelab-deploy runs `nix build` as root against
+  # the local store, where a trusted user has no filter on which settings a
+  # flake may set, and --accept-flake-config applies every setting here --
+  # this flake's only, never an input's (verified: flox's own nixConfig is
+  # not applied through ours) -- on the box and in CI. A substituter or key
+  # added here reaches the store the next time either builds.
   nixConfig = {
     extra-substituters = [ "https://cache.flox.dev" ];
     extra-trusted-public-keys = [ "flox-cache-public-1:7F4OyH7ZCnFhcze3fJdfyXYLQw/aV7GEed86nQ7IsOs=" ];
