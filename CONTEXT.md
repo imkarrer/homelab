@@ -137,9 +137,29 @@ is a per-tenant fact, not a judgement.
 _Avoid_: restart, cycle
 
 **Bump-lock**:
-The act of moving one tree's pin in `homelab` so that a change in a
-module-only tree reaches the box. A push to such a tree reaches nothing until
-its pin is bumped.
+The act of moving one tree's pin in `homelab` so that a change in a tree the
+closure still takes as an input reaches the box. A push to such a tree
+reaches nothing until its pin is bumped. An environment is not bumped; it
+has generations.
+
+**Environment**:
+A tenant's contents — the packages and processes it runs — declared in the
+tenant's own tree as a flox environment, and the same whether a developer,
+CI or the box runs it. The contract still says where on the box it lives;
+the environment says what it is.
+_Avoid_: the manifest (that is the file), the flox env
+
+**Generation**:
+One published version of an environment. For a tenant that is an
+environment, a generation is what CI stages, what the box applies, and what
+a rollback returns to — the tenant's analogue of a closure rev.
+_Avoid_: version, release
+
+**Unit stub**:
+What the closure keeps of a tenant that has become an environment: the
+pinned unit name, its slice, its restart rules, and the instruction to run
+the environment. It says nothing about what the environment contains.
+_Avoid_: the module, the wrapper
 
 **Migration exception**:
 The one sanctioned way to change the box by hand: an agent applies a commit
