@@ -133,6 +133,12 @@
       default = { };
     };
 
+    # environment-pull.nix creates its state directory here.
+    systemd.tmpfiles.rules = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+    };
+
     system.activationScripts = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {

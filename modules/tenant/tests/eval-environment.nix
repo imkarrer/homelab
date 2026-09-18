@@ -247,6 +247,17 @@ let
         message = "the pull's dir must be the stub's environment.dir";
       }
       {
+        # Split on the realise line: the activation must not appear before it.
+        assertion =
+          lib.hasInfix "nix-store --realise --max-jobs 0" text
+          && !(lib.hasInfix "activate -d \"$dir\" -- true" (lib.head (lib.splitString "nix-store --realise --max-jobs 0" text)));
+        message = "the warm must substitute-only every locked path BEFORE the activation, never compile on the box";
+      }
+      {
+        assertion = builtins.elem "d /var/lib/homelab 0755 root root -" cfg.systemd.tmpfiles.rules;
+        message = "the state directory must be created by tmpfiles so the path unit does not arm on a missing directory";
+      }
+      {
         assertion = envs.environments.agent-hub.enable == (restart != [ ]) && envs.environments.agent-hub.units == [ "agent-hub-llm.service" ];
         message = "/etc/homelab/environments.json must say whether the stub is on and which units it covers";
       }

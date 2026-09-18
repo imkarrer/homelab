@@ -496,7 +496,10 @@ else
     if [ "$ES" = true ] && [ -z "$EA" ]; then
       note "$t env: the stub is ON and nothing has been applied - its unit activates an empty ${t} environment; stage a sha now (environment-pull.nix's first-switch order was not followed)"
     fi
-    if [ -n "$ET" ] && [ -n "${OHEAD[$ET]:-}" ] && [ "${OHEAD[$ET]}" != "$EP" ] && [ $(( $(date +%s) - ${OHEADT[$ET]:-0} )) -gt 1800 ]; then
+    # Only once the edge has carried something: a tenant with no pending
+    # and no applied record has never been wired (its pipeline lacks the
+    # trigger yet), and that is a line above, not a problem.
+    if { [ -n "$EP" ] || [ -n "$EA" ]; } && [ -n "$ET" ] && [ -n "${OHEAD[$ET]:-}" ] && [ "${OHEAD[$ET]}" != "$EP" ] && [ $(( $(date +%s) - ${OHEADT[$ET]:-0} )) -gt 1800 ]; then
       note "$t env: $ET origin HEAD ${OHEAD[$ET]:0:7} ($(ago "${OHEADT[$ET]}") ago) is not staged on the box (staged $(s7 "$EP")) - its build's trigger did not run queue-environment (red gate? trigger missing? HOMELAB_STAGE_ENVIRONMENT not routed?)"
     fi
   done

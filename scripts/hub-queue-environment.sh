@@ -50,6 +50,15 @@ if [ -z "$TENANT" ] || [ -z "$REV" ]; then
   exit 2
 fi
 
+# The tenant name becomes a file name under $STATE, so it is validated
+# before any path is formed: README's tenant names are lower-case words
+# with hyphens, and anything else ('../x' from a trigger's env, say) is
+# refused rather than written somewhere.
+if ! [[ "$TENANT" =~ ^[a-z][a-z0-9-]*$ ]]; then
+  echo "refuse queue-environment: '$TENANT' is not a tenant name (lower-case, digits, hyphens)" >&2
+  exit 1
+fi
+
 # The tenant's tree must be one this hub coordinates. The remote recorded
 # here is what the pull unit compares against the registry it was built
 # with -- a sha of the wrong tree is refused there, loudly, rather than

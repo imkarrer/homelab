@@ -58,6 +58,13 @@
 # directory at `dir` that exists and is not a git checkout (never
 # overwrites state it did not create).
 #
+# A tracked file changed in place inside the checkout -- a flox re-lock
+# run there by hand, say -- makes the next pull refuse, loudly, before it
+# checks anything out, and that is correct: the checkout is the tree at a
+# sha, and a working copy that drifted is a hand-edit to land, not state
+# to keep. (git's own refusal is not relied on: it fires only when the
+# target commit touches the changed file.)
+#
 # The checkout is the tenant's: cloned and fetched as the stub unit's
 # User=, because `flox activate` writes .flox/run, .flox/cache and
 # .flox/log inside it and the stub activates as that user. The clone is
@@ -193,6 +200,10 @@ let
           pkgs.gnugrep
           pkgs.util-linux
           pkgs.systemd
+          # nix-store for the substitute-only realisation: the host's nix,
+          # so it talks to the same daemon and trusts the same caches the
+          # activation will.
+          config.nix.package
         ];
         text = ''
           tenant=${lib.escapeShellArg name}
@@ -265,27 +276,70 @@ let
             fi
             install -d -o "$user" -g "$group" -m 0755 "$dir"
             log "cloning $remote into $dir as $user"
-            as_user git clone --quiet --no-checkout "$remote" "$dir"
+            as_user env GIT_TERMINAL_PROMPT=0 git clone --quiet --no-checkout "$remote" "$dir"
           fi
           as_user git -C "$dir" remote set-url origin "$remote"
 
-          log "fetching $sha from $remote"
-          # By sha first (GitHub serves any reachable object), the whole
-          # remote as the fallback for a server that does not.
-          as_user git -C "$dir" fetch --quiet origin "$sha" \
-            || as_user git -C "$dir" fetch --quiet origin
-          if ! as_user git -C "$dir" cat-file -e "$sha^{commit}"; then
-            refuse "$sha is not reachable from $remote -- staged from the wrong tree, or not pushed?"
+          # Fetch only what is not already local, so a deferred restart
+          # retried with the network down does not fail at the fetch. By
+          # sha first (GitHub serves any reachable object), the whole
+          # remote as the fallback for a server that does not. No
+          # credential prompt: the remote is public or the fetch fails.
+          if ! as_user git -C "$dir" cat-file -e "$sha^{commit}" 2>/dev/null; then
+            log "fetching $sha from $remote"
+            as_user env GIT_TERMINAL_PROMPT=0 git -C "$dir" fetch --quiet origin "$sha" \
+              || as_user env GIT_TERMINAL_PROMPT=0 git -C "$dir" fetch --quiet origin
+            if ! as_user git -C "$dir" cat-file -e "$sha^{commit}"; then
+              refuse "$sha is not reachable from $remote -- staged from the wrong tree, or not pushed?"
+            fi
+          fi
+          # A tracked file changed in place -- a `flox upgrade`/re-lock run
+          # inside the checkout, say -- is refused, loudly, before the
+          # checkout: git itself only refuses when the target commit touches
+          # that file and otherwise carries the edit over silently, and a
+          # drifted lock activated at the next sha is the drift this whole
+          # edge exists to prevent. Untracked files (.flox/run, cache, log)
+          # are the environment's own and not looked at.
+          dirty=$(as_user git -C "$dir" status --porcelain --untracked-files=no)
+          if [ -n "$dirty" ]; then
+            refuse "$dir has tracked files changed in place (a hand edit or re-lock; land it or discard it):
+          $dirty"
           fi
           as_user git -C "$dir" checkout --quiet --detach "$sha"
           if [ ! -f "$dir/.flox/env/manifest.toml" ]; then
             refuse "$dir at $sha has no .flox/env/manifest.toml -- not a flox environment."
           fi
 
-          # THE ONE ONLINE ACTIVATION. Fails soft: exit 1, the record is not
-          # written, the timer retries. FLOX_DISABLE_METRICS as the stub
-          # sets it; nothing here phones home either.
-          log "activating $dir once, online, as $user (warms the store, pins the GC roots)"
+          # THE WARM NEVER COMPILES. The tenant user's nix goes through
+          # nix-daemon, which builds in system.slice at nice 0 on every
+          # core; a lock naming a path no trusted cache has (agent-hub's
+          # two flake packages live in CI's MinIO bucket) would turn this
+          # step into an unfenced compile of llama.cpp on the box. So every
+          # output the lock names for this system is realised
+          # SUBSTITUTE-ONLY first (--max-jobs 0: fetch or fail, never
+          # build), and a miss is a refusal that names the cause and leaves
+          # the record staged for the next firing -- a cache fixed later
+          # (the MinIO substituter, ac-box's nix.nix) is then all it takes.
+          # Not put on `flox activate` itself: that also refuses flox's own
+          # manifest.drv/environment.drv, which are tiny and must build.
+          # Catalog packages spell the field outputs_to_install, flake
+          # packages outputs-to-install; the fallback is every output.
+          log "substituting the store paths $dir/.flox/env/manifest.lock names (never building them)"
+          if ! jq -r --arg s "$(uname -m)-linux" '
+                .packages[] | select(.system == $s)
+                | (."outputs-to-install" // .outputs_to_install // (.outputs | keys)) as $want
+                | .outputs | to_entries[] | select(.key as $k | $want | index($k)) | .value
+              ' "$dir/.flox/env/manifest.lock" | sort -u \
+              | as_user xargs nix-store --realise --max-jobs 0 >/dev/null; then
+            refuse "a store path the lock names is in no substituter this box trusts (cache.flox.dev, MinIO); refusing to compile it here; leaving $pending staged."
+          fi
+
+          # THE ONE ONLINE ACTIVATION. With every package path present flox
+          # builds only its buildenv and evaluates no flake ref. Fails soft:
+          # exit 1, the record is not written, the timer retries.
+          # FLOX_DISABLE_METRICS as the stub sets it; nothing here phones
+          # home either.
+          log "activating $dir once, online, as $user (pins the GC roots)"
           if ! as_user env FLOX_DISABLE_METRICS=true "$flox" activate -d "$dir" -- true; then
             refuse "flox activate failed at $sha; leaving $pending staged for the next firing."
           fi
@@ -524,6 +578,13 @@ in
         };
       }
     ) pulls;
+
+    # The state directory exists before the path units arm on files inside
+    # it -- a host with a stub and homelab.deploy off would otherwise watch
+    # a directory nothing creates. Same rule modules/deploy carries; the
+    # duplicate line on a host with both is a tmpfiles warning, not an
+    # error.
+    systemd.tmpfiles.rules = [ "d ${toString cfg.stateDir} 0755 root root -" ];
 
     # What the running closure says about its environments, for hub-status
     # (which reads the pending/applied pair beside it) and for anyone at the
