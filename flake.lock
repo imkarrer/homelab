@@ -139,11 +139,11 @@
     },
     "home-arcade": {
       "locked": {
-        "lastModified": 1789562441,
-        "narHash": "sha256-JAFnI8S3dUo4gm5EA9lBM2PXCa7O+z1p5x7t4qaJRuQ=",
+        "lastModified": 1789746466,
+        "narHash": "sha256-jmWSb7O/EzBQ/6plInD65k0t6dTd4Gi2GlI8EOXHsP8=",
         "owner": "imkarrer",
         "repo": "home-arcade",
-        "rev": "789f994776121ef64fcee665f103e183f5443f3a",
+        "rev": "94db8be461b6c753e83de6401f851080bb0545ec",
         "type": "github"
       },
       "original": {
