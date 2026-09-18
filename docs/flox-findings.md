@@ -346,3 +346,38 @@ box's daemon by CI (`image` on every branch before the wait, `promote-image`
 on `main` after it, `queue-prod` behind promote); `ci_downtime.py` and
 `acctl.py` never build, and a missing image is a loud skip of the sidecars,
 never a missing lobby. 03:00 no longer reaches PyPI or Docker Hub.
+
+## Beyond the six — from `homelab-158.5`'s CI half (`flox push` from CI, 18 Sep)
+
+- **A fresh checkout cannot push a new generation.** A CI checkout is a
+  *path* environment: `flox push -d .` creates the remote once, then fails
+  with "already exists", and `--force` "succeeds" by **replacing the remote
+  history** with a fresh generation 1 — a copy that had pulled the old
+  generation then errors "can't find rev specified in lockfile". So
+  home-arcade's `scripts/ci_push.sh` pulls the live generation into a scratch
+  dir, overlays the tree's `manifest.toml` + `manifest.lock`, `flox edit
+  --sync`, and pushes; only a missing remote gets `push --owner`. Proven on
+  1.14.0 and 1.14.1: first push (gen 1), manifest change (gen N+1), no
+  change (nothing pushed). The product shape this implies: an environment's
+  generations live in floxmeta, and git is the tree's history, not the
+  environment's — a CI that wants "this commit = this generation" has to
+  bridge them by hand.
+- `flox edit --sync` rewrites the lock with packages reordered, so
+  "unchanged" is a canonical comparison the script does; flox compares
+  byte-for-byte.
+- `flox push` prints no generation number; `flox generations list -d <the
+  pushed copy>` does. `-r owner/name` reads `~/.cache/flox/remote/` and
+  never refreshes.
+- Environments are pushed **public** by default; `imkarrer/arcade` will be
+  (its manifest holds no host fact or secret — by construction, "Beyond
+  the six" for `.5`). Private is a FloxHub-side setting.
+- **floxmeta is not anonymously readable over git** even for a public
+  environment (`api.flox.dev/git/<owner>/floxmeta` answers 401; on this
+  WSL git then reached Windows' credential manager and popped a dialog),
+  while `flox pull` of the same environment needs no token. So the pull
+  unit cannot read a generation's lock *before* pulling without carrying the
+  token; the box carries none, and the "never compiles" guard for the
+  floxhub kind is checked after the pull rather than before.
+- Two more throwaway environments exist on FloxHub from proving the
+  first-push and next-generation paths (`imkarrer/hub-arcade-spike`,
+  `imkarrer/hub-arcade-spike-first`), and cannot be removed from the CLI.
