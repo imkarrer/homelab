@@ -41,6 +41,26 @@
 # this unit is restarted. Nothing here would make a restart at 03:00 depend
 # on flox.dev, and nothing here should.
 #
+# A FLOXHUB TENANT'S STUB IS PINNED TO A GENERATION (homelab-158.5). With
+# `environment.source.kind = "floxhub"` the environment at <dir> is flox's
+# own tracking checkout of owner/name, and "which generation runs" is a
+# run-time fact the pull unit decides -- so the ExecStart is a wrapper that
+# reads the generation the pull unit pinned (one line of digits in
+# <homelab.environments.stateDir>/pinned-environment-<tenant>, written
+# after the warm and BEFORE the restart, which is what lets the restart
+# activate the new generation while the applied record still waits on the
+# restart's outcome) and execs `flox activate -d <dir> -g <N> -- <command>`.
+# Pinned rather than the checkout's live generation because a tracking
+# checkout's live links follow whatever `flox pull` last fetched, and a
+# pull by hand must not move what the unit runs; `-g N` activates the
+# generation's own links (.flox/run/<system>.<name>.genN-run) instead. It
+# is offline the same way (docs/flox-findings.md 3: ~150 ms) as long as
+# the store paths AND the tenant user's floxmeta clone
+# ($HOME/.local/share/flox/meta/<owner>) are present -- both the pull's
+# doing. No pin file, or a malformed one, is a refusal (exit 1): the
+# first-switch order in environment-pull.nix's header is what keeps that
+# from being reached.
+#
 # FLOX_DISABLE_METRICS: activation forks a metrics POST otherwise. It fails
 # soft, but a production unit has no business phoning home, and this is the
 # same variable hub-gates.sh sets for the CI reproduction.
@@ -57,7 +77,12 @@
 # resolved path must be readable (hosts/ac-box/configuration.nix builds the
 # stub's -config path from it) whether or not the stub is on, and an option
 # value on homelab.tenants reaches nothing in the closure by itself.
-{ config, lib, ... }:
+{
+  config,
+  lib,
+  pkgs,
+  ...
+}:
 
 let
   inherit (lib) mkDefault mkForce mkIf types;
@@ -76,10 +101,56 @@ let
       lib.mapAttrsToList (unit: stub: {
         inherit tenantName unit stub;
         dir = t.environment.dir;
+        kind = t.environment.source.kind;
         inContract = builtins.elem unit t.units;
       }) t.environment.units
     ) enabledTenants
   );
+
+  # The pin the pull unit writes for a floxhub tenant (header). The path is
+  # environment-pull.nix's option, read lazily: a host that imports only
+  # this module and declares no floxhub tenant never evaluates it.
+  pinFile =
+    tenantName:
+    if config.homelab ? environments then
+      "${toString config.homelab.environments.stateDir}/pinned-environment-${tenantName}"
+    else
+      throw "homelab.tenants.${tenantName}.environment.source.kind = \"floxhub\" needs modules/tenant/environment-pull.nix imported beside environment.nix: it writes the pin this stub reads.";
+
+  activate = s: [
+    "${flox}/bin/flox"
+    "activate"
+    "-d"
+    (toString s.dir)
+  ];
+
+  # kind = tree: the activation itself, one line. kind = floxhub: the
+  # wrapper, which refuses to guess a generation. `read` is a builtin, so
+  # the wrapper needs nothing on PATH before flox. The wrapper is handed to
+  # serviceConfig as the DERIVATION, not its path: NixOS renders any value
+  # with toString (systemd-lib.nix toOption), so the unit file is the same
+  # either way, and tests/eval-environment.nix can read the wrapper's
+  # `.text` at evaluation instead of building it.
+  execStart =
+    s:
+    if s.kind == "floxhub" then
+      (pkgs.writeShellScript "${lib.removeSuffix ".service" s.unit}-activate" ''
+        set -eu
+        pin=${lib.escapeShellArg (pinFile s.tenantName)}
+        gen=""
+        if [ -r "$pin" ]; then
+          read -r gen < "$pin" || true
+        fi
+        case "$gen" in
+          "" | *[!0-9]* | 0*)
+            echo "${s.unit}: no generation pinned at $pin (${s.tenantName}-environment-pull has not applied one) -- refusing to activate an unpinned environment" >&2
+            exit 1
+            ;;
+        esac
+        exec ${lib.escapeShellArgs (activate s)} -g "$gen" -- ${lib.escapeShellArgs s.stub.command}
+      '')
+    else
+      lib.escapeShellArgs (activate s ++ [ "--" ] ++ s.stub.command);
 
   # systemd.services is keyed by BARE name; the contract spells units with
   # their suffix (resources.nix has the history of getting this wrong:
@@ -91,18 +162,7 @@ let
     map (
       s:
       lib.nameValuePair (lib.removeSuffix ".service" s.unit) {
-        serviceConfig.ExecStart = mkForce (
-          lib.escapeShellArgs (
-            [
-              "${flox}/bin/flox"
-              "activate"
-              "-d"
-              (toString s.dir)
-              "--"
-            ]
-            ++ s.stub.command
-          )
-        );
+        serviceConfig.ExecStart = mkForce (execStart s);
         environment = s.stub.environment // {
           FLOX_DISABLE_METRICS = "true";
         };

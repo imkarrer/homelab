@@ -262,6 +262,85 @@ let
         message = "/etc/homelab/environments.json must say whether the stub is on and which units it covers";
       }
     ];
+  # ---------------------------------------------------------------------
+  # source.kind = floxhub (homelab-158.5): arcade, two stubs, a generation
+  # of imkarrer/arcade as the deploy unit. fixtures/environment-floxhub-
+  # tenants.nix is the host's declaration; agent-hub (tree kind) stays in
+  # every case beside it, so "the tree kind is unchanged" is asserted by
+  # the same evaluation rather than assumed.
+  # ---------------------------------------------------------------------
+  floxhubFixture = ./fixtures/environment-floxhub-tenants.nix;
+  arcadeOn = extra: [
+    floxhubFixture
+    { homelab.tenants.arcade.environment.enable = true; }
+  ]
+  ++ extra;
+  arcadeModuleExecStart = u: (import floxhubFixture).systemd.services.${u}.serviceConfig.ExecStart;
+
+  # What the floxhub pull must look like, enable on or off -- the header of
+  # environment-pull.nix, "KIND = FLOXHUB".
+  floxhubPullShape =
+    cfg: restart:
+    let
+      pull = cfg.systemd.services.arcade-environment-pull or null;
+      text = pullText cfg "arcade";
+      envs = builtins.fromJSON cfg.environment.etc."homelab/environments.json".text;
+      beforePull = lib.head (lib.splitString "\"$flox\" pull -d" text);
+    in
+    [
+      {
+        assertion = pull != null && (pull.serviceConfig.Type or null) == "oneshot" && (pull.serviceConfig.Slice or null) == "interactive.slice";
+        message = "arcade must have arcade-environment-pull.service, a oneshot in interactive.slice, enable on or off";
+      }
+      {
+        assertion = lib.hasInfix "\nkind=floxhub\n" text && lib.hasInfix "\nsourceEnv=imkarrer/arcade\n" text;
+        message = "the script must carry the source kind and the FloxHub environment it was built for, to refuse any other record";
+      }
+      {
+        assertion = lib.hasInfix "\nregistryRemote=''\n" text && lib.hasInfix "\nremote=''\n" text;
+        message = "a floxhub tenant clones no tree: the registry remote must be empty (tree defaults to the tenant's name, which the registry does not carry, and that must NOT be an error for this kind)";
+      }
+      {
+        assertion = lib.hasInfix "\npinned=/var/lib/homelab/pinned-environment-arcade\n" text && lib.hasInfix "\ndir=/var/lib/arcade/env\n" text && lib.hasInfix "\nuser=arcade\n" text;
+        message = "the pin, the dir and the owner must be the stub's";
+      }
+      {
+        assertion = lib.hasInfix "nix-store --realise --max-jobs 0" beforePull && lib.hasInfix "api.flox.dev/git/$owner/floxmeta" beforePull;
+        message = "the substitute-only guard (fed from FloxHub's floxmeta record) must run BEFORE `flox pull`, which builds";
+      }
+      {
+        assertion = lib.hasInfix "\"$flox\" activate -d \"$dir\" -g \"$gen\" -- true" text;
+        message = "the warm must be the pinned activation, the stub's own command";
+      }
+      {
+        assertion = !(lib.hasInfix "FLOXHUB_TOKEN" text) && !(lib.hasInfix "flox auth" text) && !(lib.hasInfix "flox gc" text) && !(lib.hasInfix "activate -r" text);
+        message = "no credential, no `flox auth`, no `flox gc`, no `activate -r` in the pull unit";
+      }
+      {
+        assertion = !(lib.hasInfix "pull -g" text) && !(lib.hasInfix "--copy" text);
+        message = "the pull must be a tracking pull, never `pull -g N --copy` (a detached path environment with no record of owner or generation)";
+      }
+      {
+        assertion = lib.hasInfix "\nrestartUnits=${lib.escapeShellArg (lib.concatStringsSep " " restart)}\n" text;
+        message = "the restart set must be ${builtins.toJSON restart}";
+      }
+      {
+        assertion =
+          envs.environments.arcade.source == "floxhub"
+          && envs.environments.arcade.env == "imkarrer/arcade"
+          && envs.environments.arcade.remote == null
+          && envs.environments.arcade.pinned == "/var/lib/homelab/pinned-environment-arcade"
+          && envs.environments.arcade.enable == (restart != [ ])
+          && envs.environments.agent-hub.source == "tree"
+          && envs.environments.agent-hub.env == null;
+        message = "/etc/homelab/environments.json must carry the source kind and env per tenant, flat, with agent-hub still the tree kind";
+      }
+      {
+        assertion = (cfg.systemd.paths.arcade-environment-pull.pathConfig.PathChanged or null) == "/var/lib/homelab/pending-environment-arcade.json";
+        message = "the path unit must watch pending-environment-arcade.json";
+      }
+    ];
+
 in
 {
   # enable = false, the default and what ac-box carries: the stub is
@@ -463,6 +542,120 @@ in
     ];
   };
 
+  # The host's state: declared, enable off. Both game units are byte-for-
+  # byte the module's, the pull unit exists and restarts nothing, and
+  # agent-hub is untouched.
+  floxhubDisabled = mkCase {
+    extraModules = [ floxhubFixture ];
+    checks =
+      cfg:
+      floxhubPullShape cfg [ ]
+      ++ pullShape cfg [ ]
+      ++ [
+        {
+          assertion =
+            cfg.systemd.services.arcade-freeciv.serviceConfig.ExecStart == arcadeModuleExecStart "arcade-freeciv"
+            && cfg.systemd.services.arcade-mindustry.serviceConfig.ExecStart == arcadeModuleExecStart "arcade-mindustry"
+            && cfg.systemd.services.arcade-freeciv.environment == { }
+            && cfg.systemd.services.arcade-mindustry.environment == { };
+          message = "enable = false: arcade-freeciv and arcade-mindustry must be exactly the module's -- no ExecStart, no variable";
+        }
+        {
+          assertion = (cfg.systemd.services.arcade-freeciv.serviceConfig.Slice or null) == "interactive.slice";
+          message = "the slice is the contract's regardless";
+        }
+      ];
+  };
+
+  # enable = true: each stub's ExecStart is the wrapper that reads the pin
+  # and execs `flox activate -d <dir> -g <N> -- <command>`; the variables
+  # are on the unit; User/Restart/Slice untouched.
+  floxhubEnabled = mkCase {
+    extraModules = arcadeOn [ ];
+    checks =
+      cfg:
+      let
+        freeciv = cfg.systemd.services.arcade-freeciv;
+        mindustry = cfg.systemd.services.arcade-mindustry;
+        # The wrapper is the derivation itself (environment.nix says why);
+        # its text is read at evaluation, never built. Contexts dropped on
+        # both sides because lib.hasInfix is a builtins.match, which
+        # refuses a needle with a store-path context.
+        noCtx = builtins.unsafeDiscardStringContext;
+        wrapperText = u: noCtx cfg.systemd.services.${u}.serviceConfig.ExecStart.text;
+        freecivWrapper = wrapperText "arcade-freeciv";
+        mindustryWrapper = wrapperText "arcade-mindustry";
+        floxBin = noCtx "${floxStub}/bin/flox";
+      in
+      floxhubPullShape cfg [
+        "arcade-freeciv.service"
+        "arcade-mindustry.service"
+      ]
+      ++ [
+        {
+          assertion = lib.isDerivation freeciv.serviceConfig.ExecStart && lib.hasPrefix "/nix/store/" (toString freeciv.serviceConfig.ExecStart);
+          message = "a floxhub stub's ExecStart must be the wrapper derivation (one store path once rendered)";
+        }
+        {
+          assertion = lib.hasInfix "pin=/var/lib/homelab/pinned-environment-arcade\n" freecivWrapper && lib.hasInfix "read -r gen < \"$pin\"" freecivWrapper;
+          message = "the wrapper must read the generation the pull unit pinned";
+        }
+        {
+          assertion = lib.hasInfix "exec ${floxBin} activate -d /var/lib/arcade/env -g \"$gen\" -- freeciv-server --bind 192.168.1.50 --port 5556 --saves /var/lib/arcade/freeciv --log /var/lib/arcade/freeciv/server.log\n" freecivWrapper;
+          message = "the wrapper must exec homelab.flox.package activating the tenant's dir at the pinned generation with the stub's argv in order";
+        }
+        {
+          assertion = lib.hasInfix "exec ${floxBin} activate -d /var/lib/arcade/env -g \"$gen\" -- mindustry-server\n" mindustryWrapper;
+          message = "mindustry's wrapper must exec the same activation with its one-word command";
+        }
+        {
+          assertion = lib.hasInfix "exit 1" freecivWrapper && lib.hasInfix "*[!0-9]*" freecivWrapper;
+          message = "the wrapper must refuse (exit 1) a missing or malformed pin rather than activate unpinned";
+        }
+        {
+          assertion = (mindustry.environment.JAVA_TOOL_OPTIONS or null) == "-Xms256M -Xmx1G" && (mindustry.environment.FLOX_DISABLE_METRICS or null) == "true" && (freeciv.environment.FLOX_DISABLE_METRICS or null) == "true";
+          message = "the stubs' variables must be on the units (JAVA_TOOL_OPTIONS on mindustry, FLOX_DISABLE_METRICS on both)";
+        }
+        {
+          assertion = !(lib.any (n: lib.hasPrefix "ARCADE_" n) (builtins.attrNames freeciv.environment ++ builtins.attrNames mindustry.environment));
+          message = "no ARCADE_* variable: the manifest has no hook, every host fact travels in argv or the unit's stdin text";
+        }
+        {
+          assertion = (freeciv.serviceConfig.User or null) == "arcade" && (freeciv.serviceConfig.Restart or null) == "on-failure" && (freeciv.serviceConfig.Slice or null) == "interactive.slice";
+          message = "the stub must leave User=, Restart= and Slice= alone";
+        }
+        {
+          # agent-hub, the tree kind, in the same evaluation with its
+          # enable at the default: still exactly the module's unit (the
+          # `enabled` case has the tree kind on).
+          assertion = cfg.systemd.services.agent-hub-llm.serviceConfig.ExecStart == moduleExecStart && cfg.systemd.services.agent-hub-llm.environment == { };
+          message = "the tree kind's stub is unchanged by the floxhub kind existing";
+        }
+      ];
+  };
+
+  # MUST THROW: kind = floxhub with no env. There is nothing to pull.
+  floxhubWithoutEnv = mkCase {
+    extraModules = [
+      floxhubFixture
+      { homelab.tenants.arcade.environment.source.env = lib.mkForce null; }
+    ];
+  };
+
+  # MUST THROW: kind = tree with an env set -- a declaration that
+  # contradicts itself is refused rather than half-read.
+  treeWithEnv = mkCase {
+    extraModules = [ { homelab.tenants.agent-hub.environment.source.env = "imkarrer/agent-hub"; } ];
+  };
+
+  # MUST THROW: env that is not owner/name.
+  floxhubBadEnv = mkCase {
+    extraModules = [
+      floxhubFixture
+      { homelab.tenants.arcade.environment.source.env = lib.mkForce "arcade"; }
+    ];
+  };
+
   expected = {
     disabled = true;
     enabled = true;
@@ -474,5 +667,10 @@ in
     treeNotInRegistry = false;
     treeWithoutRemote = false;
     realRegistry = true;
+    floxhubDisabled = true;
+    floxhubEnabled = true;
+    floxhubWithoutEnv = false;
+    treeWithEnv = false;
+    floxhubBadEnv = false;
   };
 }

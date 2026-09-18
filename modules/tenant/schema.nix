@@ -284,19 +284,23 @@ in
                 # nothing. Readers see the resolved path wherever
                 # environment.nix is imported; null only where it is not.
                 #
-                # The root of a CHECKOUT of the tenant tree, not a bare
-                # .flox: `<dir>/.flox` is the environment and `<dir>/<file>`
-                # is anything the tenant reads at run time (agent-hub's
-                # llama-swap.yaml and nix/sd-ui.html). A FloxHub generation
-                # carries the manifest and lock only, so a bare environment
-                # would leave those files with no home. Under the tenant's
-                # state path because it is state: written by the pull unit,
-                # read by the stub, owned by the tenant's user, and not worth
-                # a backup slot on its own (it is a git sha).
+                # The root of a CHECKOUT, `.flox/` inside it, whichever kind
+                # `source` names. For kind = tree it is the tenant tree at a
+                # sha: `<dir>/<file>` is anything the tenant reads at run
+                # time (agent-hub's llama-swap.yaml and nix/sd-ui.html),
+                # which a FloxHub generation -- manifest and lock only --
+                # would leave with no home. For kind = floxhub it is flox's
+                # own tracking checkout of `owner/name` (`.flox/env.json`
+                # names the owner, `.flox/env.lock` the upstream commit),
+                # with nothing beside `.flox/`. Under the tenant's state
+                # path because it is state: written by the pull unit, read
+                # by the stub, owned by the tenant's user, and not worth a
+                # backup slot on its own (it is a sha or a generation).
                 default = null;
                 description = ''
                   Where the environment lives on the host: the root of a
-                  checkout of the tenant tree, `.flox/` inside it. The
+                  checkout (of the tenant tree, or flox's of the FloxHub
+                  environment), `.flox/` inside it. The
                   tenant's user must own it, because `flox activate`
                   writes `.flox/run`, `.flox/cache` and `.flox/log` there.
                 '';
@@ -322,15 +326,47 @@ in
                 '';
               };
 
-              # Where the environment comes from: a git sha of a tree in
-              # hub/repos.psv, staged by that tree's CI into
-              # <stateDir>/pending-environment-<tenant>.json and checked
-              # out by the pull unit. A FloxHub-sourced environment
-              # (`owner/env`, a generation) is homelab-158.5's job and will
-              # be a sibling option here; for agent-hub a generation is not
-              # enough, because the environment reads llama-swap.yaml and
-              # nix/sd-ui.html from the tree at run time
-              # (docs/flox-findings.md, "Beyond the six").
+              # Where the environment comes from -- the deploy unit CI
+              # stages into <stateDir>/pending-environment-<tenant>.json
+              # and the pull unit applies. Two kinds (ADR 0009, "What is
+              # staged depends on what the environment needs at run time"):
+              #
+              #   tree     a git sha of `tree` (hub/repos.psv), checked out
+              #            at `dir`; for a tenant whose environment reads
+              #            files from its tree at run time (agent-hub:
+              #            llama-swap.yaml, nix/sd-ui.html -- docs/
+              #            flox-findings.md, "Beyond the six").
+              #   floxhub  a generation of the FloxHub environment `env`
+              #            (`owner/name`), kept as a tracking checkout at
+              #            `dir` and activated pinned to that generation;
+              #            for a tenant whose runtime is entirely packages
+              #            (arcade, homelab-158.5). A public environment:
+              #            no credential on the box.
+              #
+              # This file is vocabulary only: the consistency rule (`env`
+              # set iff kind == floxhub) is environment-pull.nix's
+              # assertion, beside the registry check it makes for `tree`.
+              source = {
+                kind = mkOption {
+                  type = types.enum [
+                    "tree"
+                    "floxhub"
+                  ];
+                  default = "tree";
+                  description = "What CI stages for this tenant: a sha of `tree` (tree) or a generation of `env` (floxhub).";
+                };
+                env = mkOption {
+                  type = types.nullOr types.str;
+                  default = null;
+                  example = "imkarrer/arcade";
+                  description = ''
+                    The FloxHub environment, `owner/name`, for kind =
+                    floxhub; null otherwise. The pull unit refuses a
+                    staged record naming any other environment.
+                  '';
+                };
+              };
+
               tree = mkOption {
                 type = types.str;
                 default = name;
@@ -339,9 +375,12 @@ in
                   The registry name (hub/repos.psv, first column) of the
                   tree whose checkout is this environment. Defaults to
                   the tenant's name, right for agent-hub; arcade's tree is
-                  home-arcade. environment-pull.nix reads the tree's
-                  remote from the registry at evaluation time and refuses
-                  a name the registry does not carry.
+                  home-arcade. For source.kind = tree, environment-pull.nix
+                  reads the tree's remote from the registry at evaluation
+                  time and refuses a name the registry does not carry. For
+                  kind = floxhub it is provenance only -- the tree whose
+                  CI pushes the generation -- and hub-status holds that
+                  tree's origin HEAD against the staged record's `rev`.
                 '';
               };
             };

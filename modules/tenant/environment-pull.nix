@@ -3,7 +3,12 @@
 #
 #   closure   CI stages a rev in pending-closure.json       -> homelab-deploy switches
 #   tenant    CI stages a sha in pending-environment-<t>.json -> <t>-environment-pull checks
-#             it out, warms it, restarts the stub
+#   (tree)    it out, warms it, restarts the stub
+#   tenant    CI stages a GENERATION of owner/name           -> <t>-environment-pull pulls
+#   (floxhub) in the same file                                the tracking checkout, warms
+#                                                             that generation pinned, restarts
+#
+# Which of the two a tenant is: environment.source.kind (schema.nix).
 #
 # For every enabled tenant that DECLARES a stub (environment.units != {}),
 # whether or not environment.enable is on:
@@ -99,6 +104,76 @@
 # and the warm are idempotent and cost milliseconds the second time.
 #
 # --------------------------------------------------------------------------
+# KIND = FLOXHUB (homelab-158.5): a generation of a public FloxHub environment
+# --------------------------------------------------------------------------
+# The staged record is {tenant, env: "owner/name", generation: N, ...}.
+# Refused: an env that is not source.env, a generation that is not a
+# positive integer, a dir that has a .git (a checkout of the other kind), a
+# dir whose .flox/env.json is not a tracking checkout of source.env, and a
+# checkout that has diverged (.flox/env.lock's local_rev is not null: a
+# `flox install` run there by hand forked the generation numbering -- the
+# floxhub kind's version of the tree kind's dirty guard; a tracking
+# checkout has no .flox/.gitignore, so `git status` is not the tool).
+#
+# The shape, chosen on WSL against imkarrer/hub-spike-2026-09-18 with the
+# pinned flox 1.14.0 (the box's; scratchpad spike-floxhub/findings.md):
+#
+#   1. substitute-only, BEFORE anything flox does. `flox pull` builds the
+#      live generation and `flox activate -g N` builds generation N, so a
+#      path no trusted cache has would be compiled by either. FloxHub's
+#      record is a bare git repo (https://api.flox.dev/git/<owner>/floxmeta,
+#      one branch per environment, <N>/env/manifest.lock per generation,
+#      metadata.json naming the live one); it is readable anonymously the
+#      way flox itself reads it -- HTTP basic auth, user `oauth`, EMPTY
+#      password (a request with no credential is a 401, which is why a
+#      plain `git ls-remote` hangs on a prompt). A shallow single-branch
+#      clone into a scratch dir, as the tenant user, gives generation N's
+#      lock and the live one's; both are realised --max-jobs 0. N not on
+#      that branch is a refusal (pushed later than it was staged?).
+#   2. `flox pull -d <dir> owner/name` the first time; `flox pull -d <dir>`
+#      after (exit 0, "already up to date", when nothing moved; the form
+#      with the ref refuses an existing checkout). The pull fetches the
+#      owner's floxmeta into $XDG_DATA_HOME/flox/meta/<owner> under the
+#      tenant's HOME, writes .flox/{env.json,env.lock,env/} and builds and
+#      GC-roots the LIVE generation's links. NOT `flox pull -g N --copy`:
+#      that yields a detached path environment with no trace of owner or
+#      generation in .flox/ (findings 3), and a pull by hand into it later
+#      is indistinguishable from ours. A tracking checkout keeps flox's own
+#      record (env.json's owner, env.lock's upstream commit) beside ours.
+#   3. `flox activate -d <dir> -g N -- true`: the warm, pinned. Makes
+#      .flox/run/<system>.<name>.genN-{dev,run}, GC-rooted, beside the
+#      live links, and is the same command the stub runs. A later pull that
+#      moves the live generation leaves N's links and N's entry in the
+#      floxmeta clone alone, so a failed or half-done pull never leaves the
+#      unit without the generation it is pinned to -- no <dir>.new swap.
+#   4. the pin: <stateDir>/pinned-environment-<tenant>, one line, N,
+#      written AFTER the warm and BEFORE the restart. The stub's wrapper
+#      (environment.nix) reads it at every start; the applied record is
+#      still written after the restart, so staged != applied on a deferred
+#      or failed restart, as for the tree kind.
+#
+# What is offline-safe afterwards, measured: `flox activate -d <dir> -g N`
+# in ~150 ms with the network dead -- as long as the store paths AND the
+# tenant user's floxmeta clone exist. Without the clone even a plain
+# activation of a tracking checkout tries to re-clone from api.flox.dev and
+# fails (WSL, 18 Sep 2026). So $HOME/.local/share/flox/meta/<owner> is
+# load-bearing state for the stub: hub-backup.sh excludes it (it is
+# re-fetched by the pull), and "already applied; nothing to do" here checks
+# for it as well as for N's run link, so a restore re-pulls rather than
+# leaving a stub that needs the network at 03:00. HOME and the three XDG_*
+# dirs are set explicitly to the tenant's own so nothing lands under root's.
+#
+# Never `flox gc` here (it is a full nix store GC under a flox name) and
+# never `flox activate -r` (needs -t when unauthenticated, caches under
+# $XDG_CACHE_HOME/flox/remote, and never refreshes).
+#
+# No credential. Pulling and activating a PUBLIC environment needs none
+# (verified logged-out, 1.14.0 and 1.14.1); FLOX_FLOXHUB_TOKEN is CI's
+# for `flox push` (modules/platform/secrets.nix's ci-env) and never
+# reaches this unit. A private environment would be a platform decision,
+# not a flag here.
+#
+# --------------------------------------------------------------------------
 # WHERE IT RUNS
 # --------------------------------------------------------------------------
 # In the tenant's slice (Slice= at plain priority: this is our own unit,
@@ -156,11 +231,15 @@ let
     name: t:
     let
       env = t.environment;
+      kind = env.source.kind;
+      sourceEnv = if env.source.env == null then "" else env.source.env;
       # Already resolved: environment.nix supplies the derived default at
       # the submodule level (null only where that module is not imported,
       # which the assertion below names rather than re-deriving here).
       dir = if env.dir == null then "" else toString env.dir;
-      registryRemote = remoteFor env.tree;
+      # The registry is the tree kind's concern; for floxhub `tree` is
+      # provenance (schema.nix) and resolves to nothing here.
+      registryRemote = if kind == "tree" then remoteFor env.tree else "";
       remote = httpsRemote registryRemote;
       stubs = builtins.attrNames env.units;
 
@@ -188,6 +267,9 @@ let
 
       pending = "${toString cfg.stateDir}/pending-environment-${name}.json";
       applied = "${toString cfg.stateDir}/last-applied-environment-${name}.json";
+      # The floxhub kind's pin, read by environment.nix's wrapper (its
+      # header); "" for the tree kind, which has no such file.
+      pinned = if kind == "floxhub" then "${toString cfg.stateDir}/pinned-environment-${name}" else "";
 
       sliceable = config.homelab.enforce.slices && t.tier != "critical" && t.quiet.drainable;
 
@@ -207,8 +289,11 @@ let
         ];
         text = ''
           tenant=${lib.escapeShellArg name}
+          kind=${lib.escapeShellArg kind}
+          sourceEnv=${lib.escapeShellArg sourceEnv}
           pending=${lib.escapeShellArg pending}
           applied=${lib.escapeShellArg applied}
+          pinned=${lib.escapeShellArg pinned}
           inventory=${lib.escapeShellArg (toString cfg.inventoryFile)}
           dir=${lib.escapeShellArg dir}
           user=${lib.escapeShellArg user}
@@ -226,26 +311,61 @@ let
             exit 0
           fi
 
-          sha=$(jq -r '.sha // empty' "$pending")
-          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
-            refuse "$pending has no full sha ('$sha') -- refusing to guess."
+          # THE STAGED UNIT, by kind: a sha of the tree, or a generation of
+          # the FloxHub environment. `what` names it in every line below.
+          sha=""; gen=""
+          if [ "$kind" = tree ]; then
+            sha=$(jq -r '.sha // empty' "$pending")
+            if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+              refuse "$pending has no full sha ('$sha') -- refusing to guess."
+            fi
+            # A record for another tree is refused, not checked out. The
+            # queue script writes the registry's remote verbatim; this unit
+            # was built against the same registry.
+            tree=$(jq -r '.tree // empty' "$pending")
+            if [ "$tree" != "$registryRemote" ]; then
+              refuse "$pending is for tree '$tree', this unit pulls '$registryRemote' -- refusing."
+            fi
+            what="$sha"
+          else
+            gen=$(jq -r '.generation // empty' "$pending")
+            if ! [[ "$gen" =~ ^[1-9][0-9]*$ ]]; then
+              refuse "$pending has no positive-integer generation ('$gen') -- refusing to guess."
+            fi
+            # A record for another environment is refused, not pulled:
+            # this unit was built for source.env and pins nothing else.
+            recEnv=$(jq -r '.env // empty' "$pending")
+            if [ "$recEnv" != "$sourceEnv" ]; then
+              refuse "$pending is for environment '$recEnv', this unit pulls '$sourceEnv' -- refusing."
+            fi
+            owner=''${sourceEnv%%/*}
+            envName=''${sourceEnv#*/}
+            what="generation $gen of $sourceEnv"
           fi
 
-          # A record for another tree is refused, not checked out. The
-          # queue script writes the registry's remote verbatim; this unit
-          # was built against the same registry.
-          tree=$(jq -r '.tree // empty' "$pending")
-          if [ "$tree" != "$registryRemote" ]; then
-            refuse "$pending is for tree '$tree', this unit pulls '$registryRemote' -- refusing."
-          fi
-
-          appliedSha=""
+          # Already applied, and the checkout is intact? For the tree kind
+          # the lock is the proof. For floxhub it is generation N's run
+          # link AND the floxmeta clone the activation reads (header: a
+          # tracking checkout without it goes to the network), so a
+          # restore that brought back <dir> but not the clone re-pulls.
           if [ -e "$applied" ]; then
-            appliedSha=$(jq -r '.sha // empty' "$applied")
-          fi
-          if [ "$sha" = "$appliedSha" ] && [ -e "$dir/.flox/env/manifest.lock" ]; then
-            log "$sha already applied; nothing to do."
-            exit 0
+            if [ "$kind" = tree ]; then
+              if [ "$sha" = "$(jq -r '.sha // empty' "$applied")" ] && [ -e "$dir/.flox/env/manifest.lock" ]; then
+                log "$sha already applied; nothing to do."
+                exit 0
+              fi
+            else
+              appliedGen=$(jq -r '.generation // empty' "$applied")
+              appliedEnv=$(jq -r '.env // empty' "$applied")
+              meta=$(getent passwd "$user" | cut -d: -f6)/.local/share/flox/meta/$owner
+              if [ "$gen" = "$appliedGen" ] && [ "$sourceEnv" = "$appliedEnv" ] \
+                 && [ -L "$dir/.flox/run/$(uname -m)-linux.$envName.gen$gen-run" ] \
+                 && [ "$(cat "$pinned" 2>/dev/null)" = "$gen" ] \
+                 && git --git-dir="$meta" rev-parse --verify --quiet "refs/heads/$envName" >/dev/null 2>&1; then
+                log "$what already applied; nothing to do."
+                exit 0
+              fi
+            fi
           fi
 
           # FAIL CLOSED, as modules/deploy does: no inventory, no restart
@@ -265,58 +385,132 @@ let
           # checkout. --init-groups: supplementary groups from the user db,
           # as the stub unit gets. HOME is set explicitly because setpriv
           # leaves the environment alone (and --reset-env would also reset
-          # PATH, taking git and flox with it).
+          # PATH, taking git and flox with it). The XDG_* trio likewise, to
+          # flox's own defaults under that HOME: the floxmeta clone the
+          # floxhub kind's stub reads at every start lands under
+          # XDG_DATA_HOME, and it must be where the stub (HOME from
+          # systemd, no XDG_*) will look.
           as_user() {
-            setpriv --reuid "$user" --regid "$group" --init-groups -- env HOME="$home" "$@"
+            setpriv --reuid "$user" --regid "$group" --init-groups -- \
+              env HOME="$home" XDG_DATA_HOME="$home/.local/share" XDG_CACHE_HOME="$home/.cache" XDG_CONFIG_HOME="$home/.config" "$@"
+          }
+          # git that can never ask anyone anything: no terminal prompt, no
+          # global or system config (a credential manager configured there
+          # would be consulted on a 401 -- on WSL that is a desktop dialog),
+          # and the helper list reset. Every network-facing git call in
+          # this script goes through here; a public remote answers or the
+          # call fails, exit 128, and the timer retries.
+          git_noprompt() {
+            as_user env GIT_TERMINAL_PROMPT=0 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null \
+              git -c credential.helper= "$@"
           }
 
-          if [ ! -d "$dir/.git" ]; then
-            if [ -e "$dir" ] && [ -n "$(ls -A "$dir")" ]; then
-              refuse "$dir exists and is not a git checkout -- refusing to overwrite it."
-            fi
-            install -d -o "$user" -g "$group" -m 0755 "$dir"
-            log "cloning $remote into $dir as $user"
-            as_user env GIT_TERMINAL_PROMPT=0 git clone --quiet --no-checkout "$remote" "$dir"
-          fi
-          as_user git -C "$dir" remote set-url origin "$remote"
+          # The lock files whose outputs are realised substitute-only
+          # below, one per line. The tree kind's is the checkout's; the
+          # floxhub kind's come from FloxHub's record, read before flox
+          # touches anything (header, step 1).
+          locks=""
+          scratch=""
+          cleanup() { [ -n "$scratch" ] && rm -rf "$scratch"; }
+          trap cleanup EXIT
 
-          # Fetch only what is not already local, so a deferred restart
-          # retried with the network down does not fail at the fetch. By
-          # sha first (GitHub serves any reachable object), the whole
-          # remote as the fallback for a server that does not. No
-          # credential prompt: the remote is public or the fetch fails.
-          if ! as_user git -C "$dir" cat-file -e "$sha^{commit}" 2>/dev/null; then
-            log "fetching $sha from $remote"
-            as_user env GIT_TERMINAL_PROMPT=0 git -C "$dir" fetch --quiet origin "$sha" \
-              || as_user env GIT_TERMINAL_PROMPT=0 git -C "$dir" fetch --quiet origin
-            if ! as_user git -C "$dir" cat-file -e "$sha^{commit}"; then
-              refuse "$sha is not reachable from $remote -- staged from the wrong tree, or not pushed?"
+          if [ "$kind" = tree ]; then
+            if [ ! -d "$dir/.git" ]; then
+              if [ -e "$dir" ] && [ -n "$(ls -A "$dir")" ]; then
+                refuse "$dir exists and is not a git checkout -- refusing to overwrite it."
+              fi
+              install -d -o "$user" -g "$group" -m 0755 "$dir"
+              log "cloning $remote into $dir as $user"
+              git_noprompt clone --quiet --no-checkout "$remote" "$dir"
             fi
-          fi
-          # A tracked file changed in place -- a `flox upgrade`/re-lock run
-          # inside the checkout, say -- is refused, loudly, before the
-          # checkout: git itself only refuses when the target commit touches
-          # that file and otherwise carries the edit over silently, and a
-          # drifted lock activated at the next sha is the drift this whole
-          # edge exists to prevent. Untracked files (.flox/run, cache, log)
-          # are the environment's own and not looked at. Only once there IS
-          # a checkout: a fresh `clone --no-checkout` has HEAD and an empty
-          # worktree, which `status` reports as every tracked file deleted,
-          # and the first pull on the box (18 Sep 2026, 08:33) refused
-          # itself on exactly that. Nothing can have been edited in place
-          # before anything was checked out.
-          dirty=""
-          if as_user git -C "$dir" rev-parse --verify --quiet HEAD >/dev/null \
-             && [ -n "$(as_user git -C "$dir" ls-files 2>/dev/null | head -1)" ]; then
-            dirty=$(as_user git -C "$dir" status --porcelain --untracked-files=no)
-          fi
-          if [ -n "$dirty" ]; then
-            refuse "$dir has tracked files changed in place (a hand edit or re-lock; land it or discard it):
+            as_user git -C "$dir" remote set-url origin "$remote"
+
+            # Fetch only what is not already local, so a deferred restart
+            # retried with the network down does not fail at the fetch. By
+            # sha first (GitHub serves any reachable object), the whole
+            # remote as the fallback for a server that does not. No
+            # credential prompt: the remote is public or the fetch fails.
+            if ! as_user git -C "$dir" cat-file -e "$sha^{commit}" 2>/dev/null; then
+              log "fetching $sha from $remote"
+              git_noprompt -C "$dir" fetch --quiet origin "$sha" \
+                || git_noprompt -C "$dir" fetch --quiet origin
+              if ! as_user git -C "$dir" cat-file -e "$sha^{commit}"; then
+                refuse "$sha is not reachable from $remote -- staged from the wrong tree, or not pushed?"
+              fi
+            fi
+            # A tracked file changed in place -- a `flox upgrade`/re-lock run
+            # inside the checkout, say -- is refused, loudly, before the
+            # checkout: git itself only refuses when the target commit touches
+            # that file and otherwise carries the edit over silently, and a
+            # drifted lock activated at the next sha is the drift this whole
+            # edge exists to prevent. Untracked files (.flox/run, cache, log)
+            # are the environment's own and not looked at. Only once there IS
+            # a checkout: a fresh `clone --no-checkout` has HEAD and an empty
+            # worktree, which `status` reports as every tracked file deleted,
+            # and the first pull on the box (18 Sep 2026, 08:33) refused
+            # itself on exactly that. Nothing can have been edited in place
+            # before anything was checked out.
+            dirty=""
+            if as_user git -C "$dir" rev-parse --verify --quiet HEAD >/dev/null \
+               && [ -n "$(as_user git -C "$dir" ls-files 2>/dev/null | head -1)" ]; then
+              dirty=$(as_user git -C "$dir" status --porcelain --untracked-files=no)
+            fi
+            if [ -n "$dirty" ]; then
+              refuse "$dir has tracked files changed in place (a hand edit or re-lock; land it or discard it):
           $dirty"
-          fi
-          as_user git -C "$dir" checkout --quiet --detach "$sha"
-          if [ ! -f "$dir/.flox/env/manifest.toml" ]; then
-            refuse "$dir at $sha has no .flox/env/manifest.toml -- not a flox environment."
+            fi
+            as_user git -C "$dir" checkout --quiet --detach "$sha"
+            if [ ! -f "$dir/.flox/env/manifest.toml" ]; then
+              refuse "$dir at $sha has no .flox/env/manifest.toml -- not a flox environment."
+            fi
+            locks="$dir/.flox/env/manifest.lock"
+          else
+            # A checkout of the other kind, or a path environment, or a
+            # tracking checkout of some other environment: never pulled
+            # over. Only a dir that is empty/absent or already OUR tracking
+            # checkout passes.
+            if [ -d "$dir/.git" ]; then
+              refuse "$dir is a git checkout (the tree kind's); refusing to pull a FloxHub environment over it."
+            fi
+            if [ -e "$dir/.flox/env.json" ]; then
+              have=$(jq -r '"\(.owner // "")/\(.name // "")"' "$dir/.flox/env.json")
+              if [ "$have" != "$sourceEnv" ]; then
+                refuse "$dir/.flox/env.json is '$have', not a tracking checkout of $sourceEnv -- refusing to pull over it."
+              fi
+              if [ "$(jq -r '.local_rev' "$dir/.flox/env.lock" 2>/dev/null)" != null ]; then
+                refuse "$dir has diverged from $sourceEnv (.flox/env.lock local_rev is set: a flox install/edit run there by hand). Push it from a dev checkout or remove $dir; not pulling over it."
+              fi
+            elif [ -e "$dir" ] && [ -n "$(ls -A "$dir")" ]; then
+              refuse "$dir exists and is not a flox checkout -- refusing to overwrite it."
+            fi
+            # FloxHub's record, anonymously (header, step 1): generation
+            # N's lock and the live generation's, since the pull builds the
+            # live one and the activation builds N. Shallow, one branch,
+            # as the tenant user, into scratch that the trap removes. The
+            # one helper git gets is scoped to api.flox.dev and answers
+            # user `oauth`, empty password -- a request with no
+            # Authorization header at all is a 401, one with that pair is
+            # a 200 (curl, 18 Sep 2026); flox's own logged-out git does
+            # the same. Nothing else can be asked (git_noprompt).
+            scratch=$(as_user mktemp -d -t "$tenant-floxmeta.XXXXXX")
+            log "reading $sourceEnv's generations from FloxHub"
+            if ! git_noprompt -c 'credential.https://api.flox.dev/git.helper=!f(){ echo username=oauth; echo password=; }; f' \
+                 clone --quiet --bare --depth 1 --single-branch --branch "$envName" \
+                 "https://api.flox.dev/git/$owner/floxmeta" "$scratch/floxmeta" </dev/null; then
+              refuse "could not read $owner's floxmeta for '$envName' from api.flox.dev (no network, or the environment does not exist / is not public); leaving $pending staged for the next firing."
+            fi
+            metaGit() { as_user git --git-dir="$scratch/floxmeta" "$@"; }
+            live=$(metaGit show "$envName:metadata.json" | jq -r '.history[-1].current_generation // empty')
+            if ! metaGit cat-file -e "$envName:$gen/env/manifest.lock" 2>/dev/null; then
+              refuse "generation $gen of $sourceEnv is not on FloxHub (live is ''${live:-unknown}); staged before it was pushed? leaving $pending staged."
+            fi
+            metaGit show "$envName:$gen/env/manifest.lock" > "$scratch/gen$gen.lock"
+            locks="$scratch/gen$gen.lock"
+            if [ -n "$live" ] && [ "$live" != "$gen" ]; then
+              metaGit show "$envName:$live/env/manifest.lock" > "$scratch/gen$live.lock"
+              locks="$locks
+          $scratch/gen$live.lock"
+            fi
           fi
 
           # THE WARM NEVER COMPILES. The tenant user's nix goes through
@@ -339,11 +533,13 @@ let
           # `dev` was not (the plugin pushed the environment's closure,
           # which links only `out`), and sd.cpp compiled for three minutes
           # at SCHED_BATCH while this step reported success. The plugin now
-          # pushes every lock output too; this side demands them.
-          log "substituting the store paths $dir/.flox/env/manifest.lock names (never building them)"
+          # pushes every lock output too; this side demands them. For the
+          # floxhub kind this runs BEFORE `flox pull`, which would build.
+          log "substituting the store paths the lock(s) name (never building them)"
+          # shellcheck disable=SC2086  # $locks is newline-separated paths, split on purpose
           if ! jq -r --arg s "$(uname -m)-linux" '
                 .packages[] | select(.system == $s) | .outputs[]
-              ' "$dir/.flox/env/manifest.lock" | sort -u \
+              ' $locks | sort -u \
               | as_user xargs nix-store --realise --max-jobs 0 >/dev/null; then
             refuse "a store path the lock names is in no substituter this box trusts (cache.flox.dev, MinIO); refusing to compile it here; leaving $pending staged."
           fi
@@ -353,17 +549,60 @@ let
           # exit 1, the record is not written, the timer retries.
           # FLOX_DISABLE_METRICS as the stub sets it; nothing here phones
           # home either.
-          log "activating $dir once, online, as $user (pins the GC roots)"
-          if ! as_user env FLOX_DISABLE_METRICS=true "$flox" activate -d "$dir" -- true; then
-            refuse "flox activate failed at $sha; leaving $pending staged for the next firing."
+          if [ "$kind" = tree ]; then
+            log "activating $dir once, online, as $user (pins the GC roots)"
+            if ! as_user env FLOX_DISABLE_METRICS=true "$flox" activate -d "$dir" -- true; then
+              refuse "flox activate failed at $sha; leaving $pending staged for the next firing."
+            fi
+          else
+            # The pull (header, step 2): first time with the ref, after
+            # that without. Both need api.flox.dev; both fail soft.
+            if [ ! -e "$dir/.flox/env.json" ]; then
+              install -d -o "$user" -g "$group" -m 0755 "$dir"
+              log "pulling $sourceEnv into $dir as $user (tracking checkout)"
+              if ! as_user env FLOX_DISABLE_METRICS=true "$flox" pull -d "$dir" "$sourceEnv" </dev/null; then
+                refuse "flox pull of $sourceEnv failed; leaving $pending staged for the next firing."
+              fi
+            else
+              log "updating the $sourceEnv checkout at $dir"
+              if ! as_user env FLOX_DISABLE_METRICS=true "$flox" pull -d "$dir" </dev/null; then
+                refuse "flox pull in $dir failed; leaving $pending staged for the next firing."
+              fi
+            fi
+            if [ "$(jq -r '.local_rev' "$dir/.flox/env.lock" 2>/dev/null)" != null ]; then
+              refuse "$dir has diverged from $sourceEnv after the pull (local_rev set); not pinning it."
+            fi
+            # What the pulled copy says is live, for the journal: flox's
+            # own generation record (docs/flox-findings.md 3), read offline
+            # from the checkout. `-g N` below pins N whatever this says.
+            pulledLive=$(as_user "$flox" generations list -d "$dir" --json </dev/null 2>/dev/null \
+              | jq -r 'to_entries[] | select(.value.last_live == null) | .key' | head -1)
+            log "pulled $sourceEnv at upstream $(jq -r '.rev' "$dir/.flox/env.lock" | cut -c1-7) (live generation ''${pulledLive:-unknown}); pinning $gen"
+            # The pinned warm (header, step 3): the stub's own command.
+            log "activating generation $gen of $sourceEnv at $dir once, as $user (pins its GC roots)"
+            if ! as_user env FLOX_DISABLE_METRICS=true "$flox" activate -d "$dir" -g "$gen" -- true </dev/null; then
+              refuse "flox activate -g $gen failed; leaving $pending staged for the next firing."
+            fi
+            # The pin (header, step 4): what the stub activates from now
+            # on, before the restart that makes it so.
+            tmp="$pinned.tmp.$$"
+            printf '%s\n' "$gen" > "$tmp"
+            chmod 0644 "$tmp"
+            mv -f "$tmp" "$pinned"
           fi
 
           # The content stamp (docs/flox-findings.md 3): the store path
-          # .flox/run/<system>.<name>-run resolves to. Recorded so
-          # hub-status can tell two checkouts of different content apart
-          # even at the same sha.
-          envName=$(jq -r '.name // empty' "$dir/.flox/env.json")
-          runLink="$dir/.flox/run/$(uname -m)-linux.$envName-run"
+          # .flox/run/<system>.<name>-run (the tree kind) or
+          # .flox/run/<system>.<name>.genN-run (floxhub) resolves to.
+          # Recorded so hub-status can tell two checkouts of different
+          # content apart even at the same sha or generation. The link is
+          # named from .flox/env.json's `name`, not the directory.
+          runName=$(jq -r '.name // empty' "$dir/.flox/env.json")
+          if [ "$kind" = tree ]; then
+            runLink="$dir/.flox/run/$(uname -m)-linux.$runName-run"
+          else
+            runLink="$dir/.flox/run/$(uname -m)-linux.$runName.gen$gen-run"
+          fi
           runPath=""
           if [ -L "$runLink" ]; then
             runPath=$(readlink "$runLink")
@@ -372,7 +611,7 @@ let
           fi
 
           if [ -z "$restartUnits" ]; then
-            log "environment.enable is off for $tenant: checkout at $sha warmed, no unit restarted."
+            log "environment.enable is off for $tenant: $what warmed at $dir, no unit restarted."
           else
             # THIS tenant's quiet policy only. busyCheck's contract
             # (schema.nix): exit 0 means BUSY; 126/127 means the question
@@ -383,12 +622,12 @@ let
               false)
                 check=$(jq -r --arg t "$tenant" '.tenants[] | select(.name == $t) | .quiet.busyCheck // empty' "$inventory")
                 if [ -z "$check" ]; then
-                  log "$tenant is not drainable and has no busyCheck; a human restarts it. Checkout at $sha is warmed; deferring."
+                  log "$tenant is not drainable and has no busyCheck; a human restarts it. $what is warmed; deferring."
                   exit 0
                 fi
                 if sh -c "$check"; then rc=0; else rc=$?; fi
                 if [ "$rc" -eq 0 ]; then
-                  log "$tenant is busy; deferring the restart to $sha."
+                  log "$tenant is busy; deferring the restart to $what."
                   exit 0
                 elif [ "$rc" -eq 126 ] || [ "$rc" -eq 127 ]; then
                   log "$tenant's busyCheck could not run (exit $rc: $check); deferring rather than guessing." >&2
@@ -400,7 +639,7 @@ let
                 ;;
             esac
             for unit in $restartUnits; do
-              log "restarting $unit from $dir at $sha"
+              log "restarting $unit from $dir at $what"
               systemctl restart "$unit"
             done
           fi
@@ -408,16 +647,28 @@ let
           # After the restart, never before: a failed or deferred restart
           # must leave staged != applied.
           tmp="$applied.tmp.$$"
-          jq -cn \
-            --arg sha "$sha" \
-            --arg run "$runPath" \
-            --arg dir "$dir" \
-            --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            --arg units "$restartUnits" \
-            '{sha: $sha, run_path: (if $run == "" then null else $run end), dir: $dir, applied_at: $at, restarted: ($units | split(" ") | map(select(. != "")))}' \
-            > "$tmp"
+          if [ "$kind" = tree ]; then
+            jq -cn \
+              --arg sha "$sha" \
+              --arg run "$runPath" \
+              --arg dir "$dir" \
+              --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --arg units "$restartUnits" \
+              '{sha: $sha, run_path: (if $run == "" then null else $run end), dir: $dir, applied_at: $at, restarted: ($units | split(" ") | map(select(. != "")))}' \
+              > "$tmp"
+          else
+            jq -cn \
+              --arg env "$sourceEnv" \
+              --argjson gen "$gen" \
+              --arg run "$runPath" \
+              --arg dir "$dir" \
+              --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              --arg units "$restartUnits" \
+              '{env: $env, generation: $gen, run_path: (if $run == "" then null else $run end), dir: $dir, applied_at: $at, restarted: ($units | split(" ") | map(select(. != "")))}' \
+              > "$tmp"
+          fi
           mv -f "$tmp" "$applied"
-          log "applied $sha (run ''${runPath:-unknown})"
+          log "applied $what (run ''${runPath:-unknown})"
         '';
       };
     in
@@ -426,7 +677,10 @@ let
         name
         t
         env
+        kind
+        sourceEnv
         dir
+        pinned
         registryRemote
         remote
         stubs
@@ -510,12 +764,37 @@ in
     assertions = lib.flatten (
       lib.mapAttrsToList (name: p: [
         {
-          assertion = p.registryRemote != "";
+          assertion = p.kind != "tree" || p.registryRemote != "";
           message = ''
             homelab.tenants.${name}.environment.tree = "${p.env.tree}" names
             no tree in ${toString cfg.registry} (or one without a remote).
             The pull unit clones the registry's remote; a tree the hub does
             not coordinate has nothing to pull from.
+          '';
+        }
+        {
+          # `env` iff kind = floxhub -- schema.nix's rule, enforced here.
+          assertion = (p.kind == "floxhub") == (p.env.source.env != null);
+          message = ''
+            homelab.tenants.${name}.environment.source: kind = "${p.kind}"
+            ${
+              if p.kind == "floxhub" then
+                "needs `env` (\"owner/name\", the FloxHub environment to pull)"
+              else
+                "does not take `env` (\"${toString p.env.source.env}\"); set kind = \"floxhub\" or drop it"
+            }.
+          '';
+        }
+        {
+          assertion =
+            p.kind != "floxhub"
+            || p.env.source.env == null
+            || builtins.match "[A-Za-z0-9_-]+/[A-Za-z0-9_.-]+" p.sourceEnv != null;
+          message = ''
+            homelab.tenants.${name}.environment.source.env = "${p.sourceEnv}"
+            is not "owner/name". The pull unit splits it on the one slash
+            to reach https://api.flox.dev/git/<owner>/floxmeta and the
+            <name> branch there.
           '';
         }
         {
@@ -601,23 +880,29 @@ in
     systemd.tmpfiles.rules = [ "d ${toString cfg.stateDir} 0755 root root -" ];
 
     # What the running closure says about its environments, for hub-status
-    # (which reads the pending/applied pair beside it) and for anyone at the
-    # box: which tenants have one, where, from which tree, and whether the
-    # stub is on -- the last being the fact that decides whether a restart
-    # from the checkout is what the unit does today.
+    # (which reads the pending/applied pair beside it), hub-backup.sh (dir
+    # and user) and anyone at the box: which tenants have one, where, of
+    # which source kind, and whether the stub is on -- the last being the
+    # fact that decides whether a restart from the checkout is what the
+    # unit does today. One line of JSON with flat keys (`source` is the
+    # kind, `env` the FloxHub environment or null), because hub-status
+    # reads it with grep over ssh and the box has no jq on its path.
     environment.etc."homelab/environments.json" = {
       mode = "0444";
       text = builtins.toJSON {
         generated = "modules/tenant/environment-pull.nix";
         environments = lib.mapAttrs (name: p: {
+          source = p.kind;
+          env = if p.kind == "floxhub" then p.sourceEnv else null;
           tree = p.env.tree;
-          remote = p.registryRemote;
+          remote = if p.kind == "tree" then p.registryRemote else null;
           dir = p.dir;
           enable = p.env.enable;
           units = p.stubs;
           user = p.user;
           pending = p.pending;
           applied = p.applied;
+          pinned = if p.kind == "floxhub" then p.pinned else null;
           unit = "${unitName name}.service";
         }) pulls;
       };
