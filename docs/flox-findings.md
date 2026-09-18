@@ -47,6 +47,35 @@ needs the network. flox.dev is a dependency of the *pull*, which may fail
 soft and retry, and not of the 03:00 restart. This is the same split
 `modules/deploy` makes between staging and applying.
 
+**Built (`homelab-158.3`, 17 Sep), awaiting the box:** the answer to
+question 1 is the split above, implemented. `modules/tenant/environment-pull.nix`
+is the pull unit: the tenant's CI stages a sha (not a FloxHub generation —
+the environment reads two repo files at run time, "Beyond the six"), the
+box checks it out as the tenant's user and runs `flox activate -d <dir> --
+true` once, online, in the tenant's slice; the stub is restarted only after
+that, and its own activation is the offline ~80 ms one. Three things the
+build found that the WSL experiments had not:
+
+- **The warm is a nix build when the box trusts no cache that has the
+  path.** ac-box's `nix.conf` substitutes from cache.nixos.org and (since
+  `97f0c00`) cache.flox.dev. agent-hub's two `.flake` packages
+  (ik_llama.cpp, stable-diffusion.cpp) exist only in CI's MinIO bucket,
+  which is loopback-only on the box and refuses anonymous reads
+  (`GET /flox-binary-cache/nix-cache-info` → 403). So the first activation
+  on the box compiles both through nix-daemon — in nix-daemon's cgroup,
+  not the tenant's slice, on every core. Slicing the pull unit bounds the
+  clone and the evaluation, not the build. Either the box gets the MinIO
+  cache as a substituter (a platform trust decision like cache.flox.dev's)
+  or the first warm is a one-time unfenced compile.
+- **`flox activate` under a unit warns `Failed to detect shell from
+  environment or parent process. Defaulting to bash`** (no `$SHELL`, parent
+  is `setpriv`). Harmless; one line of journal noise per pull.
+- **`--` with a command runs the hook.** `flox activate -d <dir> -- true`
+  as the warm runs the manifest's `[hook]` with no `AGENT_HUB_*` set, so
+  the hook's `: "${X:=default}"` lines fill in the tenant tree's defaults
+  for that one process. Nothing is written by agent-hub's hook, so this is
+  benign; a hook with side effects would run once with unreviewed values.
+
 ## 2. `[services]` under systemd — partial (answered on WSL, not yet on the box)
 
 **`flox activate -- <binary>` is what systemd can supervise. `[services]` is a
@@ -98,6 +127,14 @@ environment (`generation`, `owner/env`, `pulled_at`, the run store path) the
 way `last-applied-closure.json` is — flox does not provide one for the shape
 we deploy. The run store path is the exact content check, as the closure's
 store path is.
+
+Written as of `homelab-158.3`: `last-applied-environment-<tenant>.json`
+carries `sha`, `run_path` (the `readlink` of `.flox/run/<system>.<name>-run`
+after the warm), `dir`, `applied_at` and the units restarted, and
+`hub-status` prints `staged <sha7> / applied <sha7> (run <hash7>)` per
+tenant. One detail the path environment adds: the link is named from
+`.flox/env.json`'s `name`, not from the directory, so the pull reads the
+name from there rather than guessing it from the tenant.
 
 ## 4. Secrets — open
 
