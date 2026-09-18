@@ -102,6 +102,38 @@ else
   note "backup: no status file at $BSTATUS - hub-backup.timer is not installed here (docs/runbook-restore.md)"
 fi
 
+# The FloxHub token CI pushes generations with (ADR 0009 step 2). Two kinds
+# exist: what `flox auth token` prints after a browser login is a 30-day
+# Auth0 JWT (docs/flox-findings.md, "Two more"), and what the operator
+# issued on hub.flox.dev for CI is an opaque `flox…` token whose lifetime is
+# set there. A JWT's expiry is readable from the repo's own encrypted copy
+# (base64url payload, `exp` is not a secret) -- decoded here, verdict under
+# seven days, because an expired token makes every push step go red only
+# AFTER the next tenant push. An opaque token gets a line naming where its
+# expiry lives, not a guess. Rotation either way: new token |
+# scripts/hub-secret-set.sh floxhub-token; push; agent recreate.
+. "$HUB/scripts/lib/sops-secret.sh"
+if fhtok=$(hub_sops_secret floxhub-token 2>/dev/null) && [ -n "$fhtok" ]; then
+  fhlen=${#fhtok}
+  fhpayload=$(printf '%s' "$fhtok" | cut -d. -f2 | tr '_-' '/+')
+  case $(( ${#fhpayload} % 4 )) in 2) fhpayload="$fhpayload==";; 3) fhpayload="$fhpayload=";; esac
+  fhexp=$(printf '%s' "$fhpayload" | base64 -d 2>/dev/null | grep -oE '"exp": *[0-9]+' | grep -oE '[0-9]+$')
+  unset fhtok fhpayload
+  if [ -n "$fhexp" ]; then
+    fhdays=$(( ( fhexp - $(date +%s) ) / 86400 ))
+    printf "%-18s expires %s (%s day(s))\n" "floxhub-token" "$(date -u -d "@$fhexp" +%Y-%m-%dT%H:%MZ)" "$fhdays"
+    if [ "$fhdays" -lt 0 ]; then
+      note "floxhub-token: EXPIRED $(( -fhdays )) day(s) ago - every flox push step skips or fails until it is rotated (docs/flox-findings.md)"
+    elif [ "$fhdays" -lt 7 ]; then
+      note "floxhub-token: expires in $fhdays day(s) - rotate now: flox auth login; flox auth token | scripts/hub-secret-set.sh floxhub-token; push; agent recreate"
+    fi
+  else
+    printf "%-18s present (opaque, %s chars) - lifetime is set on hub.flox.dev, not readable here\n" "floxhub-token" "$fhlen"
+  fi
+else
+  printf "%-18s not in secrets/ac-box.yaml - flox tenants cannot push generations\n" "floxhub-token"
+fi
+
 echo
 echo "===== CI: newest main build per pipeline, against origin's HEAD ====="
 # What Buildkite did with the push origin holds. Until 16 Sep 2026 the only

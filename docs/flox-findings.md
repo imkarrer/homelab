@@ -265,11 +265,16 @@ render failure is attributable.
   `imkarrer/hub-spike-2026-09-18` (public, generations 1–4) needs the web
   UI. A CI that pushes on every green build accumulates generations with
   no CLI to prune them.
-- **The FloxHub token is a 30-day Auth0 JWT** (this one expires
-  2026-10-18) and there is no service-token type, so CI's push credential
-  rotates monthly by hand (`hub-secret-set.sh floxhub-token`). `flox push`
-  honours `FLOX_FLOXHUB_TOKEN` non-interactively (verified with the config
-  file moved aside), which is how the agent carries it — nothing persisted.
+- **Two token kinds.** What `flox auth token` prints after a browser login
+  is a 30-day Auth0 JWT (the spike's, expiring 2026-10-18). What the
+  operator issued on hub.flox.dev for CI is an opaque `flox…`-prefixed
+  token (61 chars, no JWT structure) — so a CI-shaped token *does* exist,
+  correcting this record's first version; its lifetime is set on FloxHub
+  and is not readable from the token. `flox push` honours
+  `FLOX_FLOXHUB_TOKEN` non-interactively with either (the JWT verified with
+  the config file moved aside; the opaque one by home-arcade build 6's
+  push), which is how the agent carries it — nothing persisted. `hub-status`
+  decodes a JWT's expiry and names the FloxHub setting for the other kind.
   Also: `flox gc` runs a full `nix store gc` — never in a tenant unit.
 
 ## 6. Version coupling — partial (answered for the box and dev; CI's copy is by hand)
