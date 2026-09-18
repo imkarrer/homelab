@@ -622,7 +622,7 @@ in
               # Clone fresh per job: a few seconds against github.com, and
               # a plugin fix is live at the next job rather than the next
               # rm -rf by hand.
-              BUILDKITE_AGENT_PLUGINS_ALWAYS_CLONE_FRESH = "true";
+              BUILDKITE_PLUGINS_ALWAYS_CLONE_FRESH = "true"; # the agent's own spelling (`start --help`)
               # The store, opened in-process (header). Explicit, not `auto`.
               NIX_REMOTE = "local";
               NIX_USER_CONF_FILES = "${pluginNixConf}:${jobNixConf}";
