@@ -233,6 +233,30 @@ in
   };
 
   config = mkIf cfg.enable {
+    # The cache CI fills is a substituter for the box itself. ADR 0009's
+    # deploy edge warms a flox tenant's environment on the box with one
+    # activation; agent-hub's flake packages (the ik_llama.cpp fork,
+    # stable-diffusion.cpp) exist in no cache but this one, so without this
+    # the first activation compiles them through nix-daemon -- unfenced, in
+    # system.slice, on 56 threads beside the race servers. MinIO is loopback
+    # only (127.0.0.1:9000, header above), the bucket is anonymous-download
+    # since ac-host 141280e (minio-init.sh), and the two keys are the public
+    # halves of the signing pairs already listed in every pipeline's
+    # S3_CACHE_PUBLIC_KEY. Ordered after cache.nixos.org and cache.flox.dev
+    # (mkOrder 1600 in modules/platform/flox.nix): a miss there is a
+    # connection to loopback, and while ac-host-ci is down nix logs one
+    # warning per query and moves on -- the same behaviour as any
+    # unreachable substituter. The bucket path is fixed by ac-host's
+    # compose env (S3_CACHE_BUCKET); the name is repeated here rather than
+    # read, because the closure cannot read a tenant's env file.
+    nix.settings = {
+      substituters = lib.mkOrder 1700 [ "http://127.0.0.1:9000/flox-binary-cache" ];
+      trusted-public-keys = [
+        "flox-binary-cache-1:pSpP6x540XtBh+IMvmW8XrRHJDtIi+b31uvvIA0PyR0="
+        "flox-binary-cache-2:ESa71iIsMeX6Wu7EBiXXZlJraWI0HF4xdOF/ivG4UTo="
+      ];
+    };
+
     # NOT set here: virtualisation.docker.enable. The platform layer
     # (modules/platform/docker.nix) turns the daemon on the moment any
     # tenant declares needsDocker = true, and hosts/ac-box/tenants.nix's `ci`
