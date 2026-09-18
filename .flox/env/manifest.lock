@@ -1,0 +1,199 @@
+{
+  "lockfile-version": 1,
+  "manifest": {
+    "schema-version": "1.14.0",
+    "install": {
+      "bash": {
+        "pkg-path": "bash"
+      },
+      "buildkite-agent": {
+        "pkg-path": "buildkite-agent",
+        "version": "3.137.2"
+      },
+      "git": {
+        "pkg-path": "git"
+      },
+      "minio": {
+        "pkg-path": "minio",
+        "pkg-group": "minio"
+      },
+      "minio-client": {
+        "pkg-path": "minio-client",
+        "pkg-group": "minio"
+      }
+    },
+    "hook": {},
+    "options": {
+      "systems": [
+        "x86_64-linux"
+      ]
+    },
+    "services": {
+      "minio": {
+        "command": "exec minio server \"${CI_MINIO_DATA:-$FLOX_ENV_CACHE/minio}\" --address 127.0.0.1:9000 --console-address 127.0.0.1:9001"
+      }
+    }
+  },
+  "packages": [
+    {
+      "attr_path": "minio",
+      "broken": false,
+      "derivation": "/nix/store/lxsqikdfjfy5ifhi5ixm24zlhznz4q6z-minio-2025-10-15T17-29-55Z.drv",
+      "description": "S3-compatible object storage server",
+      "install_id": "minio",
+      "license": "AGPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=b12141ef619e0a9c1c84dc8c684040326f27cdcc",
+      "name": "minio-2025-10-15T17-29-55Z",
+      "pname": "minio",
+      "rev": "b12141ef619e0a9c1c84dc8c684040326f27cdcc",
+      "rev_count": 982522,
+      "rev_date": "2026-04-18T21:33:21Z",
+      "scrape_date": "2026-04-21T07:45:18.102815Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2025-10-15T17-29-55Z",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/hl2bj7jzn9m0yv2fgn36kjv7avr7dcqp-minio-2025-10-15T17-29-55Z"
+      },
+      "system": "x86_64-linux",
+      "group": "minio",
+      "priority": 5
+    },
+    {
+      "attr_path": "minio-client",
+      "broken": false,
+      "derivation": "/nix/store/kd5qnjl7sxg7f8iicp8074ag8aisy0x2-minio-client-2025-08-13T08-35-41Z.drv",
+      "description": "Replacement for ls, cp, mkdir, diff and rsync commands for filesystems and object storage",
+      "install_id": "minio-client",
+      "license": "Apache-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=b12141ef619e0a9c1c84dc8c684040326f27cdcc",
+      "name": "minio-client-2025-08-13T08-35-41Z",
+      "pname": "minio-client",
+      "rev": "b12141ef619e0a9c1c84dc8c684040326f27cdcc",
+      "rev_count": 982522,
+      "rev_date": "2026-04-18T21:33:21Z",
+      "scrape_date": "2026-04-21T07:45:18.106500Z",
+      "stabilities": [
+        "stable",
+        "staging",
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2025-08-13T08-35-41Z",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/mdhfwmprv0frdz9f6h01s58y53qvl9j7-minio-client-2025-08-13T08-35-41Z"
+      },
+      "system": "x86_64-linux",
+      "group": "minio",
+      "priority": 5
+    },
+    {
+      "attr_path": "bash",
+      "broken": false,
+      "derivation": "/nix/store/wm6p6jx1r4zbdpwwcnfkm1m84hz0m1rk-bash-interactive-5.3p15.drv",
+      "description": "GNU Bourne-Again Shell, the de facto standard shell on Linux (for interactive use)",
+      "install_id": "bash",
+      "license": "GPL-3.0-or-later",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=b1b875982b17dabde9b4a37f3e229e74913e6db3",
+      "name": "bash-interactive-5.3p15",
+      "pname": "bash",
+      "rev": "b1b875982b17dabde9b4a37f3e229e74913e6db3",
+      "rev_count": 1074753,
+      "rev_date": "2026-09-16T08:07:56Z",
+      "scrape_date": "2026-09-17T06:22:01.168435Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "5.3p15",
+      "outputs_to_install": [
+        "man",
+        "out",
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/40xjyz9n2cnn2x77yjwm7idk0b26bb6d-bash-interactive-5.3p15-debug",
+        "dev": "/nix/store/l472345nc50yyj2sds4qwk45hdrcrmrf-bash-interactive-5.3p15-dev",
+        "doc": "/nix/store/4r8b0qhgv370qw4avxc1r607fcfzq8sr-bash-interactive-5.3p15-doc",
+        "info": "/nix/store/8hldgnza4czvm1wz11lpk7i48lclpm8i-bash-interactive-5.3p15-info",
+        "man": "/nix/store/2qdkkyyrf2hxwmykimcnnb1ksd6cff4a-bash-interactive-5.3p15-man",
+        "out": "/nix/store/2ndah67h0z5m31v2wkdmg2md4380ggr5-bash-interactive-5.3p15"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "buildkite-agent",
+      "broken": false,
+      "derivation": "/nix/store/q2blfhnq5ms4gdz2pv3hfv40vvdv4hlk-buildkite-agent-3.137.2.drv",
+      "description": "Build runner for buildkite.com",
+      "install_id": "buildkite-agent",
+      "license": "MIT",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=b1b875982b17dabde9b4a37f3e229e74913e6db3",
+      "name": "buildkite-agent-3.137.2",
+      "pname": "buildkite-agent",
+      "rev": "b1b875982b17dabde9b4a37f3e229e74913e6db3",
+      "rev_count": 1074753,
+      "rev_date": "2026-09-16T08:07:56Z",
+      "scrape_date": "2026-09-17T06:22:01.294093Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "3.137.2",
+      "outputs_to_install": [
+        "out"
+      ],
+      "outputs": {
+        "out": "/nix/store/n7ma9aig1bfikq10ijwyrdyg03xrb0gs-buildkite-agent-3.137.2"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    },
+    {
+      "attr_path": "git",
+      "broken": false,
+      "derivation": "/nix/store/5rkd99cklwdkxksl31vx4rpzdi4bl58a-git-2.55.0.drv",
+      "description": "Distributed version control system",
+      "install_id": "git",
+      "license": "GPL-2.0",
+      "locked_url": "https://github.com/flox/nixpkgs?rev=b1b875982b17dabde9b4a37f3e229e74913e6db3",
+      "name": "git-2.55.0",
+      "pname": "git",
+      "rev": "b1b875982b17dabde9b4a37f3e229e74913e6db3",
+      "rev_count": 1074753,
+      "rev_date": "2026-09-16T08:07:56Z",
+      "scrape_date": "2026-09-17T06:22:03.295367Z",
+      "stabilities": [
+        "unstable"
+      ],
+      "unfree": false,
+      "version": "2.55.0",
+      "outputs_to_install": [
+        "out",
+        "out"
+      ],
+      "outputs": {
+        "debug": "/nix/store/kad4xijqzqlxmrsl730d2kg62jnljvih-git-2.55.0-debug",
+        "doc": "/nix/store/b3f5zvzp33c79pa6pdpyg7kc9hah1826-git-2.55.0-doc",
+        "out": "/nix/store/msr1v91ybfw6j12rs5mfl8ghb2rqsnsr-git-2.55.0"
+      },
+      "system": "x86_64-linux",
+      "group": "toplevel",
+      "priority": 5
+    }
+  ]
+}

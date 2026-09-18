@@ -1,0 +1,92 @@
+# The ci tenant as a flox environment (homelab ADR 0009, step 3).
+#
+# This file is the tenant: the Buildkite agent that builds and deploys every
+# tree in this hub, and the loopback MinIO that is its Nix binary cache,
+# spelled as packages instead of two containers (ac-host's
+# compose/docker-compose.buildkite.yml, which this retires). It lives at the
+# root of homelab because the CI tenant IS the hub's: there is no tree of its
+# own to hold it, and modules/tenant/environment-pull.nix keeps a tenant's
+# environment as a checkout of its tree at a sha with `.flox/` at the root
+# (the tree kind), so the checkout on the box is this repo -- which also
+# puts hub/ci/hooks and hub/ci/minio-init.sh, the two files the stubs read
+# at run time, beside the lock the same way agent-hub's llama-swap.yaml is.
+#
+# One stub per process (docs/flox-findings.md 2), declared by
+# modules/ci/default.nix when homelab.ci.native.enable is on:
+#
+#   ac-host-ci.service             flox activate -d <env> -- buildkite-agent start
+#   ac-host-ci-minio.service       flox activate -d <env> -- minio server ...
+#   ac-host-ci-minio-init.service  flox activate -d <env> -- bash <env>/hub/ci/minio-init.sh
+#
+# What is NOT here, on purpose: flox itself (the agent's flox is the box's,
+# modules/platform/flox.nix from flake.nix's pin -- which is what makes the
+# lock every tenant's CI reads and the lock the box reads the same flox,
+# findings 6); nix (the host's, on the unit's PATH; jobs open the store
+# directly as root, NIX_REMOTE=local, so their builds run in the unit's
+# own cgroup -- modules/ci's header); docker (the host daemon's CLI, for the
+# ac-host pipeline's compose and containerize steps); the secrets (the
+# sops-rendered ci-env, EnvironmentFile= on the units, never [vars]); and
+# every host fact -- ports, paths, the slice -- which are the closure's.
+schema-version = "1.14.0"
+
+
+## Install ------------------------------------------------------------
+## The two processes, the client that provisions the bucket, and what
+## the agent needs at every job: git for the checkout, bash for the
+## hooks (Buildkite sources them) and for minio-init.sh.
+## ---------------------------------------------------------------------
+[install]
+# The agent, pinned to the version the container ran (3.137.2, read from
+# ac-host-ci-agent-1 on 18 Sep 2026) so the cutover changes the process
+# boundary and nothing else. Unpinned, the catalog page that also carries
+# minio resolves it to 3.89.0.
+buildkite-agent.pkg-path = "buildkite-agent"
+buildkite-agent.version = "3.137.2"
+git.pkg-path = "git"
+bash.pkg-path = "bash"
+
+# The cache. Its own pkg-group: no single catalog page has both
+# buildkite-agent 3.137.2 and minio, and the two share nothing at run
+# time. The box's container ran RELEASE.2025-09-07 (minio/minio:latest,
+# pulled 6 Sep); a newer server reads that on-disk format, and the data
+# migration in docs/runbook-ci-native-cutover.md is a copy of the volume,
+# not a re-import. mc is what hub/ci/minio-init.sh provisions the bucket,
+# its anonymous-download policy and the flox-cache user with.
+minio.pkg-path = "minio"
+minio.pkg-group = "minio"
+minio-client.pkg-path = "minio-client"
+minio-client.pkg-group = "minio"
+
+
+## Vars ---------------------------------------------------------------
+## Empty, as agent-hub's is and for the same reason: a [vars] value
+## overrides whatever the caller exported (findings, "Beyond the six"),
+## and everything this tenant reads -- the agent token, the cache keys,
+## the paths -- is the unit's to set.
+## ---------------------------------------------------------------------
+[vars]
+
+
+## Hook ---------------------------------------------------------------
+## Nothing. The stubs set every variable (modules/ci), and the plugin the
+## jobs run (imkarrer/flox-buildkite-plugin) has hooks of its own; the
+## agent-level hook that bridges the two is hub/ci/hooks/environment,
+## which the agent sources at every job, not this file.
+## ---------------------------------------------------------------------
+[hook]
+
+
+## Services -- the developer's shell, not the production units ---------
+## `flox activate --start-services` for a laptop that wants a cache to
+## push to; on the box each process is a unit (findings 2). The agent is
+## deliberately not a service here: an agent that registers into the
+## cluster from a laptop would take the box's jobs.
+## ---------------------------------------------------------------------
+[services.minio]
+command = 'exec minio server "${CI_MINIO_DATA:-$FLOX_ENV_CACHE/minio}" --address 127.0.0.1:9000 --console-address 127.0.0.1:9001'
+
+
+## Options ------------------------------------------------------------
+[options]
+# The box and the hub's WSL are the only places this activates.
+systems = ["x86_64-linux"]

@@ -1,0 +1,53 @@
+#!/usr/bin/env bash
+# The agent-level `environment` hook for the native Buildkite agent
+# (ac-host-ci.service, modules/ci/default.nix; BUILDKITE_HOOKS_PATH points
+# at this directory in the environment checkout). Buildkite SOURCES agent
+# hooks into the job's bootstrap shell before checkout and before any
+# plugin hook, so an `export` here reaches every step and every plugin --
+# including imkarrer/flox-buildkite-plugin's own environment hook, which
+# runs after checkout.
+#
+# What it does is what the compose file used to do by interpolation, and
+# what a systemd unit cannot: Environment= and EnvironmentFile= expand
+# nothing, so a variable DERIVED from a secret is assembled here, from the
+# secret the unit's EnvironmentFile= (the sops-rendered ci-env) already
+# carries. Values are never echoed; the agent redacts *_TOKEN, *_SECRET_KEY
+# and *_ACCESS_KEY in job logs regardless.
+# No `set -e`/`set -u`: this file is sourced, so a shell option set here would
+# be the bootstrap's, not this hook's.
+
+# 1. The job must not look like a systemd unit. The agent is one, and
+#    systemd sets INVOCATION_ID (and JOURNAL_STREAM) in every service
+#    process; a job inherits them, and a tenant manifest's hook reads
+#    INVOCATION_ID as "under a unit, the host set every variable" (agent-hub's
+#    manifest, homelab-158.1) -- so a job would be told to set the box's
+#    seven variables itself, loudly. Clear both before anything else.
+unset INVOCATION_ID JOURNAL_STREAM
+
+# 2. The cache credential under the names the plugin's hooks and `nix copy`
+#    read (AWS_*), from the names the rendered file spells (S3_CACHE_*).
+#    Empty stays empty: the plugin then falls back to cluster secrets, of
+#    which there are none, and says so.
+export AWS_ACCESS_KEY_ID="${S3_CACHE_ACCESS_KEY_ID:-}"
+export AWS_SECRET_ACCESS_KEY="${S3_CACHE_SECRET_ACCESS_KEY:-}"
+
+# 3. The one private tenant repo, cloned over HTTPS: git rewrites exactly
+#    that repo's URL to carry the token (a prefix match, so the .git suffix
+#    Buildkite clones with is covered). Every other github.com URL is
+#    untouched, and the agent logs the URL it was given, not the rewritten
+#    one. Absent token: no rewrite, and a private clone fails the way it
+#    would anywhere. Fine-grained, Contents read only.
+if [ -n "${BUILDKITE_CLONE_TOKEN:-}" ]; then
+  export GIT_CONFIG_COUNT=1
+  export GIT_CONFIG_KEY_0="url.https://x-access-token:${BUILDKITE_CLONE_TOKEN}@github.com/imkarrer/inquire-platform.insteadOf"
+  export GIT_CONFIG_VALUE_0="https://github.com/imkarrer/inquire-platform"
+fi
+
+# 4. The plugin's environment hook, finding flox pre-installed, checks for
+#    a running nix-daemon with pgrep and otherwise starts one by hand as
+#    root. The box's daemon is socket-activated and idle until a client
+#    connects, so touch the socket once: the real daemon comes up and the
+#    plugin has nothing to start. Jobs themselves do not use it (NIX_REMOTE
+#    is local on this agent; modules/ci says why), so a failure here is
+#    only the plugin's noise, never the job's.
+nix --extra-experimental-features nix-command store info --store daemon >/dev/null 2>&1 || true
