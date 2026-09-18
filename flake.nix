@@ -65,7 +65,19 @@
     # box in the deploy window, every time this pin moves. The cost of not
     # following is the lock carrying flox's inputs (crane, fenix, its
     # nixpkgs) and the closure carrying a second glibc/nix -- accepted.
-    flox.url = "github:flox/flox/v1.14.0";
+    #
+    # v1.16.0 (homelab-158.15, 18 Sep 2026): /nix/store/hrrd0sda...-flox-1.16.0-g3ed8295,
+    # 109 paths / 378 MB on cache.flox.dev, substituted in 2 s on WSL. Read
+    # docs/flox-upgrade-1.16.md before moving this again. One trap from
+    # v1.16.0 on: flox's OWN flake spells its substituter
+    # "https://cache.flox.dev?priority=50", which an untrusted nix user's
+    # trusted-substituters (the bare URL) does not match, so
+    # `nix build --accept-flake-config <this pin>` -- what
+    # scripts/hub-gates.sh does on WSL -- silently compiles flox unless
+    # cache.flox.dev is also passed as --extra-substituters or the WSL
+    # nix.conf lists the ?priority=50 spelling. root (the box, CI) is a
+    # trusted user and unaffected.
+    flox.url = "github:flox/flox/v1.16.0";
   };
 
   # flox's own flake declares these same two settings, and hub-gates.sh
