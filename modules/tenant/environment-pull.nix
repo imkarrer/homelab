@@ -411,7 +411,10 @@ let
           # touches anything (header, step 1).
           locks=""
           scratch=""
-          cleanup() { [ -n "$scratch" ] && rm -rf "$scratch"; }
+          # `-z … ||`, not `-n … &&`: bash makes an EXIT trap's last status the
+          # script's, and with no scratch (the tree kind) `[ -n "" ] &&` is 1 --
+          # every agent-hub pull ended "failed" after applying (18 Sep 15:22).
+          cleanup() { [ -z "$scratch" ] || rm -rf "$scratch"; }
           trap cleanup EXIT
 
           if [ "$kind" = tree ]; then
