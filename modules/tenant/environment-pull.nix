@@ -299,8 +299,17 @@ let
           # that file and otherwise carries the edit over silently, and a
           # drifted lock activated at the next sha is the drift this whole
           # edge exists to prevent. Untracked files (.flox/run, cache, log)
-          # are the environment's own and not looked at.
-          dirty=$(as_user git -C "$dir" status --porcelain --untracked-files=no)
+          # are the environment's own and not looked at. Only once there IS
+          # a checkout: a fresh `clone --no-checkout` has HEAD and an empty
+          # worktree, which `status` reports as every tracked file deleted,
+          # and the first pull on the box (18 Sep 2026, 08:33) refused
+          # itself on exactly that. Nothing can have been edited in place
+          # before anything was checked out.
+          dirty=""
+          if as_user git -C "$dir" rev-parse --verify --quiet HEAD >/dev/null \
+             && [ -n "$(as_user git -C "$dir" ls-files 2>/dev/null | head -1)" ]; then
+            dirty=$(as_user git -C "$dir" status --porcelain --untracked-files=no)
+          fi
           if [ -n "$dirty" ]; then
             refuse "$dir has tracked files changed in place (a hand edit or re-lock; land it or discard it):
           $dirty"
