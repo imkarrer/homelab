@@ -22,9 +22,11 @@ agents:
 #     keeps a trigger build from staging the pre-bump main sha over
 #     whatever was already queued.
 #   - a trigger from a flox tenant's pipeline on green carrying
-#     HOMELAB_STAGE_ENVIRONMENT (agent-hub; ADR 0009): ONLY
-#     queue-environment, which stages that tenant's sha as its
-#     environment on the box. No gate runs here -- the tenant's pipeline
+#     HOMELAB_STAGE_ENVIRONMENT (agent-hub, arcade; ADR 0009): ONLY
+#     queue-environment, which stages that tenant's sha (agent-hub) or
+#     FloxHub generation (arcade: HOMELAB_STAGE_GENERATION +
+#     HOMELAB_STAGE_ENV beside the sha) as its environment on the box.
+#     No gate runs here -- the tenant's pipeline
 #     is the gate for a flox tenant (ADR 0009, "The gate per flox tenant
 #     is the tenant's") -- and nothing about the closure is staged.
 #
@@ -47,7 +49,11 @@ steps:
   # /var/lib/homelab/pending-environment-<tenant>.json and nothing else;
   # same mount, same skip-when-absent posture, same HAZARD 2 discipline as
   # queue-closure below. The tenant passes its own branch and build URL
-  # because in a trigger build BUILDKITE_BRANCH is homelab's.
+  # because in a trigger build BUILDKITE_BRANCH is homelab's. A trigger's
+  # `env:` block lands in this build's environment as-is, so the floxhub
+  # kind's HOMELAB_STAGE_GENERATION / HOMELAB_STAGE_ENV (and the tree
+  # kind's optional HOMELAB_STAGE_TREE) reach the script without being
+  # named here; the script decides the record's kind from which are set.
   - label: ":inbox_tray: queue-environment (a flox tenant went green)"
     if: build.env("HOMELAB_STAGE_ENVIRONMENT") != null
     command: |
