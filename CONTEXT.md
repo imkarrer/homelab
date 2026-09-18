@@ -139,8 +139,9 @@ _Avoid_: restart, cycle
 **Bump-lock**:
 The act of moving one tree's pin in `homelab` so that a change in a tree the
 closure still takes as an input reaches the box. A push to such a tree
-reaches nothing until its pin is bumped. An environment is not bumped; it
-has generations.
+reaches nothing until its pin is bumped. Since 18 Sep 2026 that tree is
+`ac-host` alone; `agent-hub` and `home-arcade` are not inputs. An environment
+is not bumped; it has generations (or a staged sha).
 
 **Environment**:
 A tenant's contents — the packages and processes it runs — declared in the

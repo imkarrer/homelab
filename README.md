@@ -1,6 +1,7 @@
 # homelab
 
-Platform layer for `ac-box` (HP Z840). Owns the host; tenants are flake inputs.
+Platform layer for `ac-box` (HP Z840). Owns the host and the contract; tenants
+are flox environments, or the one flake input that is not yet (`ac-host`).
 
 Six workloads share this machine — Assetto Corsa race servers, the AC Discord
 bot, the kid arcade hub, a CPU-only LLM server, the Prometheus/Grafana stack,
@@ -30,7 +31,7 @@ Design rationale and the full migration plan (hosted, outside version control):
 | L0 | `modules/platform/` | hardware, NICs, identity, Docker daemon, Nix, sshd, boot |
 | L1 | `modules/tenant/` | the contract: schema, port registry, tiers, metrics, drain |
 | L2 | `modules/observability/`, `modules/ci/` | shared services that *consume* the contract |
-| L3 | flake inputs | `assetto`, `arcade`, `agent-hub` — declare, never reach |
+| L3 | environments | `arcade`, `agent-hub` as flox environments (a unit stub each in `hosts/ac-box/`, ADR 0009); `assetto` as the `ac-host` flake input — declare, never reach |
 
 Dependency direction is one-way: L0 knows nothing about tenants, L1 knows only
 the schema, L2 reads declarations, L3 declares without knowing its neighbours.
@@ -70,11 +71,13 @@ the cores `critical` uses — do not hard-cap `critical`.
 Renaming code is a commit; renaming a state directory is a data migration of
 races, series, content and the player whitelist.
 
-**`nixpkgs` is owned here.** The host channel is `nixos-26.05`. Tenant flake
-inputs take `inputs.nixpkgs.follows = "nixpkgs"`; a tenant must not drag its
-own nixpkgs into the closure. `agent-hub` currently pins `nixos-unstable` and
-must be made to follow — `llama-cpp` on 26.05 is version `9190`, so verify any
-`llama-server` flag against that build, not against unstable. One input
+**`nixpkgs` is owned here.** The host channel is `nixos-26.05`. A tenant flake
+input takes `inputs.nixpkgs.follows = "nixpkgs"`; a tenant must not drag its
+own nixpkgs into the closure. Since 18 Sep 2026 (`homelab-158.11`) `ac-host`
+is the only tenant input: `agent-hub` and `home-arcade` are flox environments
+whose packages come from their manifest locks, not from this pin — which is
+the ADR 0009 answer to "one pin for everyone", and why `llama-server` on the
+box is the fork the tenant's lock names rather than 26.05's `9190`. One input
 does not follow, and it is the only one: `flox`, a platform package rather than
 a tenant, whose flake builds exactly one package from its own nixpkgs and
 nothing of which enters the module composition. Following would change that
