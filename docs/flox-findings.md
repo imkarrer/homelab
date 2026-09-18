@@ -16,7 +16,21 @@ environment is either untested or a docs claim until an operator runs
 exit 7, nix "could not resolve github.com"); `unshare -rn` maps to uid 0 and
 sends flox looking in `/root`, so it is not a usable cut.
 
-## 1. Deploy-time network dependency — answered (on the box, 18 Sep 2026)
+## 1. Deploy-time network dependency — answered (on the box, 18 Sep 2026; managed environments on WSL the same day)
+
+**Managed environments** (FloxHub; full record in
+[docs/spike-floxhub-managed-environments.md](spike-floxhub-managed-environments.md)):
+a real `flox pull` builds the environment and registers its GC roots itself,
+so a tracking pull activates offline at 128–175 ms with *no* prior online
+activation — §1's failing "pulled, never activated" case was a
+`lock-manifest` simulation, not a pull. `flox activate -r` also works
+offline from `$XDG_CACHE_HOME/flox/remote/<owner>/<env>`, but it never
+refreshes even online and prompts a non-owner about trust, so it is not a
+unit shape. Pulling or activating a **public** environment needs no token.
+The consequence for the pull unit: the build now happens *inside* `flox
+pull`, so the substitute-only guard must read the generation's lock from
+floxmeta (a bare git repo at `api.flox.dev/git/<owner>/floxmeta`, one
+`<N>/env/manifest.lock` per generation) before pulling.
 
 **On the box:** the first pull (08:53 CDT) substituted every path the lock
 named from MinIO in 2 s, activated once online, and wrote the record; the
@@ -118,7 +132,24 @@ visible to whatever started `flox activate --start-services`. An
 `exit-on-failure` (or "no sentinel") mode would make `[services]` a
 production shape; without it a supervisor cannot use it.
 
-## 3. Which generation is running — partial
+## 3. Which generation is running — answered
+
+**Managed environments (FloxHub), verified logged in:** `flox push` converts
+a path environment in place — `.flox/env.json` gains `owner` and
+`floxhub_url`, `.flox/env.lock` appears with `{"rev": <floxmeta commit>,
+"local_rev": null}` — and FloxHub's record is the floxmeta git repo:
+`<N>/env/manifest.{toml,lock}` per generation plus `metadata.json` with
+`history[].current_generation`. No store paths upstream, only locks. The
+generation *number* is not in `.flox/` but is one command away offline:
+`flox generations list --json` (the live one has `last_live: null`), or
+`git --git-dir=~/.local/share/flox/meta/<owner> show <rev>:metadata.json`.
+`flox activate -g N` pins a generation and names its run link
+`.flox/run/<system>.<name>.genN-run`, so **the run link carries the
+generation**, which is the stamp `hub-status` wants. `local_rev != null`
+marks a checkout edited in place (`pull` then refuses without `--force`) —
+the managed-environment analogue of the tree kind's dirty guard.
+
+**Path environments (what `pull -g N --copy` produces):**
 
 - For a **path environment** — which is what `flox pull --copy` produces —
   **nothing** records a generation: `.flox/env.json` is
@@ -195,6 +226,20 @@ is. That is consistent with flox's contract — an OS someone else configures
 read-only** (no mandatory log write), so an environment can sit under a
 hardened supervisor; and **a hook whose exit status passes through**, so a
 render failure is attributable.
+
+### Two more, from the managed-environment spike
+
+- **`flox delete` cannot remove a FloxHub environment** ("FloxHub
+  environments cannot yet be deleted"); the throwaway
+  `imkarrer/hub-spike-2026-09-18` (public, generations 1–4) needs the web
+  UI. A CI that pushes on every green build accumulates generations with
+  no CLI to prune them.
+- **The FloxHub token is a 30-day Auth0 JWT** (this one expires
+  2026-10-18) and there is no service-token type, so CI's push credential
+  rotates monthly by hand (`hub-secret-set.sh floxhub-token`). `flox push`
+  honours `FLOX_FLOXHUB_TOKEN` non-interactively (verified with the config
+  file moved aside), which is how the agent carries it — nothing persisted.
+  Also: `flox gc` runs a full `nix store gc` — never in a tenant unit.
 
 ## 6. Version coupling — partial (answered for the box and dev; CI's copy is by hand)
 
