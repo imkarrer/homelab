@@ -139,7 +139,10 @@ in
   # options rather than repeated (compose/docker-compose.buildkite.yml had
   # them as literals), plus the two non-secret pages defaults that file
   # carried; the secret and identity values are the ci-env render's.
-  homelab.ci.native.enable = false;
+  # ON since 18 Sep 2026 (runbook step 1): pre-flight done, MinIO data
+  # copied to /var/lib/ci/minio, queue drained. The switch stops the compose
+  # stack; step 3 stages this commit's own sha and starts the pull.
+  homelab.ci.native.enable = true;
   homelab.ci.native.jobEnvironment =
     let
       ac = config.services.ac-host;
