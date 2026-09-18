@@ -33,6 +33,9 @@
 let
   ci = ../default.nix;
   stubSystemd = ./stub-systemd.nix;
+  # modules/ci writes nix.settings too (the MinIO substituter, since
+  # cb28593); the tenant harness's stub models exactly that subset.
+  stubNix = ../../tenant/tests/stub-nix.nix;
 
   mkCase =
     {
@@ -42,7 +45,7 @@ let
     let
       evaluated = lib.evalModules {
         specialArgs = { inherit pkgs; };
-        modules = [ stubSystemd ci ] ++ extraModules;
+        modules = [ stubSystemd stubNix ci ] ++ extraModules;
       };
       cfg = evaluated.config;
       svc = cfg.systemd.services.ac-host-ci or null;
