@@ -149,9 +149,52 @@ tenant. One detail the path environment adds: the link is named from
 `.flox/env.json`'s `name`, not from the directory, so the pull reads the
 name from there rather than guessing it from the tenant.
 
-## 4. Secrets — open
+## 4. Secrets — answered (nothing changes)
 
-## 5. Host facts in the manifest — open
+Every secret consumer on this box takes a **path**: Grafana's `$__file{}`,
+Alertmanager's `webhook_url_file`, unpoller's `pass`, the exporter's
+`UNIFI_PASS_FILE`, agent-hub's future `githubTokenFile`. sops-nix renders
+those paths on the host at activation and keeps rendering them; a stub
+passes the same paths to the environment as variables (`[vars]` is not
+involved — it would clobber the caller, "Beyond the six"), and
+`ConditionPathExists=` stays on the unit. The environment never sees a
+secret value, only a path the host owns. No manifest feature is needed and
+none is missing; the one rule is that a manifest `[hook]` must not source
+`/run/secrets` into the process environment, because that turns a path
+into a value the tenant's own tools can log. (`.7`, and the agent-hub
+stub, which passes seven paths and values, none secret.)
+
+## 5. Host facts in the manifest — answered (correctly out of scope; two product asks)
+
+The `.7` spike ([docs/spike-observability-as-environment.md](spike-observability-as-environment.md))
+asked the sharpest form of the question: could the observability tenant —
+eight native units whose Prometheus config is *generated from the
+contract* — run from an environment? Mechanically yes: a `[hook]` rendered
+a `promtool`-checked `prometheus.yml` from a JSON fixture into
+`$FLOX_ENV_CACHE` in 128 ms per activation, and `flox activate -- prometheus`
+served it. But three things decide against it:
+
+- **`flox activate` writes on every activation** — `.flox/log/executive.<pid>.log`,
+  never pruned, and a read-only `.flox/` fails the activation (exit 1,
+  `Permission denied`). agent-hub never noticed because `User=agent-hub`
+  owns its checkout. observability runs as five identities including
+  `DynamicUser=yes` and two `ProtectSystem=strict` sandboxes; an environment
+  under them needs a group-writable log dir and `ReadWritePaths=` holes.
+- **A hook's exit code is collapsed to 1**, and a hook failure leaves the
+  previous rendered file in place, so a bad render is a restart loop on the
+  box rather than a red gate — where `metrics.nix`'s address assertion and
+  the module's `promtool check` fail at eval today.
+- **`/etc/homelab/tenants.json` carries no `metrics`**; the contract's
+  scrape derivation lives in Nix, and moving it means a schema addition to
+  feed a shell template what a module function reads directly.
+
+So host facts arrive by environment variable from the stub (agent-hub,
+arcade), and a host-fact-*derived config file* stays where the derivation
+is. That is consistent with flox's contract — an OS someone else configures
+— and not a gap. The two asks that are: **an activation that can run
+read-only** (no mandatory log write), so an environment can sit under a
+hardened supervisor; and **a hook whose exit status passes through**, so a
+render failure is attributable.
 
 ## 6. Version coupling — partial (answered for the box and dev; CI's copy is by hand)
 
