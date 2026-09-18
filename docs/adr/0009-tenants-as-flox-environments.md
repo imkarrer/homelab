@@ -56,11 +56,21 @@ the contract.** Concretely:
   tier → slice, quiet policy, state path, secret names are *host facts about
   a tenant*, declared in `hosts/ac-box/tenants.nix` and consumed by L2. The
   manifest has no vocabulary for them and this ADR does not invent one.
-- **A flox tenant deploys through FloxHub, independently of the closure.**
-  CI `flox push`es a generation on green; the box pulls it and the unit
-  restarts under the tenant's quiet policy. A generation is the staged /
-  applied / rollback unit for that tenant, the way a closure rev is for the
-  host. `bump-lock` stops being the way a tenant change reaches the box; the
+- **A flox tenant deploys independently of the closure**, by the same
+  stage-then-apply split as ADR 0006: CI stages *what the tenant runs* on
+  the box on green, a unit on the box fetches it, activates it once online
+  (so the stub never needs the network — findings §1), records it, and
+  restarts the stub under the tenant's quiet policy. What is staged depends
+  on what the environment needs at run time, and step 1 taught the
+  distinction (findings, "Beyond the six"): a FloxHub **generation** carries
+  manifest and lock only, so it is the whole deploy unit for a tenant whose
+  runtime is entirely packages (arcade); a tenant whose environment reads
+  files from its tree (agent-hub: `llama-swap.yaml`, `sd-ui.html`) is staged
+  as its **tree at a sha**, which carries the lock too, and FloxHub would
+  be a second copy of one of its files. Either way the staged / applied /
+  rollback unit is the tenant's, the way a closure rev is the host's, and
+  the applied record is written by the pull unit, not by flox (findings §3).
+  `bump-lock` stops being the way a tenant change reaches the box; the
   closure is touched only when a host fact changes.
 - **`flox containerize` builds every image this hub builds** (bead
   `homelab-ybm`). Only tenants that are deployed *as* containers get images —
@@ -77,8 +87,8 @@ the contract.** Concretely:
 
 | Step | Tenant | Proves |
 | --- | --- | --- |
-| 1 | `agent-hub` | manifest as tenant; `flox activate` under a slice; FloxHub push/pull as the deploy edge; generation as the drift stamp. One process, `background`, drainable, and the tenant the host pin hurts most. |
-| 2 | `arcade` | `[services]` as the supervisor of two long-running processes under one unit. |
+| 1 | `agent-hub` | manifest as tenant; `flox activate` under a slice; the stage-then-apply edge with the tree at a sha as the unit; the run store path as the drift stamp. One process, `background`, drainable, and the tenant the host pin hurts most. |
+| 2 | `arcade` | two processes from one environment (findings §2 ruled out `[services]` as a supervisor: one stub per process); FloxHub push/pull as the deploy edge, since nothing here needs the tree — the generation is the unit. |
 | 3 | `ci` | `buildkite-agent` + `minio` natively from a manifest instead of two containers. The agent runs the flox plugin from a flox environment, and `ci`'s own deploy becomes a pull rather than a closure switch, which narrows HAZARD 2. |
 | 4 | `assetto` / `bot` | images via containerize (`homelab-ybm`); compose stays the runtime. |
 | 5 | `observability` | last, and possibly never. The value there is config generated from the contract; attempting it answers whether flox wants a config-generation story. |
@@ -119,10 +129,11 @@ it can land in either order. The contract's assertions still run at eval;
 what they can no longer see is the tenant's package set, which is the
 manifest lock's job.
 
-**`hub-status` gains a second kind of pending/applied pair**: the FloxHub
-generation pushed by CI against the generation the box is running, per flox
-tenant, beside the closure's rev pair. Reading the running generation off the
-box is an open question below.
+**`hub-status` gains a second kind of pending/applied pair**: what CI
+staged for each environment tenant (a sha or a generation) against what the
+box applied, with the environment's run store path as the exact stamp,
+beside the closure's rev pair. The record is the pull unit's own (findings
+§3).
 
 **`docs/architecture.md` Part II changes**, once accepted: L3 is no longer
 "flake inputs — declare, never reach" but "environments, with a stub in the
