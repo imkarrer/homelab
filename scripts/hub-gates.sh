@@ -209,6 +209,22 @@ if [ -f flake.nix ]; then
         echo "  $h: EVAL FAILED"; RC=1
       fi
     done
+    # The host evaluating is not the whole of what CI checks: the eval
+    # harnesses (modules/*/tests/eval*.nix) are flake `checks`, and a module
+    # writing an option its fixture does not stub passes the host eval and
+    # fails only there -- cb28593 (18 Sep 2026) went red in CI after this
+    # gate said PASS. --no-build: the verdicts are computed at eval time
+    # and the toplevel build stays CI's; seconds, not minutes.
+    # --accept-flake-config: the flake's nixConfig names cache.flox.dev, and
+    # nix asks about it interactively otherwise (build 44 wedged on that).
+    echo "== nix flake check --no-build =="
+    if nix flake check --no-build --accept-flake-config >/tmp/nixcheck.$$ 2>&1; then
+      echo "  all checks evaluate"
+    else
+      grep -vE "^warning: (Git tree|not writing|ignoring untrusted flake configuration setting)" /tmp/nixcheck.$$ | tail -25 | sed 's/^/  /'
+      echo "  CHECKS FAILED"; RC=1
+    fi
+    rm -f /tmp/nixcheck.$$
   else
     echo "== nix eval: $REPO is module-only, gating through the hub =="
     hubhosts=$(cd "$HUB" && nix eval --raw .#nixosConfigurations --apply 'c: builtins.concatStringsSep " " (builtins.attrNames c)' 2>/dev/null)
