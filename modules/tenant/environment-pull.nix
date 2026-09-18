@@ -551,7 +551,7 @@ let
           # home either.
           if [ "$kind" = tree ]; then
             log "activating $dir once, online, as $user (pins the GC roots)"
-            if ! as_user env FLOX_DISABLE_METRICS=true "$flox" activate -d "$dir" -- true; then
+            if ! as_user env FLOX_DISABLE_METRICS=true FLOX_AUTH_NOTIFICATIONS=false "$flox" activate -d "$dir" -- true; then
               refuse "flox activate failed at $sha; leaving $pending staged for the next firing."
             fi
           else
@@ -560,12 +560,12 @@ let
             if [ ! -e "$dir/.flox/env.json" ]; then
               install -d -o "$user" -g "$group" -m 0755 "$dir"
               log "pulling $sourceEnv into $dir as $user (tracking checkout)"
-              if ! as_user env FLOX_DISABLE_METRICS=true "$flox" pull -d "$dir" "$sourceEnv" </dev/null; then
+              if ! as_user env FLOX_DISABLE_METRICS=true FLOX_AUTH_NOTIFICATIONS=false "$flox" pull -d "$dir" "$sourceEnv" </dev/null; then
                 refuse "flox pull of $sourceEnv failed; leaving $pending staged for the next firing."
               fi
             else
               log "updating the $sourceEnv checkout at $dir"
-              if ! as_user env FLOX_DISABLE_METRICS=true "$flox" pull -d "$dir" </dev/null; then
+              if ! as_user env FLOX_DISABLE_METRICS=true FLOX_AUTH_NOTIFICATIONS=false "$flox" pull -d "$dir" </dev/null; then
                 refuse "flox pull in $dir failed; leaving $pending staged for the next firing."
               fi
             fi
@@ -580,7 +580,7 @@ let
             log "pulled $sourceEnv at upstream $(jq -r '.rev' "$dir/.flox/env.lock" | cut -c1-7) (live generation ''${pulledLive:-unknown}); pinning $gen"
             # The pinned warm (header, step 3): the stub's own command.
             log "activating generation $gen of $sourceEnv at $dir once, as $user (pins its GC roots)"
-            if ! as_user env FLOX_DISABLE_METRICS=true "$flox" activate -d "$dir" -g "$gen" -- true </dev/null; then
+            if ! as_user env FLOX_DISABLE_METRICS=true FLOX_AUTH_NOTIFICATIONS=false "$flox" activate -d "$dir" -g "$gen" -- true </dev/null; then
               refuse "flox activate -g $gen failed; leaving $pending staged for the next firing."
             fi
             # The pin (header, step 4): what the stub activates from now

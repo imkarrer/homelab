@@ -228,6 +228,10 @@ let
           s.stub.environment
           // {
             FLOX_DISABLE_METRICS = "true";
+            # flox 1.16.0 prints "! You are not logged in to FloxHub" once per
+            # start for a logged-out user (every tenant user is); a unit has no
+            # login to offer, so the notice is noise in the journal.
+            FLOX_AUTH_NOTIFICATIONS = "false";
           }
         );
       }

@@ -45,7 +45,12 @@ find_flox() {
   local pin p
   pin=$(flox_pin)
   if [ -n "$pin" ]; then
-    p=$(nix build --no-link --print-out-paths --accept-flake-config "$pin" 2>/dev/null | tail -1)
+    # --extra-substituters: flox's v1.16.0 flake spells its cache
+    # `https://cache.flox.dev?priority=50`, which an untrusted user's
+    # trusted-substituters (the bare spelling) no longer matches, so the
+    # flake's own nixConfig is ignored and nix compiles flox (~10 min).
+    # Naming the bare spelling here matches what WSL trusts.
+    p=$(nix build --no-link --print-out-paths --accept-flake-config --extra-substituters https://cache.flox.dev "$pin" 2>/dev/null | tail -1)
     if [ -n "$p" ]; then echo "$p/bin/flox"; return; fi
   else
     # A lock from before modules/platform/flox.nix has no flox node; that is
