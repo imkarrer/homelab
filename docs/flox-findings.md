@@ -73,6 +73,15 @@ below, each verified rather than read):
    `cache.flox.dev?priority=50`, which an untrusted user's
    `trusted-substituters` no longer matches — the first `nix build` of
    v1.16.0 on WSL compiled flox for ten minutes. §6.
+10. **The `.deb` installs `/usr/bin/flox` as a symlink into `/nix/store`.**
+    In a container whose `/nix` is a named volume (the CI agent's, so
+    builds persist across recreates), Docker seeds the volume from the
+    image only when the volume is first created — so upgrading the image's
+    flox leaves a dangling symlink at run time, while the image *build*
+    (no volume) works. Found on the first 1.16.0 agent recreate, 18 Sep
+    21:24 CDT: the agent registered and had no `flox`. Cost: drop the
+    volume so it re-seeds (MinIO holds every output; builds substitute),
+    and a reason the native agent (`.6`, no volume) is the right shape. §6.
 
 **What flox did well, verified**: offline activation once warmed (52–88 ms;
 a tracking pull warms itself); `activate -g N` pins a generation and stamps
