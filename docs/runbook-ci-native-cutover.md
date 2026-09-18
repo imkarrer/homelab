@@ -210,3 +210,45 @@ can stay; nothing reads them with the flag off.
 - **The daemon's slice** (`nix-daemon.service` in `batch.slice`, for
   every non-root client's builds): a platform line in
   `modules/platform/nix.nix`, not this cutover.
+
+## What the first cutover taught (18 Sep 2026, 16:30–18:20 CDT)
+
+Four things this runbook did not predict, each now fixed in git; the
+sequence above is still right, with these corrections folded in.
+
+1. **The switch does not stop the compose stack.** `ac-host-ci.service` is
+   the same unit name for the compose wrapper and the native stub, and it
+   is `restartIfChanged = false`, so the switch replaced the unit's
+   definition and left the running instance (and its containers) alone;
+   the old `ExecStop` (`compose down`) never ran. Step 2 therefore begins
+   with `systemctl stop ac-host-ci` and `docker stop`/`docker rm` of the
+   three containers (volumes kept), from ssh, before the delta rsync.
+2. **The first pull deferred forever.** The `ci` tenant's `busyCheck` was
+   `pgrep -f 'buildkite-agent bootstrap'`, which matched its own `sh -c`
+   line. Fixed as `[b]uildkite` (`2394711`). The environment was warmed
+   (the substitute-only step took seven minutes: every store path was
+   asked of the MinIO substituter, which was down — expected, slow); the
+   stubs were started by hand once (`systemctl start ac-host-ci-minio-init
+   ac-host-ci-minio ac-host-ci`) so an agent existed to build the fix,
+   and the pull's next timer run applied the record cleanly.
+3. **The plugin's hooks said `#!/bin/bash`.** NixOS has `/bin/sh` and
+   `/usr/bin/env` only; every plugin-using job (the tenants' gates) failed
+   with "perhaps the script interpreter /bin/bash is missing" while
+   homelab's own builds (no plugin) were green. Fixed upstream
+   (`flox-buildkite-plugin` `a218a63`, `#!/usr/bin/env bash`) — and then
+   the agent kept its **cached** checkout of the broken ref, because the
+   container had a fresh plugin cache at every recreate and the unit keeps
+   `/var/lib/ci/plugins`. `BUILDKITE_PLUGINS_ALWAYS_CLONE_FRESH=true` in
+   the stub's environment (`d0fedf1`; the first attempt spelled the
+   variable wrong, `1b1f681`) — which itself needed one more restart from
+   ssh, since nothing was staged for the pull to restart the agent.
+4. **Three restarts from ssh** were the price of 1–3. Each was the
+   sanctioned kind (idle agent, from a plain ssh session), and none would
+   be needed again: the fixes are in the closure and the plugin.
+
+Proofs as run: homelab build 108 on the native agent staged and switched
+`2394711` (proof 1); ac-host build 52 green end to end — containerize into
+the daemon, promote, `queue-prod` staged `bd92fa7`, pages (proof 2);
+`/homeless-shelter` absent and the agent's cgroup
+`/batch.slice/ac-host-ci.service` (proof 3); homelab builds 109/110 staged
+agent-hub `ef90152` and arcade generation 2, both applied (proof 4).

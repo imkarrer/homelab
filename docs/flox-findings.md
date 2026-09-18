@@ -533,3 +533,27 @@ never a missing lobby. 03:00 no longer reaches PyPI or Docker Hub.
 - Two more throwaway environments exist on FloxHub from proving the
   first-push and next-generation paths (`imkarrer/hub-arcade-spike`,
   `imkarrer/hub-arcade-spike-first`), and cannot be removed from the CLI.
+
+## Beyond the six — from `homelab-158.6` (the CI agent natively, 18 Sep)
+
+The agent, MinIO and its init as three root stubs in `batch.slice` from
+homelab's own environment; the agent's flox is the box's, and job builds
+run in the unit's cgroup (root's nix opens the local store in-process, so
+the sandboxed builders are the unit's children — `NIX_REMOTE=local` makes
+it explicit). What the cutover taught, beyond the runbook's own section:
+
+- **A flox-driven agent has no Ubuntu underneath.** The plugin's hooks
+  assumed `/bin/bash`; NixOS offers `/bin/sh` and `/usr/bin/env`. Portable
+  shebangs are the only kind an environment can promise.
+- **`flox activate -- buildkite-agent start` is a fine unit shape**: flox
+  exec's into the agent, `MainPID` is the agent, `systemctl restart`
+  re-registers it in seconds, and a job's `flox activate` nests over the
+  agent's. The plugin reports `Using pre-installed flox (1.16.0…)` — the
+  box's.
+- **Substitute-only warm with a substituter down is slow, not wrong**: nix
+  asks every path of the dead MinIO before falling through to
+  cache.nixos.org (~7 min for ~100 paths). A pull unit that knows its
+  tenant *is* the substituter could skip it; recorded, not built.
+- The 11-hour-old finding stands sharper: the `.deb`-in-a-`/nix`-volume
+  trap (item 10) is gone entirely once the agent is native — there is no
+  image, no volume, one pin.
