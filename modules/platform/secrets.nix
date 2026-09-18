@@ -287,6 +287,20 @@
       # for that repo alone, so the agent holds no credential for any other.
       # Minted 18 Sep 2026.
       buildkite-clone-token = { };
+      # CI's FloxHub credential (ADR 0009 step 2, homelab-158.5): what
+      # home-arcade's scripts/ci_push.sh pushes a green environment with,
+      # forwarded to jobs as FLOX_FLOXHUB_TOKEN the way HOMELAB_PUSH_TOKEN
+      # is; absent, the push step skips and says so. It is `flox auth
+      # token` from the operator's `flox auth login` on WSL: an Auth0 JWT
+      # with a 30-DAY lifetime (minted 18 Sep 2026 15:32 UTC, expires 18
+      # Oct 2026), the only credential shape the CLI offers -- there is no
+      # service token and no refresh path, so this rotates monthly, by
+      # hand: `flox auth login` (a browser device flow), then `flox auth
+      # token | scripts/hub-secret-set.sh floxhub-token`, push, and the
+      # agent bounce the ci-env comment below describes. The box's own
+      # pull unit does NOT use it: pulling a public environment needs no
+      # credential (modules/tenant/environment-pull.nix, "KIND = FLOXHUB").
+      floxhub-token = { };
     };
 
     # /var/lib/ac-host/.env, as of the box on 13 Sep 2026 (sha256 d85835fd...,
@@ -435,6 +449,16 @@
     #   BUILDKITE_AGENT_TOKEN the agent registers into the Default cluster;
     #                         GET /v2/organizations/isaac-karrer/agents shows
     #                         cluster non-null and queue self.
+    #   FLOX_FLOXHUB_TOKEN    read by `flox push` in the job's environment
+    #                         (home-arcade ci_push.sh) at each push; nothing
+    #                         stores it, so the new value is live from the
+    #                         first job after the bounce. Rotates MONTHLY
+    #                         (the secret's comment above: a 30-day JWT), and
+    #                         each rotation is this same render + bounce.
+    #                         An expired token is a failed push step on
+    #                         home-arcade main -- the tenant's build goes red
+    #                         there, not here, and hub-status shows the
+    #                         generation behind the tree's HEAD.
     templates.ci-env = {
       content = ''
         # Rendered by sops-nix from homelab's modules/platform/secrets.nix; not hand-edited.
@@ -453,6 +477,7 @@
         AC_PAGES_PUSH=1
         HOMELAB_PUSH_TOKEN=${config.sops.placeholder.homelab-push-token}
         BUILDKITE_CLONE_TOKEN=${config.sops.placeholder.buildkite-clone-token}
+        FLOX_FLOXHUB_TOKEN=${config.sops.placeholder.floxhub-token}
       '';
     };
   };
