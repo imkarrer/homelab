@@ -614,6 +614,15 @@ in
               BUILDKITE_BUILD_PATH = "${stateDir}/builds";
               BUILDKITE_HOOKS_PATH = "${envDir}/hub/ci/hooks";
               BUILDKITE_PLUGINS_PATH = "${stateDir}/plugins";
+              # A plugin checkout is cached by ref and reused across jobs;
+              # the container had a fresh cache at every recreate, this unit
+              # keeps ${stateDir}/plugins. `imkarrer/flox#main` is a moving
+              # ref, and the first native build (18 Sep 2026) ran a cached
+              # copy whose hooks said #!/bin/bash on a host that has none.
+              # Clone fresh per job: a few seconds against github.com, and
+              # a plugin fix is live at the next job rather than the next
+              # rm -rf by hand.
+              BUILDKITE_AGENT_PLUGINS_ALWAYS_CLONE_FRESH = "true";
               # The store, opened in-process (header). Explicit, not `auto`.
               NIX_REMOTE = "local";
               NIX_USER_CONF_FILES = "${pluginNixConf}:${jobNixConf}";
