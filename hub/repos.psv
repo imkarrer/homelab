@@ -1,5 +1,14 @@
 # Source trees homelab coordinates. Fields: name|path|remote|deploy|agent-push
-#   deploy      how the tree reaches ac-box ("buildkite" or "none")
+#   deploy      how the tree reaches ac-box:
+#                 buildkite    its own pipeline stages it and something on the box
+#                              applies it (ac-host: queue-prod + the 03:00 build;
+#                              homelab: queue-closure + homelab-deploy)
+#                 environment  as a flox environment (ADR 0009): its pipeline
+#                              stages a sha (agent-hub) or a FloxHub generation
+#                              (home-arcade) and <tenant>-environment-pull on
+#                              the box applies it; nothing of the tree is in
+#                              homelab's closure, and bump-lock is not involved
+#                 none         nothing carries it
 #   agent-push  may an agent push this remote unattended, on green gates? ("yes" or "ask")
 ac-host|/home/nixos/src/ac-host|git@github.com:imkarrer/ac-host|buildkite|yes
 # homelab: deploy=buildkite as of ADR 0006; since ADR 0008 (15 Sep) the
@@ -14,10 +23,15 @@ ac-host|/home/nixos/src/ac-host|git@github.com:imkarrer/ac-host|buildkite|yes
 # 80 s, home-arcade 789f994 via bump-lock 3db878b). The gate is still the
 # gate: nothing is pushed red, and hub-status reads every build back.
 # agent-push governs agents in WSL. CI's own bump-lock commits (scripts/
-# hub-bump-lock.sh, triggered by a tenant pipeline on green) are a different
+# hub-bump-lock.sh, triggered by ac-host's pipeline on green) are a different
 # actor and are gated by HOMELAB_PUSH_TOKEN existing on the agent -- see
 # docs/architecture.md Part III row 24. Both mean the same thing once the
 # deploy unit is live: a push to homelab main is a system switch at 03:30.
 homelab|/home/nixos/src/homelab|git@github.com:imkarrer/homelab|buildkite|yes
-agent-hub|/home/nixos/src/agent-hub|git@github.com:imkarrer/agent-hub|none|yes
-home-arcade|/home/nixos/src/home-arcade|git@github.com:imkarrer/home-arcade|none|yes
+# agent-hub, home-arcade: deploy=environment since 18 Sep 2026 (homelab-158.11).
+# Was `none` -- true only in the sense that no pipeline carried the tree to the
+# box directly; it reached the box through homelab's closure when flake.lock
+# moved (row 24). Now the tree's own green build is what reaches the box, one
+# hop, and hub-status prints the staged/applied pair per tenant.
+agent-hub|/home/nixos/src/agent-hub|git@github.com:imkarrer/agent-hub|environment|yes
+home-arcade|/home/nixos/src/home-arcade|git@github.com:imkarrer/home-arcade|environment|yes

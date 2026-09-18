@@ -4,7 +4,8 @@
 # catching it here costs seconds, catching it in CI costs a stalled pipeline.
 # Usage: hub-gates.sh [repo] [path]   (default: ac-host, at its registry path)
 #   path: gate a worktree of <repo> instead of the registry checkout --
-#   the registry still names the flake input to override for module-only trees.
+#   the registry still names the flake input to override for a module-only
+#   tree the hub composes (ac-host), and says which trees it does not (deploy).
 set -uo pipefail
 export NIX_CONFIG="experimental-features = nix-command flakes"
 
@@ -13,6 +14,10 @@ REG="${HUB_REGISTRY:-$HUB/hub/repos.psv}"
 REPO="${1:-ac-host}"
 PATHX=$(awk -F'|' -v r="$REPO" '$1==r{print $2}' "$REG")
 [ -n "$PATHX" ] || { echo "unknown repo: $REPO (see $REG)"; exit 2; }
+# How the tree reaches ac-box (the registry's `deploy` column): "environment"
+# means through its own edge (ADR 0009), never through the hub's closure,
+# which decides below whether there is a composition to evaluate at all.
+DEPLOY=$(awk -F'|' -v r="$REPO" '$1==r{print $4}' "$REG")
 if [ -n "${2:-}" ]; then
   [ -d "$2" ] || { echo "no such path: $2"; exit 2; }
   PATHX=$(cd "$2" && pwd)
@@ -176,6 +181,18 @@ fi
 # they reference, so it is the only place their breakage is visible -- and it
 # checks the real composition rather than the module in isolation.
 #
+# Unless nothing composes it. A tree whose registry row says deploy=environment
+# (agent-hub, home-arcade since 18 Sep 2026, homelab-158.11) reaches ac-box as
+# a flox environment -- a sha or a FloxHub generation its own CI stages, the
+# box's pull unit applies -- and its flake is an input of no host: the unit
+# that runs it is a stub in homelab's closure, and the box owes it nothing
+# from its .nix. For such a tree the gate IS the manifest gates above (the
+# lock satisfying the manifest, ci_test/ci_lint under the pinned flox), which
+# are what CI runs before it pushes; a nixosModules.* left in the tree reaches
+# nothing and is said so below rather than evaluated against a host it is not
+# part of. Not a SKIPPED entry: a composition that does not exist is not a
+# gate that failed to run.
+#
 # Discovery is DERIVED, not declared:
 #   consuming tree   $HUB -- the tree this script ships in. homelab is the hub
 #                    for all five trees (AGENTS.md) and the only one that owns
@@ -225,6 +242,12 @@ if [ -f flake.nix ]; then
       echo "  CHECKS FAILED"; RC=1
     fi
     rm -f /tmp/nixcheck.$$
+  elif [ "$DEPLOY" = environment ]; then
+    echo "== nix eval: $REPO deploys as an environment (hub/repos.psv deploy=$DEPLOY) =="
+    echo "  not composed into any host here: its units are stubs in $HUB's closure and"
+    echo "  its own CI stages what the box runs. The manifest gates above are its gate."
+    mods=$(nix eval --raw .#nixosModules --apply 'm: builtins.concatStringsSep " " (builtins.attrNames m)' 2>/dev/null || true)
+    [ -z "$mods" ] || echo "  nixosModules in this tree reach no host: $mods"
   else
     echo "== nix eval: $REPO is module-only, gating through the hub =="
     hubhosts=$(cd "$HUB" && nix eval --raw .#nixosConfigurations --apply 'c: builtins.concatStringsSep " " (builtins.attrNames c)' 2>/dev/null)

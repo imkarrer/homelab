@@ -3,7 +3,10 @@
 # the box. Closes docs/architecture.md Part III row 24: "push to tenant ->
 # deployed" was false for home-arcade, agent-hub and ac-host's .nix module,
 # because they reach ac-box only through homelab's closure, and the closure
-# only moves when flake.lock does.
+# only moves when flake.lock does. Since 18 Sep 2026 (homelab-158.11) that
+# is ac-host alone: agent-hub and home-arcade are flox environments with
+# their own edge (hub-queue-environment.sh), and a bump trigger from either
+# is skipped below.
 #
 # Runs as a Buildkite step in homelab's pipeline when a TENANT pipeline
 # triggers a homelab build on green (a `trigger: homelab` step behind that
@@ -74,9 +77,23 @@ locked_rev() {
 # Only inputs the flake actually declares. A typo in a tenant's trigger step
 # must be a loud refusal here, not a `nix flake update` that quietly does
 # nothing and reports success.
+#
+# One exception, and it is a skip rather than a refusal: a tree that WAS an
+# input and now deploys as a flox environment (hub/repos.psv deploy=environment
+# -- agent-hub and home-arcade since 18 Sep 2026, homelab-158.11). Its
+# pipeline's bump trigger, until that tree removes it, would otherwise turn
+# every green tenant build into a red homelab build for a bump that has
+# nothing to move. Read from the registry, not guessed from the input name,
+# so a genuine typo still refuses.
 case " $(lock_inputs) " in
   *" $INPUT "*) ;;
   *)
+    if [ "$(awk -F'|' -v r="$INPUT" '$1==r{print $4}' "$HUB/hub/repos.psv")" = environment ]; then
+      echo "skip bump-lock: '$INPUT' is no longer an input of this flake -- it deploys as an environment"
+      echo "  (hub/repos.psv deploy=environment; its own CI stages what the box runs)."
+      echo "  Remove the 'bump homelab's lock' trigger step from $INPUT's .buildkite/pipeline.yml."
+      exit 0
+    fi
     echo "refuse bump-lock: '$INPUT' is not an input of this flake" >&2
     echo "  inputs: $(lock_inputs)" >&2
     exit 1 ;;
