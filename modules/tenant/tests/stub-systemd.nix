@@ -4,7 +4,10 @@
 # plus the unit-level keys the stub and the pull unit set (description,
 # after, wants, wantedBy, restartIfChanged, path), systemd.paths, systemd.timers,
 # system.activationScripts, and the assertions/warnings pair
-# nixos/modules/misc/assertions.nix normally declares.
+# nixos/modules/misc/assertions.nix normally declares. Since 18 Sep 2026
+# (homelab-158.6) also requires, stopIfChanged and unitConfig: modules/ci
+# composes the tenant contract for its native shape, so its harness uses
+# these stubs rather than a second copy, and its compose unit sets those.
 #
 # This is intentionally NOT the real nixos/modules/system/boot/systemd.nix --
 # pulling that in (or the full <nixpkgs/nixos> module list, which is what
@@ -82,6 +85,18 @@
             restartIfChanged = lib.mkOption {
               type = lib.types.bool;
               default = true;
+            };
+            stopIfChanged = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+            };
+            requires = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+            };
+            unitConfig = lib.mkOption {
+              type = lib.types.attrsOf lib.types.anything;
+              default = { };
             };
             path = lib.mkOption {
               type = lib.types.listOf lib.types.unspecified;
