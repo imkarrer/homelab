@@ -1,37 +1,51 @@
 # The unit stub for a flox tenant (ADR 0009). Consumes
 # homelab.tenants.<name>.environment (schema.nix) and homelab.flox.package
 # (modules/platform/flox.nix) to produce, for every stub unit of every
-# enabled tenant whose environment is enabled:
+# enabled tenant:
 #
-#   systemd.services.<unit>.serviceConfig.ExecStart   (mkForce, see below)
-#   systemd.services.<unit>.environment               (the tenant's host facts)
+#   systemd.services.<unit>                           (the whole unit, see below)
 #   assertions                                        (every stub is a contract unit)
 #
-# and NOTHING for a tenant whose environment.enable is false -- the default.
-# That is load-bearing the same way modules/deploy's inert default is: the
-# stub is imported into the closure before any tenant runs from it, and the
-# proof that importing changed nothing is an unchanged toplevel drvPath
-# (homelab-158.2 recorded it; tests/eval-environment.nix's `disabled` case
-# keeps it).
+# and NOTHING for a tenant with no stub declared. That is load-bearing the
+# same way modules/deploy's inert default is: a host that declares no
+# environment gets no key at all from this file (tests/eval-environment.nix's
+# `dirDerivedFromHostPaths` case keeps a tenant without a stub unit-less).
 #
-# WHAT THE STUB REPLACES, AND WHAT IT KEEPS. Only ExecStart and the
-# variables. The unit's name (README: never renamed), its Slice= and Nice=
-# from resources.nix, restartIfChanged, User=/Group=, After=/Wants=,
-# Restart=, TimeoutStopSec=, the host's own AllowedCPUs/NUMAPolicy -- all
-# of it stays exactly what the NixOS module and hosts/<name>/*.nix made it,
-# because this file writes to none of those keys. Step 1 of the ADR runs
-# the tenant's module and the stub SIDE BY SIDE: the module still declares
-# the unit, the stub only redirects what it executes. When the module goes,
-# the stub becomes the whole unit and this file grows the fifteen lines the
-# ADR promises; not before.
+# THE STUB IS THE WHOLE UNIT (homelab-158.11). Until then a tenant's NixOS
+# module (agent-hub's modules/agent-hub.nix, home-arcade's
+# modules/arcade-hub.nix) declared the unit and this file mkForce'd only
+# ExecStart and the variables onto it. Those modules have left the closure;
+# what they supplied -- Description=, User=/Group=, WorkingDirectory=,
+# Restart=/RestartSec=, TimeoutStopSec=, After=/Wants=, WantedBy=, and for
+# mindustry the StandardInputText= lines -- is now the stub's skeleton
+# fields (schema.nix, environmentUnit), rendered here. Two things are still
+# not this file's: Slice= and Nice= are resources.nix's from the tenant's
+# tier (the ladder in its header), and a host's own facts about its own
+# unit (agent-hub-llm's AllowedCPUs= and NUMA policy) are a plain
+# systemd.services definition in the host's configuration, merged by the
+# module system. The proof that the move changed nothing on the box was
+# every affected unit's `systemd.units.<u>.text` equal between the closure
+# with the modules and the closure without (homelab-158.11's handoff).
 #
-# mkForce, and where that sits on the ladder in resources.nix (upstream
-# 100, contract 90, host 50). The stub is declared BY the host -- the
-# values in hosts/ac-box/configuration.nix are the host's facts about its
-# own unit -- so it takes the host's rung. A tenant module's ExecStart is
-# the upstream default the ADR is retiring; there is no third party that
-# should be able to out-argue "this unit runs from its environment" short
-# of turning `enable` off, which is the lever.
+# WHAT `enable` DECIDES: only what the unit executes. On, ExecStart is the
+# activation of <dir> and the variables are set. Off -- the default, and
+# the state a stub is landed in first, so the pull unit (environment-pull.nix)
+# can put the environment at <dir> and warm it before anything runs from it
+# -- ExecStart is a placeholder that exits 1 naming the flag. Both retired
+# modules made that same choice for their skeletons: a declared unit that
+# is not yet switched on fails loudly in the journal (Restart=on-failure
+# retries it into systemd's start limit, then it sits failed), never
+# serves some other way, and never leaves resources.nix's Slice= on a
+# unit with no process behind it. Off is also the rollback for a tenant
+# whose environment has gone bad: the unit stops running it, and the
+# checkout stays.
+#
+# Plain priority for every key. There is no upstream definition to
+# out-argue any more (the mkForce this file carried existed for the
+# module's ExecStart), so a second definition of ExecStart from anywhere
+# is a conflict at evaluation -- loud, which is right -- and a host that
+# wants a key different from the stub's says so with mkForce on its own
+# rung (resources.nix: upstream 100, contract 90, host 50).
 #
 # THE UNIT NEVER FETCHES. `flox activate -d <dir>` against an environment
 # that has been activated once online is offline and ~80 ms; against one
@@ -85,13 +99,17 @@
 }:
 
 let
-  inherit (lib) mkDefault mkForce mkIf types;
+  inherit (lib) mkDefault mkIf types;
 
   hostPaths = config.homelab.host.paths;
 
   flox = config.homelab.flox.package;
 
-  enabledTenants = lib.filterAttrs (_: t: t.enable && t.environment.enable) config.homelab.tenants;
+  # Every enabled tenant with a stub declared -- enable on or off, since
+  # the unit exists either way (header).
+  declaringTenants = lib.filterAttrs (
+    _: t: t.enable && t.environment.units != { }
+  ) config.homelab.tenants;
 
   # One entry per stub unit, carrying its tenant so the assertion and the
   # ExecStart can both name their source.
@@ -102,9 +120,10 @@ let
         inherit tenantName unit stub;
         dir = t.environment.dir;
         kind = t.environment.source.kind;
+        on = t.environment.enable;
         inContract = builtins.elem unit t.units;
       }) t.environment.units
-    ) enabledTenants
+    ) declaringTenants
   );
 
   # The pin the pull unit writes for a floxhub tenant (header). The path is
@@ -124,6 +143,15 @@ let
     (toString s.dir)
   ];
 
+  # enable = false: refuse, and say which flag. Never `true` (a unit
+  # "active" with nothing on its port), never a server from somewhere else.
+  placeholder =
+    s:
+    pkgs.writeShellScript "${lib.removeSuffix ".service" s.unit}-unstubbed" ''
+      echo "${s.unit}: homelab.tenants.${s.tenantName}.environment.enable is false -- this unit runs from the tenant's flox environment at ${toString s.dir} and nothing else (homelab ADR 0009); it is declared but not switched on" >&2
+      exit 1
+    '';
+
   # kind = tree: the activation itself, one line. kind = floxhub: the
   # wrapper, which refuses to guess a generation. `read` is a builtin, so
   # the wrapper needs nothing on PATH before flox. The wrapper is handed to
@@ -133,7 +161,9 @@ let
   # `.text` at evaluation instead of building it.
   execStart =
     s:
-    if s.kind == "floxhub" then
+    if !s.on then
+      placeholder s
+    else if s.kind == "floxhub" then
       (pkgs.writeShellScript "${lib.removeSuffix ".service" s.unit}-activate" ''
         set -eu
         pin=${lib.escapeShellArg (pinFile s.tenantName)}
@@ -152,6 +182,17 @@ let
     else
       lib.escapeShellArgs (activate s ++ [ "--" ] ++ s.stub.command);
 
+  # The derived defaults schema.nix leaves null (its header: vocabulary
+  # only, the consumer derives).
+  user = s: if s.stub.user != null then s.stub.user else s.tenantName;
+  group = s: if s.stub.group != null then s.stub.group else user s;
+  description =
+    s:
+    if s.stub.description != null then
+      s.stub.description
+    else
+      "${s.tenantName}: ${lib.removeSuffix ".service" s.unit} (from its flox environment)";
+
   # systemd.services is keyed by BARE name; the contract spells units with
   # their suffix (resources.nix has the history of getting this wrong:
   # phantom *.service.service units, and a slice guarantee that was inert).
@@ -162,10 +203,33 @@ let
     map (
       s:
       lib.nameValuePair (lib.removeSuffix ".service" s.unit) {
-        serviceConfig.ExecStart = mkForce (execStart s);
-        environment = s.stub.environment // {
-          FLOX_DISABLE_METRICS = "true";
+        description = description s;
+        inherit (s.stub) after wants wantedBy;
+        serviceConfig = {
+          User = user s;
+          Group = group s;
+          ExecStart = execStart s;
+          Restart = s.stub.restart;
+          RestartSec = s.stub.restartSec;
+        }
+        // lib.optionalAttrs (s.stub.workingDirectory != null) {
+          WorkingDirectory = toString s.stub.workingDirectory;
+        }
+        // lib.optionalAttrs (s.stub.timeoutStopSec != null) {
+          TimeoutStopSec = s.stub.timeoutStopSec;
+        }
+        // lib.optionalAttrs (s.on && s.stub.stdin != [ ]) {
+          StandardInputText = s.stub.stdin;
         };
+        # The variables only with the stub on: off, nothing is running that
+        # would read them, and a placeholder with the host's facts in its
+        # environment reads as a unit that meant to run.
+        environment = lib.optionalAttrs s.on (
+          s.stub.environment
+          // {
+            FLOX_DISABLE_METRICS = "true";
+          }
+        );
       }
     ) (builtins.filter (s: lib.hasSuffix ".service" s.unit) stubs)
   );
@@ -187,28 +251,29 @@ in
     );
   };
 
-  # mkIf on the whole block: with no enabled environment this contributes
-  # no key at all to systemd.services, not an empty override -- the
-  # difference between "drvPath unchanged" and "drvPath unchanged, probably".
+  # mkIf on the whole block: with no stub declared this contributes no key
+  # at all to systemd.services, not an empty override -- the difference
+  # between "drvPath unchanged" and "drvPath unchanged, probably".
   config = mkIf (stubs != [ ]) {
-    assertions = map (s: {
-      assertion = s.inContract;
-      message = ''
-        homelab.tenants.${s.tenantName}.environment.units."${s.unit}" is a
-        stub for a unit that homelab.tenants.${s.tenantName}.units does not
-        name. The contract assigns slices by that list; a stub outside it
-        would run from the environment but outside the tenant's tier.
-        Add "${s.unit}" to units, or remove the stub.
-      '';
-    }) stubs
-    ++ map (s: {
-      assertion = lib.hasSuffix ".service" s.unit;
-      message = ''
-        homelab.tenants.${s.tenantName}.environment.units."${s.unit}": only a
-        .service unit runs a process, so only a .service can be run from an
-        environment. Spell the name with its suffix, exactly as `units` does.
-      '';
-    }) stubs;
+    assertions =
+      map (s: {
+        assertion = s.inContract;
+        message = ''
+          homelab.tenants.${s.tenantName}.environment.units."${s.unit}" is a
+          stub for a unit that homelab.tenants.${s.tenantName}.units does not
+          name. The contract assigns slices by that list; a stub outside it
+          would run from the environment but outside the tenant's tier.
+          Add "${s.unit}" to units, or remove the stub.
+        '';
+      }) stubs
+      ++ map (s: {
+        assertion = lib.hasSuffix ".service" s.unit;
+        message = ''
+          homelab.tenants.${s.tenantName}.environment.units."${s.unit}": only a
+          .service unit runs a process, so only a .service can be run from an
+          environment. Spell the name with its suffix, exactly as `units` does.
+        '';
+      }) stubs;
 
     systemd.services = services;
   };

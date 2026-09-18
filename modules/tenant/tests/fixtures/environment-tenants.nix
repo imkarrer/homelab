@@ -1,15 +1,18 @@
 # Fixture for environment.nix's harness: the agent-hub tenant as
 # hosts/ac-box/tenants.nix declares it (tier, unit, state dir -- the facts
-# the stub reads), plus a stand-in for what modules/agent-hub.nix makes of
-# agent-hub-llm.service today: an ExecStart at plain priority, a User=. The
-# stub must leave the second alone and, when enabled, replace only the
-# first. Unit names carry their suffix, as tenants.nix spells them and as
-# fixtures/resources-tenants.nix explains at length.
+# the stub reads) and its stub as hosts/ac-box/configuration.nix declares
+# it, values written as literals because this fixture has no
+# services.agent-hub to read them from. Unit names carry their suffix, as
+# tenants.nix spells them and as fixtures/resources-tenants.nix explains at
+# length.
 #
-# The stub declaration is the SAME shape hosts/ac-box/configuration.nix
-# carries (enable left at its default there too); the values are the box's,
-# written as literals here because this fixture has no services.agent-hub
-# to read them from.
+# Since homelab-158.11 the stub is the whole unit: there is no stand-in
+# for a tenant module here any more, because no module declares the unit.
+# What the retired modules/agent-hub.nix supplied is the stub's skeleton --
+# the description and TimeoutStopSec set explicitly, User/Group, Restart,
+# After/Wants, WantedBy from schema.nix's defaults. enable is left at its
+# default (false) here as configuration.nix's first-switch state; the
+# cases that need it on say so.
 {
   homelab.tenants.agent-hub = {
     description = "CPU-only LLM server";
@@ -17,6 +20,8 @@
     units = [ "agent-hub-llm.service" ];
     state.dirs = [ "/var/lib/agent-hub" ];
     environment.units."agent-hub-llm.service" = {
+      description = "agent-hub model server: llama-swap over 6 models (LAN only)";
+      timeoutStopSec = 90;
       command = [
         "llama-swap"
         "-config"
@@ -34,12 +39,5 @@
         AGENT_HUB_ASSETS = "/var/lib/agent-hub/env/nix";
       };
     };
-  };
-
-  # What the tenant's NixOS module contributes today, at plain priority.
-  systemd.services.agent-hub-llm.serviceConfig = {
-    ExecStart = "/nix/store/0000000000000000000000000000000-llama-swap-224/bin/llama-swap -config /nix/store/0000000000000000000000000000000-agent-hub-llama-swap.json -listen 127.0.0.1:8100";
-    User = "agent-hub";
-    Restart = "on-failure";
   };
 }

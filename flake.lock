@@ -20,26 +20,6 @@
         "type": "github"
       }
     },
-    "agent-hub": {
-      "inputs": {
-        "nixpkgs": [
-          "nixpkgs"
-        ]
-      },
-      "locked": {
-        "lastModified": 1789756385,
-        "narHash": "sha256-HzC37GITWeBgIu/++/F+zDqLbPhaU3phCdgsoZmfyD4=",
-        "owner": "imkarrer",
-        "repo": "agent-hub",
-        "rev": "db48ddd654a0453e52791dafc2759f64f88f9829",
-        "type": "github"
-      },
-      "original": {
-        "owner": "imkarrer",
-        "repo": "agent-hub",
-        "type": "github"
-      }
-    },
     "crane": {
       "locked": {
         "lastModified": 1774313767,
@@ -137,21 +117,6 @@
         "type": "github"
       }
     },
-    "home-arcade": {
-      "locked": {
-        "lastModified": 1789755809,
-        "narHash": "sha256-5We8kIUnvn5SWhumaTiKgowNW+i8EkpTv1RwjHhYD6o=",
-        "owner": "imkarrer",
-        "repo": "home-arcade",
-        "rev": "af82d51664d7ee881f203696ebb689502c131fe7",
-        "type": "github"
-      },
-      "original": {
-        "owner": "imkarrer",
-        "repo": "home-arcade",
-        "type": "github"
-      }
-    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1774386573,
@@ -210,9 +175,7 @@
     "root": {
       "inputs": {
         "ac-host": "ac-host",
-        "agent-hub": "agent-hub",
         "flox": "flox",
-        "home-arcade": "home-arcade",
         "nixpkgs": "nixpkgs_2",
         "sops-nix": "sops-nix"
       }

@@ -157,6 +157,15 @@ let
   # the host owes it, and ADR 0009 makes "from an environment, at this
   # path" a host fact about a tenant in the same sense a state path is.
   #
+  # Since homelab-158.11 the stub is the WHOLE unit. Until then a tenant's
+  # NixOS module (agent-hub's modules/agent-hub.nix, home-arcade's
+  # modules/arcade-hub.nix) declared the unit -- description, User=,
+  # WorkingDirectory=, Restart=, After=/Wants=, WantedBy= -- and the stub
+  # replaced only ExecStart and the variables; those modules have left the
+  # closure, so the skeleton they supplied is spelled here, per unit, with
+  # the defaults a LAN-bound service under systemd wants. The unit's Slice=
+  # and Nice= are still resources.nix's from the tier, never a field here.
+  #
   # `command` runs with the environment's bin on PATH and the manifest's
   # hook already sourced; its first word is a package the manifest
   # installs, not a store path. `environment` is every host fact the
@@ -165,6 +174,13 @@ let
   # docs/flox-findings.md, "Beyond the six": `[vars]` clobbers the caller,
   # so the hook is the only channel, and a value the unit does not set is a
   # value the tenant tree chose for it.
+  #
+  # What is deliberately NOT a field: a host's own facts about its own unit
+  # that are not the skeleton -- agent-hub-llm's AllowedCPUs= and NUMA
+  # policy on ac-box -- stay a plain `systemd.services.<unit>.serviceConfig`
+  # definition in the host's configuration, which the module system merges
+  # with what environment.nix emits. A second spelling of serviceConfig
+  # here would be exactly the kind of duplicate the README forbids.
   environmentUnit = types.submodule {
     options = {
       command = mkOption {
@@ -184,6 +200,116 @@ let
           the manifest's hook would otherwise default. Set every one the
           hook names; a missing one is a tenant-tree default running on
           the box unreviewed.
+        '';
+      };
+
+      # -- The skeleton (homelab-158.11). ------------------------------
+      # Every default below is what both retired modules set for every
+      # unit they declared, so a stub that names only `command` gets the
+      # unit they would have made. null means "derived by environment.nix"
+      # (this file computes nothing, its header), and the derivation is
+      # the obvious one: the tenant's name.
+
+      description = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          The unit's Description=. null derives "<tenant>: <unit> (from
+          its flox environment)"; set it to keep a description the box
+          already shows (`systemctl status` and the journal are keyed on
+          the unit NAME, never on this, so changing it is free).
+        '';
+      };
+
+      user = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          User= the process runs as. null derives the tenant's name, which
+          is what both retired modules used (agent-hub, arcade). Must own
+          `environment.dir`: `flox activate` writes there, and the pull
+          unit checks the environment out as this user.
+        '';
+      };
+
+      group = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = "Group= for the process. null derives the same name as `user`.";
+      };
+
+      workingDirectory = mkOption {
+        type = types.nullOr types.path;
+        default = null;
+        description = ''
+          WorkingDirectory=, when the process writes relative to its cwd
+          (Mindustry writes config/ under it). null leaves it unset, which
+          systemd resolves to / for a system service.
+        '';
+      };
+
+      restart = mkOption {
+        type = types.enum [ "no" "always" "on-success" "on-failure" "on-abnormal" "on-abort" "on-watchdog" ];
+        default = "on-failure";
+        description = "Restart=. on-failure is what every tenant unit on ac-box carries.";
+      };
+
+      restartSec = mkOption {
+        type = types.ints.unsigned;
+        default = 5;
+        description = "RestartSec=, seconds.";
+      };
+
+      timeoutStopSec = mkOption {
+        type = types.nullOr types.ints.unsigned;
+        default = null;
+        description = ''
+          TimeoutStopSec=, seconds; null leaves systemd's default (90 s
+          on NixOS). Set it where the process supervises children of its
+          own that need time to die -- llama-swap stopping a model
+          mid-load.
+        '';
+      };
+
+      after = mkOption {
+        type = types.listOf types.str;
+        default = [ "network-online.target" ];
+        description = ''
+          After=. The default is what a unit that binds the LAN address
+          needs: at boot the address does not exist until
+          network-online.target, and a unit ordered after network.target
+          alone dies with "Cannot assign requested address" (rsyncd and
+          qdrant both did, 12 and 16 Sep 2026).
+        '';
+      };
+
+      wants = mkOption {
+        type = types.listOf types.str;
+        default = [ "network-online.target" ];
+        description = "Wants=. Paired with `after` by default; the ordering alone does not pull the target in.";
+      };
+
+      wantedBy = mkOption {
+        type = types.listOf types.str;
+        default = [ "multi-user.target" ];
+        description = ''
+          WantedBy=. multi-user.target is what makes the unit start at
+          boot; environment-pull.nix's applied record lists the units it
+          restarted by these names, so a stub that is not wanted by
+          anything is one the pull starts and nothing else does.
+        '';
+      };
+
+      stdin = mkOption {
+        type = types.listOf types.str;
+        default = [ ];
+        description = ''
+          Lines fed to the process on standard input at start, one
+          StandardInputText= each (systemd appends a newline to every
+          line). For a server that takes its startup commands on its
+          console -- Mindustry's `config port N` and `host <map> <mode>` --
+          which is where a host fact goes when it is neither argv nor a
+          variable the manifest's hook reads.
         '';
       };
     };
@@ -254,16 +380,21 @@ in
         };
 
         # ADR 0009: this tenant's contents as a flox environment, and the
-        # unit stubs that run it. Inert unless `enable` -- with it false the
-        # tenant's units are whatever their NixOS modules make them, and
-        # modules/tenant/environment.nix contributes nothing (proven by an
-        # unchanged toplevel drvPath, homelab-158.2). With it true each
-        # stub's ExecStart is replaced with `flox activate -d <dir> --
-        # <command>` and its variables set; the unit's name, slice,
-        # restartIfChanged, hardening and dependencies stay whatever they
-        # were. The unit never fetches: the environment at `dir` must have
-        # been activated once online by whoever put it there (the pull
-        # unit, homelab-158.3), after which activation is offline and ~80 ms
+        # unit stubs that run it. Declaring a stub under `units` is what
+        # puts the unit in the closure at all (since homelab-158.11 no
+        # NixOS module declares it): modules/tenant/environment.nix emits
+        # the whole unit from the stub's skeleton fields, and `enable`
+        # decides what it EXECUTES. With it true, ExecStart is `flox
+        # activate -d <dir> -- <command>` and the variables are set. With
+        # it false -- the default, and the first-switch state (the pull
+        # unit keeps the checkout warm before anything runs from it) --
+        # ExecStart is a placeholder that exits 1 naming this flag, so a
+        # declared stub that is not yet switched on is a failed unit in
+        # the journal saying why, never a unit quietly serving some other
+        # way and never a phantom with a slice and no process. The unit
+        # never fetches: the environment at `dir` must have been activated
+        # once online by whoever put it there (the pull unit,
+        # homelab-158.3), after which activation is offline and ~80 ms
         # (docs/flox-findings.md section 1).
         environment = mkOption {
           type = types.submodule {
@@ -271,7 +402,7 @@ in
               enable = mkOption {
                 type = types.bool;
                 default = false;
-                description = "Run this tenant's stub units from the flox environment at `dir` instead of from their modules' ExecStart.";
+                description = "Run this tenant's stub units from the flox environment at `dir`. false: the units exist as their skeletons and their ExecStart refuses, naming this flag.";
               };
 
               dir = mkOption {
@@ -316,7 +447,9 @@ in
                   a stub the contract does not know about would run
                   outside the tenant's slice. environment.nix asserts it.
 
-                  Declaring one is also what puts the environment ON the
+                  Declaring one is what puts the unit in the closure
+                  (environment.nix emits it whole, from the skeleton
+                  fields and their defaults) and the environment ON the
                   box: environment-pull.nix keeps a checkout of `tree` at
                   `dir` for every tenant with a stub declared, whether or
                   not `enable` is on -- so the checkout is pulled and

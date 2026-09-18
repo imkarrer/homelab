@@ -1,8 +1,8 @@
 # Minimal stand-in for the slice of NixOS's own option surface resources.nix
 # (and, since 17 Sep 2026, environment.nix and environment-pull.nix) writes
 # to: systemd.slices, systemd.services.<name>.{serviceConfig,environment}
-# plus the unit-level keys the pull unit sets (description, after, wants,
-# restartIfChanged, path), systemd.paths, systemd.timers,
+# plus the unit-level keys the stub and the pull unit set (description,
+# after, wants, wantedBy, restartIfChanged, path), systemd.paths, systemd.timers,
 # system.activationScripts, and the assertions/warnings pair
 # nixos/modules/misc/assertions.nix normally declares.
 #
@@ -70,6 +70,12 @@
               default = [ ];
             };
             wants = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [ ];
+            };
+            # environment.nix's stub unit (the whole unit since
+            # homelab-158.11) sets this; the pull unit never does.
+            wantedBy = lib.mkOption {
               type = lib.types.listOf lib.types.str;
               default = [ ];
             };

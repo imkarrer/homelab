@@ -1,5 +1,5 @@
 {
-  description = "Platform layer for ac-box: host facts, a tenant contract, and the tenants as inputs";
+  description = "Platform layer for ac-box: host facts, a tenant contract, and the tenants as environments";
 
   inputs = {
     # This repo owns nixpkgs, and a tenant must not drag its own copy into the
@@ -23,19 +23,14 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    # The arcade tenant. Module-only flake with no inputs of its own, so there
-    # is nothing to make follow.
-    home-arcade.url = "github:imkarrer/home-arcade";
-
-    # The local coding-agent tenant: llama.cpp model serving plus a sandboxed
-    # repo+task->PR runner. Declared in hosts/ac-box/tenants.nix and ON since
-    # 45f67ab (llm only; the runner waits on a sops-backed githubTokenFile).
-    # Live on ac-box since generation 31, 12 Sep 2026: llama-server on
-    # 192.168.1.50:8100, alone in background.slice.
-    agent-hub = {
-      url = "github:imkarrer/agent-hub";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    # No agent-hub or home-arcade input since 18 Sep 2026 (homelab-158.11,
+    # ADR 0009's end state): those tenants are flox environments, deployed
+    # through their own edge (a sha or a FloxHub generation staged by their
+    # CI, applied by modules/tenant/environment-pull.nix), and their units
+    # are the stubs hosts/ac-box/configuration.nix declares. What the box
+    # owes them -- a user, directories, nginx, qdrant, samba, rsyncd -- is
+    # hosts/ac-box/tenants/{agent-hub,arcade}.nix. ac-host is the one
+    # tenant still composed as an input, and bump-lock is for it alone.
 
     # Secrets. README has said "credentials go to sops-nix" since the repo
     # began; as of 12 Sep 2026 one does (arcade's SMB password, the proof),
@@ -98,7 +93,7 @@
   };
 
   outputs =
-    { self, nixpkgs, ac-host, home-arcade, agent-hub, sops-nix, flox }:
+    { self, nixpkgs, ac-host, sops-nix, flox }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -164,8 +159,12 @@
           ./modules/tenant/metrics.nix
           ./modules/tenant/quiet.nix
           # ADR 0009: the unit stub for a tenant that is a flox environment.
-          # Inert until a tenant sets environment.enable (none does yet);
-          # proven a no-op on import by an unchanged toplevel drvPath.
+          # Since homelab-158.11 the stub is the whole unit: agent-hub-llm,
+          # arcade-freeciv and arcade-mindustry exist in this closure only
+          # because hosts/ac-box/configuration.nix declares them under
+          # homelab.tenants.<n>.environment.units, and this module renders
+          # each from its skeleton fields. Emits nothing for a host that
+          # declares no stub.
           ./modules/tenant/environment.nix
           # ADR 0009's deploy edge, applying half: for every tenant with a
           # stub declared, a path/timer-driven unit that checks the staged
@@ -226,7 +225,7 @@
           # modules/deploy: imported but inert (ADR 0006's applying half).
           # homelab.deploy.enable defaults false and nothing sets it, so this
           # contributes nothing to the composed config -- same discipline, and
-          # same proof, as modules/ci above and agent-hub below.
+          # same proof, as modules/ci above.
           #
           # Flipping it makes ac-box self-switching, which is ADR 0006's
           # deliberate choice and NOT a side effect of importing the module.
@@ -238,22 +237,20 @@
           # human -- the same ordering modules/ci's HAZARD 1 describes.
           ./modules/deploy
 
-          # L3: the tenants, as inputs rather than vendored copies. arcade-hub
-          # comes from home-arcade's canonical module -- not the drifted,
-          # mojibake copy that used to live in the ac-host tree.
+          # L3: the tenants. ac-host is the one still composed as an input
+          # (its module owns the lobbies, the bot's compose project and
+          # ac-host-dev). agent-hub and arcade are flox environments (ADR
+          # 0009, homelab-158.11): their units are the stubs
+          # hosts/ac-box/configuration.nix declares, rendered by
+          # modules/tenant/environment.nix above, and what the box owes
+          # each -- identity, directories, nginx and qdrant for agent-hub,
+          # samba and rsyncd for arcade -- is the host's own file below,
+          # which took the tenant module's non-unit half verbatim when the
+          # module left. Neither tenant tree is composed here any more; a
+          # tenant author writes no Nix.
           ac-host.nixosModules.ac-host
-          home-arcade.nixosModules.arcade-hub
-
-          # agent-hub: imported but inert. services.agent-hub.enable defaults
-          # false (mkEnableOption) and nothing below sets it, so this
-          # contributes nothing to the composed config yet -- verified by
-          # comparing nixosConfigurations.ac-box's toplevel store path
-          # before/after this line was added. Turning the tenant on is a
-          # separate, later change: flip services.agent-hub.enable (and
-          # .llm.enable) in hosts/ac-box/configuration.nix with a real
-          # llm.modelPath, matching how services.ac-host/arcade-hub are
-          # wired just below.
-          agent-hub.nixosModules.agent-hub
+          ./hosts/ac-box/tenants/arcade.nix
+          ./hosts/ac-box/tenants/agent-hub.nix
 
           # This host.
           ./hosts/ac-box/host.nix

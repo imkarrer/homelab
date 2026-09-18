@@ -291,14 +291,16 @@
     };
 
     # Kid arcade hub: LAN-only game servers plus a Samba/rsync export of the
-    # ROM library. Never touches Docker or the AC firewall (arcade-hub.nix).
+    # ROM library. Never touches Docker or the AC firewall
+    # (hosts/ac-box/tenants/arcade.nix, the host side).
     arcade = {
       description = "LAN arcade hub: Freeciv/Mindustry dedicated servers, SMB + rsync ROM library export.";
       tier = "interactive";
 
       # The ROM export is arcade's too, not the platform's. smbd, winbindd and
       # rsyncd all exist solely because services.arcade-hub turns them on
-      # (arcade-hub.nix's services.samba / services.rsyncd blocks, gated on
+      # (hosts/ac-box/tenants/arcade.nix's services.samba / services.rsyncd
+      # blocks, since 18 Sep 2026 -- home-arcade's module until then -- gated on
       # cfg.smb.enable and cfg.rsync.enable), and this tenant already declares
       # their ports -- 445, 139 and 873 are right below. Declaring the ports
       # but not the units was half a declaration: the three ran in
@@ -392,11 +394,13 @@
         # game without being told an IP. Exactly the failure freeciv had
         # before announcePort was split out, one game later.
         #
-        # home-arcade now declares mindustry.multicastPort (default 20151) and
-        # opens it alongside the game port, mirroring freeciv.announcePort. So
-        # "lan" is no longer homelab reaching past the tenant -- it is the
-        # registry agreeing with what the tenant module asks for, which is the
-        # only arrangement the contract permits.
+        # home-arcade then declared mindustry.multicastPort (default 20151)
+        # and opened it alongside the game port, mirroring freeciv.announcePort,
+        # so "lan" was the registry agreeing with what the tenant module asked
+        # for. Since 18 Sep 2026 (homelab-158.11) the module is gone and this
+        # claim is the ONLY thing that opens 20151 -- which is the arrangement
+        # the contract always wanted: ports are host facts about a tenant,
+        # declared once, here.
         mindustry-multicast = {
           number = 20151;
           proto = [ "udp" ];

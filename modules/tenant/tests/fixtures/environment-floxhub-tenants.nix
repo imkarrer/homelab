@@ -1,14 +1,13 @@
 # Fixture for eval-environment.nix's floxhub cases: the arcade tenant as
 # hosts/ac-box/tenants.nix declares it (tier, the two game units, no
-# state.dirs -- so dir derives to /var/lib/arcade/env) with the stub
-# hosts/ac-box/configuration.nix carries (homelab-158.5): source.kind =
-# floxhub, two stubs from one environment, the values the box's
-# services.arcade-hub computes written as literals. enable is left at its
-# default (false) here as there; the cases that need it on say so.
-#
-# The two units are stand-ins for what home-arcade's modules/arcade-hub.nix
-# makes of them today (User=arcade, Restart=, an ExecStart at plain
-# priority), the way environment-tenants.nix stands in for agent-hub's.
+# state.dirs -- so dir derives to /var/lib/arcade/env) with the stubs
+# hosts/ac-box/configuration.nix carries (homelab-158.5, whole units since
+# .11): source.kind = floxhub, two stubs from one environment, the values
+# the box's services.arcade-hub computes written as literals -- the
+# descriptions and WorkingDirectory the retired modules/arcade-hub.nix used
+# to set, mindustry's three console lines as `stdin`, and User/Group,
+# Restart, After/Wants, WantedBy from schema.nix's defaults. enable is left
+# at its default (false) here as there; the cases that need it on say so.
 {
   homelab.tenants.arcade = {
     description = "LAN arcade hub";
@@ -23,32 +22,32 @@
         env = "imkarrer/arcade";
       };
       tree = "home-arcade";
-      units."arcade-freeciv.service".command = [
-        "freeciv-server"
-        "--bind"
-        "192.168.1.50"
-        "--port"
-        "5556"
-        "--saves"
-        "/var/lib/arcade/freeciv"
-        "--log"
-        "/var/lib/arcade/freeciv/server.log"
-      ];
+      units."arcade-freeciv.service" = {
+        description = "Arcade Freeciv dedicated server (LAN only)";
+        workingDirectory = "/var/lib/arcade/freeciv";
+        command = [
+          "freeciv-server"
+          "--bind"
+          "192.168.1.50"
+          "--port"
+          "5556"
+          "--saves"
+          "/var/lib/arcade/freeciv"
+          "--log"
+          "/var/lib/arcade/freeciv/server.log"
+        ];
+      };
       units."arcade-mindustry.service" = {
+        description = "Arcade Mindustry dedicated server (LAN only)";
+        workingDirectory = "/var/lib/arcade/mindustry";
         command = [ "mindustry-server" ];
         environment.JAVA_TOOL_OPTIONS = "-Xms256M -Xmx1G";
+        stdin = [
+          "config name Arcade"
+          "config port 6567"
+          "host Islands sandbox"
+        ];
       };
     };
-  };
-
-  systemd.services.arcade-freeciv.serviceConfig = {
-    ExecStart = "/nix/store/0000000000000000000000000000000-freeciv-3.2.2/bin/freeciv-server --bind 192.168.1.50 --port 5556 --saves /var/lib/arcade/freeciv --log /var/lib/arcade/freeciv/server.log";
-    User = "arcade";
-    Restart = "on-failure";
-  };
-  systemd.services.arcade-mindustry.serviceConfig = {
-    ExecStart = "/nix/store/0000000000000000000000000000000-arcade-mindustry";
-    User = "arcade";
-    Restart = "on-failure";
   };
 }

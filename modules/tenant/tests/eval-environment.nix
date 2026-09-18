@@ -1,14 +1,16 @@
 # Eval harness for modules/tenant/environment.nix -- ADR 0009's unit stub --
 # and modules/tenant/environment-pull.nix, the pull unit beside it.
 #
-# What it is for. The stub's whole contract is "off: the unit is its
-# module's; on: only ExecStart and the variables change, and the slice the
-# contract gave the unit is still there". The host config can prove only
-# the first half (ac-box has it off), and `nix flake check` on the toplevel
-# says nothing about which keys a module touched. So: the same fixture,
-# once with the stub off and once on, and the exact keys compared -- plus
-# the two things the module must REJECT (a stub outside the tenant's
-# `units`, a stub that is not a .service), which no real host has.
+# What it is for. The stub is the whole unit (homelab-158.11): its
+# contract is "declared: the unit exists with the skeleton the stub spells
+# and schema.nix defaults, in the slice the contract gives it; off: its
+# ExecStart refuses, naming the flag, and no variable is set; on: ExecStart
+# is the activation and the variables are on the unit, and nothing else
+# changes". `nix flake check` on the toplevel says nothing about which keys
+# a module touched. So: the same fixture, once with the stub off and once
+# on, and the exact keys compared -- plus the two things the module must
+# REJECT (a stub outside the tenant's `units`, a stub that is not a
+# .service), which no real host has.
 #
 # The pull unit's contract is the first-switch order in its header: it
 # EXISTS whenever a stub is declared (enable on or off), it is a oneshot in
@@ -56,8 +58,16 @@ let
   # harness's and could not be satisfied by a flox from anywhere else.
   floxStub = pkgs.runCommand "flox-stub" { } "mkdir -p $out/bin; touch $out/bin/flox";
 
-  # The module's ExecStart, verbatim from the fixture -- the "off" answer.
-  moduleExecStart = (import tenants).systemd.services.agent-hub-llm.serviceConfig.ExecStart;
+  # The "off" answer: environment.nix's placeholder, a derivation whose
+  # text names the flag and exits 1. Read at evaluation, never built;
+  # contexts dropped because lib.hasInfix is a builtins.match.
+  noCtx = builtins.unsafeDiscardStringContext;
+  isPlaceholder =
+    unit: tenant: v:
+    lib.isDerivation v
+    && lib.hasSuffix "-unstubbed" v.name
+    && lib.hasInfix "homelab.tenants.${tenant}.environment.enable is false" (noCtx v.text)
+    && lib.hasInfix "exit 1" (noCtx v.text);
 
   # The pull script's text, through the module's own readOnly `pull` map;
   # the remote, the owner and the restart set are decided at evaluation
@@ -151,25 +161,27 @@ let
   on = extra: [ { homelab.tenants.agent-hub.environment.enable = true; } ] ++ extra;
 
   # What every enabled case must show, whatever else it checks: the unit
-  # is still the contract's (slice, nice), still the module's (User,
-  # Restart), and runs from the environment.
+  # is still the contract's (slice, nice), its skeleton is the stub's
+  # (User, Restart -- the retired module's values, now schema.nix's
+  # defaults), and it runs from the environment.
   keptByStub = cfg: [
     {
       assertion = (cfg.systemd.services.agent-hub-llm.serviceConfig.Slice or null) == "background.slice";
       message = ''
         the stub must not touch Slice=. resources.nix put agent-hub-llm in
-        background.slice (mkOverride 90) from the tenant's tier, and the
-        stub writes only ExecStart and the variables; a unit that changed
-        slice when it changed ExecStart would leave the tier model behind.
+        background.slice (mkOverride 90) from the tenant's tier; the stub
+        renders every other key of the unit and none of the slice's, so a
+        unit that changed slice when it changed ExecStart would leave the
+        tier model behind.
       '';
     }
     {
       assertion = (cfg.systemd.services.agent-hub-llm.serviceConfig.User or null) == "agent-hub";
-      message = "the stub must leave User= (the module's) in place";
+      message = "User= must be the tenant's name (schema.nix's derived default)";
     }
     {
       assertion = (cfg.systemd.services.agent-hub-llm.serviceConfig.Restart or null) == "on-failure";
-      message = "the stub must leave Restart= (the module's) in place";
+      message = "Restart= must be on-failure (schema.nix's default, the retired module's value)";
     }
   ];
   # What the pull unit must look like whenever a stub is DECLARED, enable
@@ -275,7 +287,6 @@ let
     { homelab.tenants.arcade.environment.enable = true; }
   ]
   ++ extra;
-  arcadeModuleExecStart = u: (import floxhubFixture).systemd.services.${u}.serviceConfig.ExecStart;
 
   # What the floxhub pull must look like, enable on or off -- the header of
   # environment-pull.nix, "KIND = FLOXHUB".
@@ -355,11 +366,13 @@ in
       pullShape cfg [ ]
       ++ [
         {
-          assertion = cfg.systemd.services.agent-hub-llm.serviceConfig.ExecStart == moduleExecStart;
+          assertion = isPlaceholder "agent-hub-llm.service" "agent-hub" cfg.systemd.services.agent-hub-llm.serviceConfig.ExecStart;
           message = ''
-            environment.enable = false: ExecStart must be exactly the
-            module's. The stub is declared in the fixture with a command and
-            seven variables; none of it may reach the unit until enable.
+            environment.enable = false: ExecStart must be the placeholder
+            that exits 1 naming the flag. The stub is declared in the
+            fixture with a command and seven variables; none of it may
+            reach the unit until enable, and the unit must not be a
+            phantom either.
           '';
         }
         {
@@ -371,8 +384,19 @@ in
           message = "environment.enable = false: the slice is the contract's regardless";
         }
         {
-          assertion = cfg.systemd.services.agent-hub-llm.description == "" && cfg.systemd.services.agent-hub-llm.restartIfChanged;
+          assertion = cfg.systemd.services.agent-hub-llm.restartIfChanged;
           message = "environment.enable = false: the pull module must not touch the stub unit's own keys";
+        }
+        {
+          # The skeleton is there with the stub off: that is what makes a
+          # declared-but-not-switched-on unit a failed unit with a slice
+          # and a user, rather than nothing.
+          assertion =
+            cfg.systemd.services.agent-hub-llm.description == "agent-hub model server: llama-swap over 6 models (LAN only)"
+            && (cfg.systemd.services.agent-hub-llm.serviceConfig.User or null) == "agent-hub"
+            && (cfg.systemd.services.agent-hub-llm.serviceConfig.TimeoutStopSec or null) == 90
+            && cfg.systemd.services.agent-hub-llm.wantedBy == [ "multi-user.target" ];
+          message = "environment.enable = false: the skeleton (description, User, TimeoutStopSec, WantedBy) is rendered regardless";
         }
       ];
   };
@@ -474,12 +498,8 @@ in
     extraModules = on [ { homelab.tenants.agent-hub.enable = false; } ];
     checks = cfg: [
       {
-        assertion = cfg.systemd.services.agent-hub-llm.serviceConfig.ExecStart == moduleExecStart;
-        message = "a disabled tenant's stub must not run; ExecStart must be the module's";
-      }
-      {
-        assertion = cfg.systemd.services.agent-hub-llm.environment == { };
-        message = "a disabled tenant's stub must set no variables";
+        assertion = !(cfg.systemd.services ? agent-hub-llm);
+        message = "a disabled tenant's stub must emit no unit at all (and resources.nix no slice for it)";
       }
       {
         assertion = !(cfg.systemd.services ? agent-hub-environment-pull) && !(cfg.environment.etc ? "homelab/environments.json");
@@ -554,11 +574,12 @@ in
       ++ [
         {
           assertion =
-            cfg.systemd.services.arcade-freeciv.serviceConfig.ExecStart == arcadeModuleExecStart "arcade-freeciv"
-            && cfg.systemd.services.arcade-mindustry.serviceConfig.ExecStart == arcadeModuleExecStart "arcade-mindustry"
+            isPlaceholder "arcade-freeciv.service" "arcade" cfg.systemd.services.arcade-freeciv.serviceConfig.ExecStart
+            && isPlaceholder "arcade-mindustry.service" "arcade" cfg.systemd.services.arcade-mindustry.serviceConfig.ExecStart
             && cfg.systemd.services.arcade-freeciv.environment == { }
-            && cfg.systemd.services.arcade-mindustry.environment == { };
-          message = "enable = false: arcade-freeciv and arcade-mindustry must be exactly the module's -- no ExecStart, no variable";
+            && cfg.systemd.services.arcade-mindustry.environment == { }
+            && !(cfg.systemd.services.arcade-mindustry.serviceConfig ? StandardInputText);
+          message = "enable = false: arcade-freeciv and arcade-mindustry must refuse -- the placeholder ExecStart, no variable, no stdin";
         }
         {
           assertion = (cfg.systemd.services.arcade-freeciv.serviceConfig.Slice or null) == "interactive.slice";
@@ -581,7 +602,6 @@ in
         # its text is read at evaluation, never built. Contexts dropped on
         # both sides because lib.hasInfix is a builtins.match, which
         # refuses a needle with a store-path context.
-        noCtx = builtins.unsafeDiscardStringContext;
         wrapperText = u: noCtx cfg.systemd.services.${u}.serviceConfig.ExecStart.text;
         freecivWrapper = wrapperText "arcade-freeciv";
         mindustryWrapper = wrapperText "arcade-mindustry";
@@ -628,8 +648,130 @@ in
           # agent-hub, the tree kind, in the same evaluation with its
           # enable at the default: still exactly the module's unit (the
           # `enabled` case has the tree kind on).
-          assertion = cfg.systemd.services.agent-hub-llm.serviceConfig.ExecStart == moduleExecStart && cfg.systemd.services.agent-hub-llm.environment == { };
+          assertion = isPlaceholder "agent-hub-llm.service" "agent-hub" cfg.systemd.services.agent-hub-llm.serviceConfig.ExecStart && cfg.systemd.services.agent-hub-llm.environment == { };
           message = "the tree kind's stub is unchanged by the floxhub kind existing";
+        }
+        {
+          assertion =
+            (mindustry.serviceConfig.StandardInputText or null) == [ "config name Arcade" "config port 6567" "host Islands sandbox" ]
+            && (mindustry.serviceConfig.WorkingDirectory or null) == "/var/lib/arcade/mindustry"
+            && (freeciv.serviceConfig.WorkingDirectory or null) == "/var/lib/arcade/freeciv"
+            && !(freeciv.serviceConfig ? StandardInputText)
+            && mindustry.description == "Arcade Mindustry dedicated server (LAN only)";
+          message = "the skeleton fields must render: mindustry's three stdin lines in order, both WorkingDirectory=, no stdin on freeciv, the descriptions";
+        }
+      ];
+  };
+
+  # ---------------------------------------------------------------------
+  # The whole-unit stub (homelab-158.11): the skeleton fields and their
+  # defaults. A stub that names only `command` gets exactly the unit the
+  # retired modules made; every field set explicitly reaches its key.
+  # ---------------------------------------------------------------------
+
+  # Only `command`: every skeleton default -- the tenant's name as
+  # User/Group, on-failure/5, network-online After/Wants, multi-user
+  # WantedBy, a derived description -- and none of the optional keys
+  # (WorkingDirectory, TimeoutStopSec, StandardInputText).
+  skeletonDefaults = mkCase {
+    extraModules = on [
+      {
+        homelab.tenants.agent-hub.environment.units."agent-hub-llm.service" = lib.mkForce {
+          command = [ "llama-swap" ];
+        };
+      }
+    ];
+    checks =
+      cfg:
+      let
+        u = cfg.systemd.services.agent-hub-llm;
+        sc = u.serviceConfig;
+      in
+      [
+        {
+          assertion = u.description == "agent-hub: agent-hub-llm (from its flox environment)";
+          message = "a stub with no description must derive one from the tenant and the unit, got \"${u.description}\"";
+        }
+        {
+          assertion = (sc.User or null) == "agent-hub" && (sc.Group or null) == "agent-hub";
+          message = "User= and Group= must default to the tenant's name";
+        }
+        {
+          assertion = (sc.Restart or null) == "on-failure" && (sc.RestartSec or null) == 5;
+          message = "Restart=on-failure and RestartSec=5 are the defaults";
+        }
+        {
+          assertion =
+            u.after == [ "network-online.target" ]
+            && u.wants == [ "network-online.target" ]
+            && u.wantedBy == [ "multi-user.target" ];
+          message = "After=/Wants=network-online.target and WantedBy=multi-user.target are the defaults";
+        }
+        {
+          assertion = !(sc ? WorkingDirectory) && !(sc ? TimeoutStopSec) && !(sc ? StandardInputText);
+          message = "WorkingDirectory=, TimeoutStopSec= and StandardInputText= must be absent when their fields are unset";
+        }
+        {
+          assertion = lib.hasSuffix " -- llama-swap" sc.ExecStart && (u.environment.FLOX_DISABLE_METRICS or null) == "true";
+          message = "ExecStart is the activation and FLOX_DISABLE_METRICS is set even with no host variables";
+        }
+        {
+          assertion = (sc.Slice or null) == "background.slice";
+          message = "the slice is still the contract's";
+        }
+      ];
+  };
+
+  # Every skeleton field set explicitly: each reaches its key, on and off.
+  skeletonFields = mkCase {
+    extraModules = on [
+      {
+        homelab.tenants.agent-hub.environment.units."agent-hub-llm.service" = {
+          description = lib.mkForce "the model server";
+          user = "llm";
+          group = "models";
+          workingDirectory = "/var/lib/agent-hub/work";
+          restart = "always";
+          restartSec = 30;
+          timeoutStopSec = lib.mkForce 120;
+          after = lib.mkForce [ "qdrant.service" ];
+          wants = lib.mkForce [ "qdrant.service" ];
+          wantedBy = lib.mkForce [ ];
+          stdin = [
+            "one"
+            "two"
+          ];
+        };
+      }
+    ];
+    checks =
+      cfg:
+      let
+        u = cfg.systemd.services.agent-hub-llm;
+        sc = u.serviceConfig;
+        text = pullText cfg "agent-hub";
+      in
+      [
+        {
+          assertion =
+            u.description == "the model server"
+            && sc.User == "llm"
+            && sc.Group == "models"
+            && sc.WorkingDirectory == "/var/lib/agent-hub/work"
+            && sc.Restart == "always"
+            && sc.RestartSec == 30
+            && sc.TimeoutStopSec == 120
+            && u.after == [ "qdrant.service" ]
+            && u.wants == [ "qdrant.service" ]
+            && u.wantedBy == [ ]
+            && sc.StandardInputText == [ "one" "two" ];
+          message = "every skeleton field must reach its unit key verbatim";
+        }
+        {
+          # The pull unit reads the checkout's owner off the unit, so a
+          # `user` here is who the checkout belongs to.
+          assertion = lib.hasInfix "\nuser=llm\n" text;
+          message = "the pull's checkout owner must follow the stub's user";
         }
       ];
   };
@@ -669,6 +811,8 @@ in
     realRegistry = true;
     floxhubDisabled = true;
     floxhubEnabled = true;
+    skeletonDefaults = true;
+    skeletonFields = true;
     floxhubWithoutEnv = false;
     treeWithEnv = false;
     floxhubBadEnv = false;

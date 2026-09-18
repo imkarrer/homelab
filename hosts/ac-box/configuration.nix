@@ -5,10 +5,11 @@
 #   1. The hardware import. Nix's module system cannot make `imports` depend on
 #      `config`, so driving this from homelab.host.name is infinite recursion,
 #      not a style choice. It is therefore resolved with a literal path here.
-#   2. Wiring tenant options to host facts. Tenant modules declare and never
-#      reach, so something has to hand arcade-hub the LAN address -- and that
-#      something is the host composition, which is the one place allowed to know
-#      both sides.
+#   2. Wiring tenant options to host facts. A tenant's host side
+#      (hosts/ac-box/tenants/*.nix, since ADR 0009's modules left the
+#      closure) declares and never reaches, so something has to hand arcade
+#      the LAN address -- and that something is the host composition, which
+#      is the one place allowed to know both sides.
 { config, lib, ... }:
 
 let
@@ -216,203 +217,87 @@ in
     stateDir = "/var/lib/ac-host-dev";
   };
 
-  # The canonical arcade-hub module deliberately has no defaults for lanAddress
-  # or gameInterface: they were duplicated into two tenant modules and drifted.
-  # They are host facts, so they come from homelab.host and are passed in here.
+  # arcade's host side (hosts/ac-box/tenants/arcade.nix): the user, the
+  # directories, the SMB and rsync exports. lanAddress has no default there
+  # on purpose -- it was once duplicated into two tenant modules and
+  # drifted -- so the host fact is passed in from homelab.host here. The
+  # two game servers are the stubs further down, not options here.
   services.arcade-hub = {
     enable = true;
     lanAddress = config.homelab.host.networks.lan.address;
-    gameInterface = config.homelab.host.networks.lan.interface;
     rsync.enable = true;
-    freeciv.enable = true;
-    mindustry.enable = true;
   };
 
   # ---------------------------------------------------------------------------
   # agent-hub: the local coding-agent model server (tenant declared in
-  # tenants.nix, module imported from the agent-hub flake input).
+  # tenants.nix; host side in hosts/ac-box/tenants/agent-hub.nix, which
+  # since homelab-158.11 is where the option set below is declared -- the
+  # tenant's own module has left the closure, ADR 0009).
   #
-  # Phase 1 only -- serving, no repo access. runner.enable is deliberately
-  # left false: it needs a sops-backed githubTokenFile (beads homelab-bqo.10,
-  # still open) and the runner image loaded into this box's Docker, neither of
-  # which is done. Turning llm on does not turn runner on; they are separate
-  # flags for exactly this reason.
+  # Phase 1 only -- serving, no repo access. The runner (a Docker image the
+  # agent-hub tree builds) is off everywhere and declared nowhere in this
+  # closure; when it is switched on it arrives as a second stub, and its
+  # egress allowlist as a host firewall fact.
   #
-  # lanAddress/gameInterface come from homelab.host rather than the module's
-  # own defaults, same as services.arcade-hub above. The module happens to
-  # default to this box's values today, which is precisely the drift trap the
-  # arcade-hub comment describes -- host facts are read from the host, never
+  # lanAddress comes from homelab.host rather than a default, same as
+  # services.arcade-hub above: host facts are read from the host, never
   # inherited from a tenant's guess.
+  #
+  # What is NOT here any more, and where it went (homelab-158.11): the
+  # llama-swap table. Which engine, which GGUF, which flags per model, which
+  # models may stay resident together -- all of it is llama-swap.yaml in the
+  # agent-hub tree, read from the checkout at <environment.dir>. This block
+  # used to set those as options the module rendered into the table; the
+  # module stopped reading them on 18 Sep 2026 (.12) and they are gone with
+  # it. What stays is what the HOST decides: the threads and context the
+  # tier's fence affords, the port, the landing page, which models exist by
+  # name and kind (the landing page lists them), and the vector store.
   services.agent-hub = {
     enable = true;
     lanAddress = config.homelab.host.networks.lan.address;
-    gameInterface = config.homelab.host.networks.lan.interface;
 
     llm = {
       enable = true;
 
-      # ik_llama.cpp, not nixpkgs' llama-cpp, for every llama model below. On
-      # this CPU-only box the fork's matrix kernels are a 4-5x, measured 14
-      # Sep 2026 on the coder model, these cores and this memory placement:
-      # prefill 121 vs 30 tok/s, generation 12.5 vs 5.8 (agent-hub
-      # docs/prefill-tuning.md has every run). The unit before that change
-      # measured 17 / 4.5; the live unit after it measures 140 / 13.3 on the
-      # same 1707-token request, first token in 12 s instead of 99.
-      engine = "ik-llama-cpp";
-
-      # Five models behind the one port, swapped by llama-swap on demand (the
-      # agent-hub module's `models`; see its description). The two Qwen models
-      # may be resident together (`concurrent` below); the image model always
-      # runs alone. Every name here matches a file agent-hub's
-      # scripts/fetch-model.sh fetches, and is the `model` a request names.
-      #
-      # All paths are quoted STRINGS, not Nix path literals: the option type
-      # accepts either, but an unquoted ./path would make Nix copy the whole
-      # file into /nix/store at eval time. At 85 GB that is not a mistake you
-      # notice early.
+      # The six models behind the one port, by the names llama-swap.yaml
+      # spells them and the request names. Only `kind` and `description`
+      # are read (the landing page's models.json); the GGUF paths, flags
+      # and aliases are the table's. The reasoning behind each choice --
+      # Qwen3-Coder-Next 80B-A3B over the 480B (the 480B does not fit at a
+      # quantization that preserves code quality; CPU rate tracks ACTIVE
+      # parameters, 3B vs 35B), the prompt-cache sizes (--cache-ram 12288
+      # for coder: ~2.5 GiB per 32k conversation, agents alternate, five
+      # fit; 8192 for instruct), the embedding model at the unit's 23
+      # threads not 4 (prefill is compute-bound: 6.7 s per 938-token chunk
+      # at 4 threads, 16 Sep 2026), the image models' recipes (4-step
+      # klein, 8-step Z-Image, cfg 1.0, --diffusion-fa), and the flags every
+      # llama backend gets (-rtr: repack at load, disables mmap so the
+      # model is anonymous memory under this unit's NUMAPolicy below, ~6 %
+      # prefill; --flash-attn on; --jinja: tool calls, without it every
+      # request carrying `tools` is a 500; --metrics) and the ones removed
+      # by measurement (--numa distribute: sets no memory policy and fights
+      # the cgroup fence, 30 -> 16 tok/s; --threads-batch 46: SMT siblings
+      # cost ~20 %; --mlock: nothing to pin with -rtr and no swap) -- is
+      # recorded in agent-hub's docs/prefill-tuning.md and beside each
+      # entry in its llama-swap.yaml, which is where a table change is made.
       models = {
-        # Qwen3-Coder-Next, 80B total / 3B active MoE (512 experts, 10 routed
-        # per token), Q8_0, ~85 GB across four shards. Point llama.cpp at
-        # shard 1; it finds the rest in the same directory.
-        #
-        # Chosen over the bigger Qwen3-Coder-480B-A35B deliberately, and the
-        # reasoning is worth keeping because it inverts the obvious answer:
-        #
-        #   - The 480B does not fit here at a quantization that preserves
-        #     code quality. Q4_K_S is 273 GB against 251 GiB of physical RAM,
-        #     so it is not a tuning question -- it does not fit at all. What
-        #     fits is Q2_K_XL (180 GB) or Q3_K_S (207 GB), and sub-Q4
-        #     quantization damage lands hardest on exactly this workload.
-        #   - Qwen's own line on the 80B-A3B variant is that it retains ~96%
-        #     of the 480B flagship's quality. Trading ~4% of a full-precision
-        #     model against Q2/Q3 damage to a larger one is not a close call.
-        #   - Q8_0 is effectively lossless, so the number above is the
-        #     quality we actually get rather than a starting point to
-        #     degrade from.
-        #   - CPU token rate tracks ACTIVE parameters, not total. 3B active
-        #     vs 35B active is roughly a tenfold difference in memory traffic
-        #     per token on a box with no GPU and ~130 GB/s of DDR4 -- the
-        #     difference between a tool you use and one you wait on.
-        #
-        # If this turns out to be wrong, the 480B UD-Q2_K_XL is a modelPath
-        # change plus a memoryShare bump, and both can be A/B'd on this box.
-        coder = {
-          modelPath = "/srv/agent-hub/models/Qwen3-Coder-Next-Q8_0-00001-of-00004.gguf";
-          description = "Qwen3-Coder-Next 80B-A3B Q8_0 -- code. Chat tab.";
-          # The server-side prompt cache: when a request arrives whose prompt
-          # does not continue the slot's current one, the slot's KV state is
-          # saved here and a cached entry sharing >= 50 % of the new prompt is
-          # restored instead of re-prefilled. ik's default is 8192 MiB and it
-          # is already on (the journal on 14 Sep 2026 shows a 2637-token
-          # prompt restored in 1.2 ms where its prefill took 14.3 s), so this
-          # line sizes it rather than enables it. Measured cost per entry on
-          # this hybrid model: ~76 MiB base plus a ~75 MiB context checkpoint
-          # every 512 tokens (Gated-DeltaNet state cannot be rolled back, so
-          # the checkpoints are what let a prefix be reused), so a full 32k
-          # conversation is ~2.5 GiB and the default held three. Agents
-          # alternate on this model; 12 GiB holds about five. Prefill is the
-          # box's binding constraint and RAM is not, which is the whole trade.
-          # Counted in background's memoryShare below.
-          extraArgs = [ "--cache-ram" "12288" ];
-        };
-
-        # The same architecture, size and speed, tuned for instructions and
-        # prose instead of code: the model for inquire-platform's rubric
-        # scoring and for anything that is not a coding task. The aliases
-        # are the hosted model names inquire-platform hard-codes, so pointing
-        # its Anthropic SDK at this port (ANTHROPIC_BASE_URL) needs no code
-        # change -- both of its tiers land here.
-        instruct = {
-          modelPath = "/srv/agent-hub/models/Qwen3-Next-80B-A3B-Instruct-Q8_0.gguf";
-          description = "Qwen3-Next-80B-A3B-Instruct Q8_0 -- prose, judgement, inquire-platform scoring. Chat tab.";
-          aliases = [
-            "claude-sonnet-4-6"
-            "claude-haiku-4-5-20251001"
-          ];
-          # ik's default, written down so the memory arithmetic below has
-          # every term in this file. inquire-platform's scoring prompts share
-          # a rubric prefix, which is exactly what this cache is for.
-          extraArgs = [ "--cache-ram" "8192" ];
-        };
-
-        # Embeddings for the vector store (`vectors` below): the small end of
-        # the same Qwen3 family, 1024-dim vectors, resident with the chat
-        # models so an embedding request evicts nothing. The module puts
-        # llama-server in embedding mode and raises both batch sizes to the
-        # context, so a chunk up to 8k tokens embeds in one call; the KV for
-        # that context on a 0.6B model is under a GiB. The pooling is in the
-        # GGUF (last token), verified 14 Sep 2026 on the WSL box: 1842-token
-        # input, 1024-dim output, nearest-neighbour smoke green (agent-hub
-        # scripts/vectors-smoke.sh).
-        #
-        # Threads: the unit-wide 23, not the 4 this shipped with. Embedding
-        # is prefill, and prefill is compute-bound: at 4 threads a 938-token
-        # chunk took 6.7 s (140 tok/s, measured 16 Sep 2026, and four chunks
-        # in one request took four times as long -- CPU batching buys
-        # nothing). "Small model, few threads" was the wrong instinct; the
-        # model being small is what makes 23 threads cheap, not what makes
-        # them unnecessary. The cost of the share is only paid when an
-        # embedding batch and a chat request are busy at the same moment,
-        # which is what `concurrent` already means for coder and instruct.
+        coder.description = "Qwen3-Coder-Next 80B-A3B Q8_0 -- code. Chat tab.";
+        instruct.description = "Qwen3-Next-80B-A3B-Instruct Q8_0 -- prose, judgement, inquire-platform scoring. Chat tab.";
         embed = {
           kind = "embedding";
-          modelPath = "/srv/agent-hub/models/Qwen3-Embedding-0.6B-Q8_0.gguf";
           description = "Qwen3-Embedding-0.6B Q8_0 -- 1024-dim embeddings for Qdrant on :6333. POST /v1/embeddings.";
-          contextSize = 8192;
         };
-
-        # Image generation: Z-Image-Turbo (6B DiT, distilled to 8 steps with
-        # no classifier-free guidance) through stable-diffusion.cpp, which
-        # needs the diffusion model plus its Qwen3-4B text encoder and the
-        # FLUX autoencoder. ~11 GB resident -- small next to the Qwen models,
-        # but it still takes the whole fence while it runs, so it swaps like
-        # the others rather than sitting alongside them. CPU-only means
-        # minutes per image, not seconds; the defaults below are the model's
-        # own recipe (8 steps, cfg 1.0) so a bare OpenAI-style request with
-        # just a prompt produces a correct image.
-        # FLUX.2 klein, both sizes, next to Z-Image so they can be compared
-        # on the same prompts. 4-step distilled models (--steps 4, no CFG),
-        # each with the Qwen3 text encoder it was trained against -- the
-        # ORIGINAL Qwen3-4B / 8B, not Z-Image's 2507 Instruct -- and the
-        # FLUX.2 VAE. The 4B is Apache 2.0; the 9B is under BFL's
-        # non-commercial licence, which this box is. Both can also edit an
-        # image given one (/v1/images/edits), which Z-Image cannot.
         flux2-klein-4b = {
           kind = "image";
-          modelPath = "/srv/agent-hub/models/flux-2-klein-4b-Q8_0.gguf";
-          vae = "/srv/agent-hub/models/flux2-vae.safetensors";
-          textEncoder = "/srv/agent-hub/models/Qwen3-4B-Q8_0.gguf";
           description = "FLUX.2 klein 4B Q8_0 -- images, fastest here; also edits. Images tab only.";
-          extraArgs = [
-            "--steps" "4"
-            "--cfg-scale" "1.0"
-            "--diffusion-fa"
-          ];
         };
         flux2-klein-9b = {
           kind = "image";
-          modelPath = "/srv/agent-hub/models/flux-2-klein-9b-Q8_0.gguf";
-          vae = "/srv/agent-hub/models/flux2-vae.safetensors";
-          textEncoder = "/srv/agent-hub/models/Qwen3-8B-Q8_0.gguf";
           description = "FLUX.2 klein 9B Q8_0 -- images, best quality here; also edits. Images tab only.";
-          extraArgs = [
-            "--steps" "4"
-            "--cfg-scale" "1.0"
-            "--diffusion-fa"
-          ];
         };
-
         z-image-turbo = {
           kind = "image";
-          modelPath = "/srv/agent-hub/models/z_image_turbo-Q8_0.gguf";
           description = "Z-Image-Turbo Q8_0 -- images, ~4 min per 512x512 on this CPU. Images tab only.";
-          vae = "/srv/agent-hub/models/z_image-vae-ae.safetensors";
-          textEncoder = "/srv/agent-hub/models/Qwen3-4B-Instruct-2507-Q8_0.gguf";
-          extraArgs = [
-            "--steps" "8"
-            "--cfg-scale" "1.0"
-            "--diffusion-fa"
-          ];
         };
       };
 
@@ -422,8 +307,8 @@ in
       # want one per physical core -- oversubscribing to the siblings makes
       # a memory-bandwidth-bound workload slower, not faster.
       #
-      # This is the option's own documented contract: "must be set to match
-      # the CPU allowance the platform's tenant tier actually grants this
+      # This is the option's own documented contract: "must match the CPU
+      # allowance the platform's tenant tier actually grants this
       # service". If the tier shares below move, this moves with them.
       threads = 23;
 
@@ -433,23 +318,11 @@ in
       # compute-bound, this is Broadwell (no AVX-512), and ingesting a
       # six-figure-token prompt would take longer than the answer is worth.
       # Raise it once a measured prefill rate says it is affordable. As of
-      # 14 Sep 2026 one does -- 128 tok/s at 4k, 119 at 8k with the engine
-      # below -- so the full 32k is under five minutes and more is a routing
+      # 14 Sep 2026 one does -- 128 tok/s at 4k, 119 at 8k with the ik
+      # engine -- so the full 32k is under five minutes and more is a routing
       # decision (homelab-route) rather than a hardware one. Not raised in
       # the same change that swapped the engine; one variable at a time.
       contextSize = 32768;
-
-      # coder, instruct, the 9B image model and the embedding model stay
-      # loaded side by side, so switching between them costs no 20-30 s
-      # reload: 2 x ~80 GiB of anonymous memory (-rtr) plus KV and prompt
-      # cache for the Qwens, ~19 GiB for klein (9.5 GB diffusion + 8.3 GB
-      # Qwen3-8B encoder + VAE, and working memory), ~2 GiB for embed --
-      # which is what background's memoryShare below is sized for. They
-      # share the 23 cores when busy at once: an image takes the whole fence
-      # for minutes, so a chat request during one runs slowly rather than
-      # waiting for a reload. Asking for klein 4B or Z-Image still evicts
-      # all four; asking for any of these afterwards loads just that one.
-      concurrent = [ [ "coder" "instruct" "flux2-klein-9b" "embed" ] ];
 
       # nginx in front, so http://<lan>:8100/ is a page that lists chat
       # models and image models apart and opens each in its own UI.
@@ -459,78 +332,22 @@ in
       # joins this tenant's units in tenants.nix so it lives in the same
       # slice.
       landingPage = true;
-
-      # Applied to every llama backend above (the image backends have their
-      # own extraArgs); the module appends these after the flags it emits.
-      extraArgs = [
-        # Run-time repack: at load, rewrite the Q8_0 tensors into the
-        # row-interleaved layout the fork's GEMM wants. Worth ~6 % prefill
-        # (137 vs 128 tok/s at 4k), and it disables mmap, which is the point:
-        # the model is then anonymous memory allocated under THIS unit's
-        # NUMAPolicy below, so its placement across the two sockets is
-        # decided by this file rather than by whichever node the page cache
-        # happened to hold the file on. Load is ~20 s from a warm page cache.
-        "-rtr"
-
-        "--flash-attn" "on"
-
-        # Tool calling, step one. Without this, llama-server answers any
-        # request that carries `tools` with HTTP 500 "tools param requires
-        # --jinja flag", which is every request a coding agent sends -- found
-        # 16 Sep 2026 pointing opencode at this port. With it, the prompt is
-        # rendered by the GGUF's own chat template and tool calls are parsed
-        # server-side. The embedding backend inherits the flag and ignores
-        # it: it serves no chat endpoint.
-        #
-        # Step two is not settled. The ik build (agent-hub nix/ik-llama-cpp.nix,
-        # 3bb386e) has only the generic template-derived parser, which needs
-        # the literal <tool_call> to open a call. Qwen3-Coder-30B-A3B on the
-        # WSL box omitted that token in 7 of 7 samples, so every call came
-        # back as content; mainline llama.cpp newer than nixpkgs' b9190 has a
-        # Qwen3-Coder parser that tolerates the omission, and the WSL box
-        # serves that model with it (b11007). Whether Qwen3-Coder-Next does
-        # the same is untested here -- check the first opencode session's
-        # replies before trusting `coder` behind an agent.
-        "--jinja"
-
-        # Each llama backend serves /metrics on its loopback port; the LAN
-        # port's /metrics is llama-swap's own. Neither is scraped yet --
-        # see the agent-hub tenant's `metrics = null` in tenants.nix for
-        # why (metrics.nix scrapes 127.0.0.1 and this binds the LAN address).
-        "--metrics"
-
-        # Gone, with the measurement that removed each:
-        #
-        #   --numa distribute   Was called "THE flag on this box" here. It
-        #                       spreads THREADS across nodes and sets no
-        #                       memory policy -- numa_maps showed all 85 GB
-        #                       on node 1 regardless -- and its per-node
-        #                       pinning fights the cgroup fence: 30 -> 16
-        #                       tok/s prefill at 23 threads, and at 46
-        #                       threads generation collapsed to 0.15 tok/s.
-        #                       Placement is NUMAPolicy=interleave below.
-        #   --threads-batch 46  Prefill does NOT benefit from the SMT siblings
-        #                       here; threads landing on them cost ~20 %.
-        #                       The cpuset below holds 23 CPUs, so batch
-        #                       threads default to --threads.
-        #   --mlock             Nothing to pin: -rtr means no file-backed
-        #                       pages, and the box has no swap.
-      ];
     };
 
     # Qdrant on the LAN address, :6333, the store the `embed` model above
-    # writes into; the module keeps gRPC off so that is its only port.
-    # qdrant.service and /var/lib/qdrant join this tenant in tenants.nix --
-    # the same pairing rule as nginx.service. Empty until something indexes
-    # into it (homelab-jtn); agent-hub's scripts/vectors-smoke.sh proves the
-    # pair works without leaving data behind.
+    # writes into; gRPC is off so that is its only port. qdrant.service
+    # and /var/lib/qdrant join this tenant in tenants.nix -- the same
+    # pairing rule as nginx.service. Empty until something indexes into it
+    # (homelab-jtn); agent-hub's scripts/vectors-smoke.sh proves the pair
+    # works without leaving data behind.
     vectors.enable = true;
   };
 
-  # Where the model server's threads and memory go. Set here rather than in
-  # the agent-hub module because every value is a fact about THIS host's
-  # sockets and fence, not a property of the module. Merges with the
-  # module's own serviceConfig -- different keys, no conflict.
+  # Where the model server's threads and memory go. Set directly on the
+  # unit rather than as a stub field because every value is a fact about
+  # THIS host's sockets and fence, not part of the unit's skeleton
+  # (schema.nix says which keys are). Merges with what
+  # modules/tenant/environment.nix emits -- different keys, no conflict.
   systemd.services.agent-hub-llm.serviceConfig = {
     # Physical cores only: the fence background.slice gets from resources.nix
     # is 3-25 plus SMT siblings 31-53, and a child cgroup's cpuset must be a
@@ -547,58 +364,56 @@ in
     # node 1, measured -- and half the cores read every weight across QPI.
     # Interleave is what lets a two-socket thread set beat a one-socket one
     # with these kernels (121 vs 78 tok/s prefill, 12.5 vs 8.5 generation).
-    # -rtr in extraArgs makes this the policy for the model itself, not just
+    # -rtr (llama-swap.yaml's llama_extra) makes this the policy for the model itself, not just
     # for what the page cache happens to fault under it.
     NUMAPolicy = "interleave";
     NUMAMask = "0-1";
   };
 
   # ---------------------------------------------------------------------------
-  # ADR 0009 step 1: the same unit, run from agent-hub's flox environment.
+  # ADR 0009 step 1: agent-hub-llm.service, run from agent-hub's flox
+  # environment -- and since homelab-158.11 the WHOLE unit, declared here.
   #
   # ON as of homelab-158.3 -- and flipping it was that bead's LAST commit,
   # landed as a separate push, for a reason this file cannot enforce:
-  # enable = true replaces agent-hub-llm.service's ExecStart with an
-  # activation of `dir`, and the switch that carries it restarts the unit.
-  # Against an empty `dir` that activation cannot succeed and Restart=
-  # loops it. So `dir` must already hold a checkout of agent-hub, owned by
-  # the agent-hub user and activated once online (docs/flox-findings.md
-  # 1), BEFORE this line is true. Declaring the stub (units below) is what
-  # makes modules/tenant/environment-pull.nix keep that checkout, enable on
-  # or off; the order is: land the pull unit with this false, push agent-hub
-  # main so its trigger stages a sha, watch hub-status say
-  # `agent-hub env: staged X / applied X (run ...)`, THEN land this true.
-  # hub-status names the state where that order was not followed ("the
-  # stub is ON and nothing has been applied"). Turning it back to false is
-  # the rollback: the unit returns to the module's ExecStart at the next
-  # switch, and the checkout stays where it is.
+  # enable = true makes ExecStart an activation of `dir`, and the switch
+  # that carries it restarts the unit. Against an empty `dir` that
+  # activation cannot succeed and Restart= loops it. So `dir` must already
+  # hold a checkout of agent-hub, owned by the agent-hub user and activated
+  # once online (docs/flox-findings.md 1), BEFORE this line is true.
+  # Declaring the stub (units below) is what makes
+  # modules/tenant/environment-pull.nix keep that checkout, enable on or
+  # off; the order is: land the stub with this false, push agent-hub main
+  # so its trigger stages a sha, watch hub-status say `agent-hub env:
+  # staged X / applied X (run ...)`, THEN land this true. hub-status names
+  # the state where that order was not followed ("the stub is ON and
+  # nothing has been applied"). Back to false is the rollback: the unit's
+  # ExecStart becomes environment.nix's refusing placeholder at the next
+  # switch (there is no module to fall back to since .11) and the checkout
+  # stays where it is.
   #
-  # With enable = false this block contributes nothing to the unit
-  # (modules/tenant/environment.nix emits no key; homelab-158.2 proved the
-  # toplevel drvPath unchanged with it declared, and 158.3 proved the pull
-  # unit is the only addition).
-  #
-  # What the stub changes on agent-hub-llm.service: ExecStart becomes
-  # `flox activate -d <dir> -- llama-swap -config <dir>/llama-swap.yaml
-  # -listen 127.0.0.1:8100`, and the seven AGENT_HUB_* variables the
-  # manifest's hook would otherwise default are set here, from THIS file's
-  # values. Everything else -- the name, background.slice from tenants.nix,
-  # User=agent-hub, the cpuset and NUMA policy just above, Restart=,
-  # TimeoutStopSec=90, the nginx front and qdrant beside it -- is untouched.
-  #
-  # Every value below is the one modules/agent-hub.nix computes for the
-  # unit today, read from the same option where one exists so the two
-  # cannot drift while both are live. Two are literals the module has as
-  # constants rather than options, and say so. The manifest's hook defaults
-  # happen to equal these on the box; that is a coincidence this block
-  # exists to make irrelevant -- the .1 review's finding 1.
+  # What the stub declares, since .11, is the unit: `command` and the
+  # seven AGENT_HUB_* variables the manifest's hook would otherwise default
+  # (set here, from THIS file's values, so no default in the tenant tree is
+  # load-bearing on the box -- the .1 review's finding 1), and the skeleton
+  # the retired modules/agent-hub.nix used to supply: the description,
+  # User=/Group=agent-hub (the schema's default, the tenant's name),
+  # Restart=on-failure/RestartSec=5 (defaults), After=/Wants=
+  # network-online.target and WantedBy=multi-user.target (defaults), and
+  # TimeoutStopSec=90 -- llama-swap stops its backends itself on SIGTERM,
+  # and a model mid-load needs time to die cleanly before systemd
+  # escalates. background.slice is tenants.nix's via resources.nix; the
+  # cpuset and NUMA policy are the host's, just above. Every value below
+  # is read from the same option a second reader has (services.agent-hub,
+  # hosts/ac-box/tenants/agent-hub.nix) so the two cannot drift.
   homelab.tenants.agent-hub.environment =
     let
       llm = config.services.agent-hub;
       env = config.homelab.tenants.agent-hub.environment;
-      # The module's own expression: loopback when nginx owns the LAN side
-      # of the port (landingPage), the LAN address otherwise.
+      # Loopback when nginx owns the LAN side of the port (landingPage),
+      # the LAN address otherwise.
       listen = "${if llm.llm.landingPage then "127.0.0.1" else llm.lanAddress}:${toString llm.llm.port}";
+      modelCount = builtins.length (builtins.attrNames llm.llm.models);
     in
     {
       enable = true;
@@ -607,6 +422,10 @@ in
       # above reads the resolved value, so the -config path and the
       # activation share one spelling.
       units."agent-hub-llm.service" = {
+        # The retired module's description, verbatim: the model count is
+        # the one live thing the models table still says about the unit.
+        description = "agent-hub model server: llama-swap over ${toString modelCount} models (LAN only)";
+        timeoutStopSec = 90;
         command = [
           "llama-swap"
           "-config"
@@ -619,14 +438,11 @@ in
           AGENT_HUB_THREADS = toString llm.llm.threads;
           AGENT_HUB_CTX = toString llm.llm.contextSize;
           AGENT_HUB_LISTEN = listen;
-          # The module's swapConfig has `startPort = 18100` as a constant,
-          # not an option; the manifest's hook defaults the same number.
-          AGENT_HUB_BACKEND_PORT = "18100";
+          # llama-swap.yaml's `startPort`; one spelling, the option's.
+          AGENT_HUB_BACKEND_PORT = toString llm.llm.backendPort;
           AGENT_HUB_SWAP_CONFIG = "${toString env.dir}/llama-swap.yaml";
           # nix/sd-ui.html, the image backends' page, is a file of the
-          # tenant tree at `<dir>/nix` -- the module bakes it into the store
-          # (`${../nix/sd-ui.html}`), the environment reads it from the
-          # checkout.
+          # tenant tree at `<dir>/nix`, read from the checkout.
           AGENT_HUB_ASSETS = "${toString env.dir}/nix";
         };
       };
@@ -641,37 +457,29 @@ in
   # agent-hub's sha is. modules/tenant/environment-pull.nix's "KIND = FLOXHUB"
   # header is the mechanism; docs/flox-findings.md 3 the record.
   #
-  # OFF, and the same first-switch order as agent-hub's block above, one
-  # generation in place of one sha: this lands with enable = false (the pull
-  # unit and the pin file appear, arcade-freeciv and arcade-mindustry are
-  # byte-for-byte the module's); home-arcade main pushes generation 1 and
-  # its trigger stages it; arcade-environment-pull pulls the tracking
-  # checkout to /var/lib/arcade/env, warms `-g 1`, pins it; hub-status says
-  # `arcade env: staged g1 / applied g1 (run ...)`; THEN this flips true in
-  # its own push, and the switch restarts both units into `flox activate -d
-  # /var/lib/arcade/env -g 1 -- <server>`, offline. Back to false is the
-  # rollback. Both units are arcade's, drainable (AGENTS.md: bounce freely).
+  # Since homelab-158.11 these two stubs are the whole units: what
+  # home-arcade's modules/arcade-hub.nix used to supply -- the descriptions,
+  # User=/Group=arcade (the schema's default), WorkingDirectory= under the
+  # state dir (Mindustry writes config/ under its cwd), Restart=on-failure/
+  # RestartSec=5, After=/Wants= network-online.target, WantedBy=
+  # multi-user.target (all defaults) -- is spelled here or defaulted by
+  # schema.nix. interactive.slice is tenants.nix's via resources.nix; the
+  # firewall holes are the tenant's port claims there.
   #
-  # What each stub changes: ExecStart only, plus mindustry's stdin text and
-  # JAVA_TOOL_OPTIONS. Everything else -- the names, interactive.slice from
-  # tenants.nix, User=arcade, WorkingDirectory, Restart=on-failure,
-  # RestartSec=5, the firewall rules from the tenant's ports -- is whatever
-  # home-arcade's modules/arcade-hub.nix makes it. The values are the
-  # module's own ExecStart minus the store path, read from the same options
-  # (services.arcade-hub.*) so the two cannot drift while both are live:
+  # The values are the module's own argv minus the store path, read from
+  # the same options (services.arcade-hub.*, hosts/ac-box/tenants/arcade.nix)
+  # the exports read, so the two cannot drift:
   #
   #   freeciv    freeciv-server --bind <lan> --port <freeciv.port>
   #                --saves <state>/freeciv --log <state>/freeciv/server.log
   #   mindustry  mindustry-server, JAVA_TOOL_OPTIONS=-Xms256M -Xmx1G (the
   #              module's java flags), and the three console lines the
-  #              module's wrapper pipes into java carried as the unit's
-  #              StandardInputText= instead: Mindustry takes startup
-  #              commands on stdin, one per line, and joins argv into one
-  #              command (the module's comment has the history). The
-  #              nixpkgs mindustry-server wrapper execs java, so the unit's
-  #              main PID is java and stdin reaches it through `flox
-  #              activate --` (home-arcade's CI gate feeds it `version` the
-  #              same way).
+  #              module's wrapper once piped into java carried as the unit's
+  #              stdin: Mindustry takes startup commands on stdin, one per
+  #              line, and joins argv into one command. The nixpkgs
+  #              mindustry-server wrapper execs java, so the unit's main PID
+  #              is java and stdin reaches it through `flox activate --`
+  #              (home-arcade's CI gate feeds it `version` the same way).
   #
   # NO ARCADE_* variables, on purpose: the manifest has no [hook] (a
   # `${X:?}` hook fails CI's activation and the pull's warm, both of which
@@ -688,9 +496,9 @@ in
       # ON since 18 Sep 2026 12:27 CDT: generation 1 of imkarrer/arcade was
       # pulled, warmed and pinned at /var/lib/arcade/env with this false
       # (hub-status: staged g1 / applied g1). The switch carrying this line
-      # restarts both game units into `flox activate -d ... -g 1`. Back to
-      # false is the rollback: the module's ExecStart returns at the next
-      # switch and the checkout stays.
+      # restarted both game units into `flox activate -d ... -g 1`. Back to
+      # false is the rollback: the placeholder ExecStart at the next switch
+      # and the checkout stays.
       enable = true;
       source = {
         kind = "floxhub";
@@ -703,36 +511,37 @@ in
       # dir: derived to /var/lib/arcade/env (no state.dirs on the tenant;
       # homelab.host.paths.state/<tenant>/env). Inside the tenant's 0700
       # home, owned by arcade, as the pull unit creates it.
-      units."arcade-freeciv.service".command = [
-        "freeciv-server"
-        "--bind"
-        hub.lanAddress
-        "--port"
-        (toString hub.freeciv.port)
-        "--saves"
-        "${state}/freeciv"
-        "--log"
-        "${state}/freeciv/server.log"
-      ];
+      units."arcade-freeciv.service" = {
+        description = "Arcade Freeciv dedicated server (LAN only)";
+        workingDirectory = "${state}/freeciv";
+        command = [
+          "freeciv-server"
+          "--bind"
+          hub.lanAddress
+          "--port"
+          (toString hub.freeciv.port)
+          "--saves"
+          "${state}/freeciv"
+          "--log"
+          "${state}/freeciv/server.log"
+        ];
+      };
       units."arcade-mindustry.service" = {
+        description = "Arcade Mindustry dedicated server (LAN only)";
+        workingDirectory = "${state}/mindustry";
         command = [ "mindustry-server" ];
         environment.JAVA_TOOL_OPTIONS = "-Xms256M -Xmx1G";
+        # The module's three printf lines, verbatim, from the same options;
+        # systemd appends each StandardInputText= line to the buffer with a
+        # newline, which is what the module's `printf '%s\n'` produced.
+        stdin = [
+          "config name Arcade"
+          "config port ${toString hub.mindustry.port}"
+          "host ${hub.mindustry.map} ${hub.mindustry.mode}"
+        ];
       };
     };
 
-  # The stdin text for the mindustry stub -- the module's three printf lines
-  # verbatim, from the same options. Gated on the stub being on, so with it
-  # off this key is absent and the unit is byte-for-byte the module's (the
-  # drvPath proof homelab-158.5 recorded). systemd appends each
-  # StandardInputText= line to the buffer with a newline, which is what the
-  # module's `printf '%s\n'` produced.
-  systemd.services.arcade-mindustry.serviceConfig.StandardInputText =
-    lib.mkIf config.homelab.tenants.arcade.environment.enable
-      [
-        "config name Arcade"
-        "config port ${toString config.services.arcade-hub.mindustry.port}"
-        "host ${config.services.arcade-hub.mindustry.map} ${config.services.arcade-hub.mindustry.mode}"
-      ];
   # ---------------------------------------------------------------------------
   # Tier shares, rebalanced to point this machine at the model server.
   #
@@ -783,8 +592,8 @@ in
       cpuShare = 0.05;
     };
     background = {
-      # ~203 GiB, sized to hold everything `concurrent` above keeps resident
-      # at once, worst case:
+      # ~203 GiB, sized to hold everything llama-swap.yaml's `matrix` (agent-hub;
+      # the resident set: coder, instruct, klein 9B, embed) keeps loaded at once, worst case:
       #     coder     80.5 GiB   measured, anonymous under -rtr, with KV
       #     instruct  80.4 GiB   measured (RSS, 14 Sep 2026)
       #     klein 9B  ~19 GiB    17 GiB of weights + working memory, estimated
