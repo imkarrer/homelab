@@ -18,6 +18,18 @@
     "ac"
   ];
   nix.settings.auto-optimise-store = true;
+
+  # Every build the daemon runs -- and it runs every build a NON-trusted
+  # user asks for, in nix-daemon.service, system.slice, on every core --
+  # yields to the box's real work. Belt and braces under ADR 0009: the
+  # tenant's pull unit realises its locked paths substitute-only
+  # (modules/tenant/environment-pull.nix) precisely so the daemon never
+  # compiles a tenant's package on the box; this is the floor if something
+  # else asks it to. The deploy unit's own closure build is root, local
+  # store, its own Nice=19/idle -- unaffected. Changes nix-daemon.service
+  # (CPUSchedulingPolicy=batch, IOSchedulingClass=idle): intended.
+  nix.daemonCPUSchedPolicy = "batch";
+  nix.daemonIOSchedClass = "idle";
   nix.gc = {
     automatic = true;
     dates = "weekly";
