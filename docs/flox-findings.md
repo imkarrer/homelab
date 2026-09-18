@@ -7,6 +7,89 @@ runs on the answer, **partial** when a WSL experiment settled part of it, and
 **open** when nothing has been tried. Where a docs claim could not be
 verified it is marked as such rather than repeated as fact.
 
+## Summary — what one box taught in two days (17–18 Sep 2026)
+
+**What runs from flox on ac-box now.** Two of six tenants run from flox
+environments under systemd: `agent-hub` (llama-swap + a llama.cpp fork +
+stable-diffusion.cpp, staged as its tree at a sha) and `arcade` (freeciv +
+mindustry, staged as FloxHub generation N of `imkarrer/arcade`). Both reach
+the box in about four minutes from a green push — stage, substitute-only
+pull, one online warm, restart under the tenant's quiet policy — with no
+closure switch and no human. The racing tenant's bot and sidecars run an
+image built by `flox containerize` in CI; the 03:00 window no longer fetches
+from PyPI or Docker Hub. The CI tenant is built to run natively from an
+environment (cutover pending, `docs/runbook-ci-native-cutover.md`). The
+observability tenant stays NixOS, for reasons that are product asks (§5).
+flox itself is v1.16.0, pinned once (homelab's `flox` flake input) and read
+from the lock by the box, the gate and — after its next recreate — CI.
+
+**The argument this supports.** A tenant author writes no Nix: a tenant is a
+`manifest.toml` in its own tree, the same for the developer, CI and the
+box; per-package versions are one line (agent-hub's fork, mindustry's
+version); one tenant's red no longer blocks another's deploy; a re-lock is a
+deploy (`.15`: curl/jq/llama-swap moved through the sha edge on 1.16.0).
+The closure kept the host and the contract — hardware, slices, firewall,
+secrets, the busy gate — and got *thinner*: two tenant modules and two flake
+inputs left it with the system derivation byte-identical (`homelab-158.11`).
+That boundary is where flox's value is clearest: **flox replaces the Nix a
+tenant author would write; it does not replace the Nix that configures the
+machine**, and this deployment did not need it to.
+
+**What flox could not do, ranked by what it cost here** (each detailed
+below, each verified rather than read):
+
+1. **`[services]` cannot be supervised** — a died service is invisible to
+   the activation (`flox_never_exit` sentinel, no exit-on-failure). Cost:
+   one unit per process, `flox activate -- <binary>`; `[services]` is
+   dev-only. §2.
+2. **An environment's closure is not what activating it elsewhere needs** —
+   the lock's `outputs` is. A `-dev` output nobody linked compiled sd.cpp on
+   the production box for three minutes. Cost: the plugin pushes every lock
+   output; the pull demands every one. §1.
+3. **`flox activate` writes `.flox/log` on every activation and a hook's
+   exit status is collapsed to 1.** Cost: an environment cannot sit under
+   `DynamicUser`/`ProtectSystem=strict`; observability stays NixOS. §5.
+4. **A fresh checkout cannot push a new generation** (`push --force` rewrites
+   remote history). Cost: CI pulls the live generation, overlays the tree's
+   manifest and lock, `edit --sync`, pushes. "Beyond the six", `.5`.
+5. **A custom derivation enters an environment only by flake reference or
+   `flox publish`**, and a generation carries manifest + lock but no repo
+   files — so a tenant that reads a file from its tree deploys as a sha, not
+   a generation. Cost: two source kinds in the pull unit. "Beyond the six",
+   `.1`; ADR 0009's decision bullet.
+6. **`[vars]` clobbers the caller and a hook runs on every activation
+   including the warm**, so a required host fact cannot live in the
+   manifest at all. Cost: host facts arrive as `Environment=` from the stub
+   (agent-hub) or as argv/stdin (arcade); defaults only when
+   `INVOCATION_ID` is unset. §5, `.12`.
+7. **Nothing on a path environment says which generation it is**, and
+   `pull -g N` requires `--copy`, which discards identity. Cost: a pin file
+   and our own applied record; the run link's `.genN` suffix is the stamp.
+   §3.
+8. **FloxHub environments cannot be deleted from the CLI**; a CI that
+   pushes per green build accumulates generations with no way to prune.
+   Three throwaway environments remain from this work.
+9. **Version coupling has a trap**: flox's own flake spells its cache
+   `cache.flox.dev?priority=50`, which an untrusted user's
+   `trusted-substituters` no longer matches — the first `nix build` of
+   v1.16.0 on WSL compiled flox for ten minutes. §6.
+
+**What flox did well, verified**: offline activation once warmed (52–88 ms;
+a tracking pull warms itself); `activate -g N` pins a generation and stamps
+the run link; `FLOX_FLOXHUB_TOKEN` non-interactive push; a public
+environment pulls with no token; locks written by 1.16 read by 1.14 and
+vice-versa; `containerize` from the dev manifest with the same closure CI
+tests; nested activations (a job's environment over the agent's).
+
+**Two things 1.16.0 shipped that bear on this design**: a
+`nixosModules.flox` that does what `modules/tenant/environment.nix` does,
+with `pullAtServiceStart = true` — the network-at-start posture ADR 0009
+rejected on purpose (findings §1); and catalog auth gating, which makes a
+re-lock need a token wherever it runs (CI has one; the box never resolves).
+Worth a direct comparison before this hub's module grows further.
+
+---
+
 Environment for the WSL experiments: flox `1.14.1-gaad7ad2` (bundled nix
 2.31.5, process-compose 1.94.0), 17 Sep 2026, **not logged in to FloxHub** —
 so every `-r` / `push` / `pull` / `generations` behaviour on a managed
@@ -277,7 +360,23 @@ render failure is attributable.
   decodes a JWT's expiry and names the FloxHub setting for the other kind.
   Also: `flox gc` runs a full `nix store gc` — never in a tenant unit.
 
-## 6. Version coupling — partial (answered for the box and dev; CI's copy is by hand)
+## 6. Version coupling — answered (box, gate and dev read one pin; CI's copy follows it, and is retired by `.6`)
+
+**Upgrade to v1.16.0, 18 Sep (`homelab-158.15`, `docs/flox-upgrade-1.16.md`):**
+reader-first — the box (`03a2285`, three stubs restarted clean), then the CI
+image's `FLOX_VERSION` (ac-host `c779aab`, live at the next recreate), then
+the manifests. `lockfile-version` stayed 1 and a 1.16 re-lock keeps
+`schema-version = "1.14.0"`, so nothing had to go first; the one thing
+1.14.x refuses is the hand-bumped schema string, which waits for the
+agent. The proof that the upgrade deploys: agent-hub re-locked by 1.16.0
+(curl 8.21.0, jq 1.8.2, llama-swap rebuilt) went push → stage → pull →
+restart on the 1.16.0 box with the agent's 1.14.0 reading the lock in CI.
+None of the product asks above landed in 1.15 or 1.16 (each re-verified).
+The trap: `cache.flox.dev?priority=50` (Summary, item 9). What remains a
+hand-kept copy — the CI container's flox — disappears when `.6` cuts over
+and the agent's flox is the box's.
+
+**Before the upgrade:**
 
 **The pin is `flake.nix`'s `flox` input; everything else reads the lock.**
 From `homelab-158.2`: `modules/platform/flox.nix` installs the package that
