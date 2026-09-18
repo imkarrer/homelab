@@ -254,16 +254,36 @@ BOXTXT=$("${SSH[@]}" '
   # whose pull unit exists and has never been staged still gets a line.
   # queue-environment (Buildkite, via the tenant'"'"'s trigger) writes pending;
   # the pull unit writes applied after the restart. Same grep shape as the
-  # closure pair: every record is one line of JSON with known keys.
+  # closure pair: every record is one line of JSON with known flat keys
+  # (the box has no jq on its path). The tenant list is anchored on the
+  # "unit" key, whose value names the tenant, rather than on the order
+  # toJSON happens to emit keys in (.3'"'"'s review). Two source kinds: tree
+  # (a sha) and floxhub (a generation, a JSON number, with the tenant
+  # commit that pushed it as "rev"); ENVSOURCE says which, and the staged
+  # /applied values are the sha or the generation accordingly.
   e=/etc/homelab/environments.json
-  echo "ENVTENANTS=$(grep -oE "\"[A-Za-z0-9_-]+\":\{\"applied\":" $e 2>/dev/null | cut -d\" -f2 | tr "\n" " ")"
-  for t in $(grep -oE "\"[A-Za-z0-9_-]+\":\{\"applied\":" $e 2>/dev/null | cut -d\" -f2); do
+  tenants=$(grep -oE "\"unit\":\"[A-Za-z0-9_-]+-environment-pull\.service\"" $e 2>/dev/null | sed -E "s/\"unit\":\"(.*)-environment-pull\.service\"/\1/")
+  echo "ENVTENANTS=$(echo "$tenants" | tr "\n" " ")"
+  for t in $tenants; do
     p=$h/pending-environment-$t.json; a=$h/last-applied-environment-$t.json
-    echo "ENVSTUB_$t=$(grep -oE "\"$t\":\{[^}]*\"enable\":(true|false)" $e | grep -oE "(true|false)$")"
-    echo "ENVTREE_$t=$(grep -oE "\"$t\":\{[^}]*\"tree\":\"[^\"]*\"" $e | grep -oE "[^\"]*\"$" | tr -d "\"")"
-    echo "ENVPENDING_$t=$(grep -oE "\"sha\":\"[0-9a-f]{40}\"" $p 2>/dev/null | grep -oE "[0-9a-f]{40}" | head -1)"
+    # This tenant'"'"'s own object: from its opening brace to the "unit" key
+    # that names it. Nested values are absent by construction (flat keys).
+    obj=$(grep -oE "\"$t\":\{[^{}]*\"unit\":\"$t-environment-pull\.service\"" $e)
+    src=$(echo "$obj" | grep -oE "\"source\":\"[a-z]+\"" | cut -d\" -f4)
+    echo "ENVSOURCE_$t=$src"
+    echo "ENVENV_$t=$(echo "$obj" | grep -oE "\"env\":\"[^\"]*\"" | cut -d\" -f4)"
+    echo "ENVSTUB_$t=$(echo "$obj" | grep -oE "\"enable\":(true|false)" | grep -oE "(true|false)$")"
+    echo "ENVTREE_$t=$(echo "$obj" | grep -oE "\"tree\":\"[^\"]*\"" | cut -d\" -f4)"
+    if [ "$src" = floxhub ]; then
+      echo "ENVPENDING_$t=$(grep -oE "\"generation\":[0-9]+" $p 2>/dev/null | grep -oE "[0-9]+" | head -1)"
+      echo "ENVPENDINGREV_$t=$(grep -oE "\"rev\":\"[0-9a-f]{40}\"" $p 2>/dev/null | grep -oE "[0-9a-f]{40}" | head -1)"
+      echo "ENVAPPLIED_$t=$(grep -oE "\"generation\":[0-9]+" $a 2>/dev/null | grep -oE "[0-9]+" | head -1)"
+      echo "ENVPINNED_$t=$(cat $h/pinned-environment-$t 2>/dev/null | grep -oE "^[0-9]+$")"
+    else
+      echo "ENVPENDING_$t=$(grep -oE "\"sha\":\"[0-9a-f]{40}\"" $p 2>/dev/null | grep -oE "[0-9a-f]{40}" | head -1)"
+      echo "ENVAPPLIED_$t=$(grep -oE "\"sha\":\"[0-9a-f]{40}\"" $a 2>/dev/null | grep -oE "[0-9a-f]{40}" | head -1)"
+    fi
     echo "ENVQUEUED_$t=$(grep -oE "\"queued_at\":\"[^\"]*\"" $p 2>/dev/null | cut -d\" -f4)"
-    echo "ENVAPPLIED_$t=$(grep -oE "\"sha\":\"[0-9a-f]{40}\"" $a 2>/dev/null | grep -oE "[0-9a-f]{40}" | head -1)"
     echo "ENVRUN_$t=$(grep -oE "\"run_path\":\"[^\"]*\"" $a 2>/dev/null | cut -d\" -f4 | sed "s|^/nix/store/||")"
     echo "ENVAPPLIEDAT_$t=$(grep -oE "\"applied_at\":\"[^\"]*\"" $a 2>/dev/null | cut -d\" -f4)"
     # is-failed prints the state either way; "failed" is the verdict, and
@@ -465,42 +485,74 @@ else
   fi
   # One line per flox tenant (ADR 0009): what CI staged against what the
   # pull unit applied, the run store path as the content stamp (docs/
-  # flox-findings.md 3), and whether the stub runs from it. A staged sha
-  # the pull has not landed is a state for ~15 min (the path unit fires
-  # at once; the warm can take minutes online) and a verdict after it --
-  # the pull failed soft, the tenant was busy, or nothing is watching. A
+  # flox-findings.md 3), and whether the stub runs from it. Two source
+  # kinds, one line shape: a tree tenant's unit is a sha (`staged abc1234`),
+  # a floxhub tenant's a generation (`staged g4`, the tenant commit that
+  # pushed it in brackets, and the pin the stub reads when it disagrees
+  # with what was applied). A staged unit the pull has not landed is a
+  # state for ~15 min (the path unit fires at once; the warm can take
+  # minutes online) and a verdict after it -- the pull failed soft, the
+  # tenant was busy, or nothing is watching. A record with no queued_at
+  # (hand-written on the box) has no age: it is reported as staged, never
+  # as stale (.3's review: `date -d ""` is midnight today, not unknown). A
   # stub that is on with nothing applied is the one state modules/tenant/
   # environment-pull.nix's first-switch order exists to prevent, and it
   # is named as such. The tenant's origin HEAD is held against the staged
-  # sha the way the closure's is: a green push whose trigger did not stage
-  # is otherwise invisible (the trigger is async and soft_fail).
+  # sha (tree) or the staged record's rev (floxhub) the way the closure's
+  # is: a green push whose trigger did not stage is otherwise invisible
+  # (the trigger is async and soft_fail).
   s7() { if [ -n "$1" ]; then echo "${1:0:7}"; else echo none; fi; }
+  gN() { if [ -n "$1" ]; then echo "g$1"; else echo none; fi; }
   for t in $(get ENVTENANTS); do
     EP=$(get "ENVPENDING_$t"); EA=$(get "ENVAPPLIED_$t"); ER=$(get "ENVRUN_$t"); ES=$(get "ENVSTUB_$t")
     EPULL=$(get "ENVPULL_$t"); EPATH=$(get "ENVPATH_$t"); ELOG=$(get "ENVLOG_$t"); ET=$(get "ENVTREE_$t")
+    ESRC=$(get "ENVSOURCE_$t"); EENV=$(get "ENVENV_$t"); EPREV=$(get "ENVPENDINGREV_$t"); EPIN=$(get "ENVPINNED_$t")
     stub=$([ "$ES" = true ] && echo "stub ON" || echo "stub off")
-    echo "$t env    : staged $(s7 "$EP") / applied $(s7 "$EA")${ER:+ (run ${ER:0:7})} - $stub, pull unit ${EPULL:-absent}, path ${EPATH:-absent}"
+    if [ "$ESRC" = floxhub ]; then
+      disp() { gN "$1"; }
+      # What the tree's origin HEAD is compared with: the record's rev.
+      staged_rev=$EPREV
+      what="$(gN "$EP")${EPREV:+ [${EPREV:0:7}]}"
+      echo "$t env    : staged $(gN "$EP") / applied $(gN "$EA")${ER:+ (run ${ER:0:7})} - $EENV, $stub, pull unit ${EPULL:-absent}, path ${EPATH:-absent}"
+      # A pin that matches neither record: in flight it equals the staged
+      # generation (pinned, restart pending), and the staged verdict below
+      # covers that; anything else is a hand edit or a dead pull.
+      if [ -n "$EA" ] && [ "$EPIN" != "$EA" ] && [ "$EPIN" != "$EP" ]; then
+        note "$t env: the stub is pinned to $(gN "$EPIN") but $(gN "$EA") was applied - the pin file and the applied record disagree (pinned-environment-$t was edited, or the pull died between the pin and the record)"
+      fi
+    else
+      disp() { s7 "$1"; }
+      staged_rev=$EP
+      what="$(s7 "$EP")"
+      echo "$t env    : staged $(s7 "$EP") / applied $(s7 "$EA")${ER:+ (run ${ER:0:7})} - $stub, pull unit ${EPULL:-absent}, path ${EPATH:-absent}"
+    fi
     if [ "$EPULL" = failed ]; then
       note "$t env: $t-environment-pull.service failed - ${ELOG:-see journalctl -u $t-environment-pull}"
     fi
     if [ -n "$EP" ] && [ "$EP" != "$EA" ]; then
-      qage=$(( $(date +%s) - $(date -d "$(get "ENVQUEUED_$t")" +%s 2>/dev/null || date +%s) ))
+      EQ=$(get "ENVQUEUED_$t")
+      qage=""
+      if [ -n "$EQ" ]; then
+        qts=$(date -d "$EQ" +%s 2>/dev/null) && qage=$(( $(date +%s) - qts ))
+      fi
       if [ "$EPATH" != enabled ]; then
-        note "$t env: ${EP:0:7} is staged but $t-environment-pull.path is ${EPATH:-absent} - nothing will pull it"
-      elif [ "$qage" -gt 900 ]; then
-        note "$t env: ${EP:0:7} staged $(ago $(( $(date +%s) - qage ))) ago, applied is $(s7 "$EA") - the pull has not landed it (${ELOG:-journalctl -u $t-environment-pull})"
+        note "$t env: $what is staged but $t-environment-pull.path is ${EPATH:-absent} - nothing will pull it"
+      elif [ -n "$qage" ] && [ "$qage" -gt 900 ]; then
+        note "$t env: $what staged $(ago $(( $(date +%s) - qage ))) ago, applied is $(disp "$EA") - the pull has not landed it (${ELOG:-journalctl -u $t-environment-pull})"
+      elif [ -z "$qage" ]; then
+        echo "             $t env: $what is staged (no queued_at in the record, age unknown); $t-environment-pull applies it within minutes (${ELOG:-no journal line yet})"
       else
-        echo "             $t env: ${EP:0:7} is staged; $t-environment-pull applies it within minutes (${ELOG:-no journal line yet})"
+        echo "             $t env: $what is staged; $t-environment-pull applies it within minutes (${ELOG:-no journal line yet})"
       fi
     fi
     if [ "$ES" = true ] && [ -z "$EA" ]; then
-      note "$t env: the stub is ON and nothing has been applied - its unit activates an empty ${t} environment; stage a sha now (environment-pull.nix's first-switch order was not followed)"
+      note "$t env: the stub is ON and nothing has been applied - its unit activates an empty ${t} environment; stage a ${ESRC:-tree} record now (environment-pull.nix's first-switch order was not followed)"
     fi
     # Only once the edge has carried something: a tenant with no pending
     # and no applied record has never been wired (its pipeline lacks the
     # trigger yet), and that is a line above, not a problem.
-    if { [ -n "$EP" ] || [ -n "$EA" ]; } && [ -n "$ET" ] && [ -n "${OHEAD[$ET]:-}" ] && [ "${OHEAD[$ET]}" != "$EP" ] && [ $(( $(date +%s) - ${OHEADT[$ET]:-0} )) -gt 1800 ]; then
-      note "$t env: $ET origin HEAD ${OHEAD[$ET]:0:7} ($(ago "${OHEADT[$ET]}") ago) is not staged on the box (staged $(s7 "$EP")) - its build's trigger did not run queue-environment (red gate? trigger missing? HOMELAB_STAGE_ENVIRONMENT not routed?)"
+    if { [ -n "$EP" ] || [ -n "$EA" ]; } && [ -n "$ET" ] && [ -n "${OHEAD[$ET]:-}" ] && [ "${OHEAD[$ET]}" != "$staged_rev" ] && [ $(( $(date +%s) - ${OHEADT[$ET]:-0} )) -gt 1800 ]; then
+      note "$t env: $ET origin HEAD ${OHEAD[$ET]:0:7} ($(ago "${OHEADT[$ET]}") ago) is not staged on the box (staged $(s7 "$staged_rev")) - its build's trigger did not run queue-environment (red gate? trigger missing? HOMELAB_STAGE_ENVIRONMENT not routed?)"
     fi
   done
   echo "homelab    : HEAD ${HEADSHA:0:7}$([ "$(git -C "$HL" status --porcelain 2>/dev/null | wc -l)" != 0 ] && echo ' (+ uncommitted changes)')"
