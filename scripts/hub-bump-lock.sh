@@ -33,7 +33,14 @@
 # so a tenant tip that breaks the composition never lands on main. The
 # pushed commit then gets homelab's ordinary build, which is what stages it.
 set -euo pipefail
-export NIX_CONFIG="experimental-features = nix-command flakes"
+# flake.nix declares nixConfig (the flox cache substituter). Without
+# accept-flake-config every `nix flake` command here asks "do you want to
+# allow configuration setting ... (y/N)?" -- a real prompt under Buildkite's
+# PTY, which nobody answers: on 18 Sep 2026 `nix flake update` sat in
+# n_tty_read for 25 minutes holding the only agent. hub-gates.sh passes
+# --accept-flake-config per call; this covers update and check alike.
+export NIX_CONFIG="experimental-features = nix-command flakes
+accept-flake-config = true"
 
 HUB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$HUB"
