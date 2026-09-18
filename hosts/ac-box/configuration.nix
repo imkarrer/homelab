@@ -685,7 +685,13 @@ in
       state = toString hub.stateDir;
     in
     {
-      enable = false;
+      # ON since 18 Sep 2026 12:27 CDT: generation 1 of imkarrer/arcade was
+      # pulled, warmed and pinned at /var/lib/arcade/env with this false
+      # (hub-status: staged g1 / applied g1). The switch carrying this line
+      # restarts both game units into `flox activate -d ... -g 1`. Back to
+      # false is the rollback: the module's ExecStart returns at the next
+      # switch and the checkout stays.
+      enable = true;
       source = {
         kind = "floxhub";
         env = "imkarrer/arcade";
