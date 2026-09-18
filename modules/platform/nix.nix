@@ -3,7 +3,7 @@
 # today (root, nixosuser, ac) rather than derived from modules/platform/identity.nix's
 # user set — deriving it would be a behaviour-preserving refactor in spirit,
 # but this layer's job is a clean no-op closure diff, not a tidier equivalent.
-{ ... }:
+{ config, lib, ... }:
 
 {
   nixpkgs.config.allowUnfree = true;
@@ -30,6 +30,16 @@
   # (CPUSchedulingPolicy=batch, IOSchedulingClass=idle): intended.
   nix.daemonCPUSchedPolicy = "batch";
   nix.daemonIOSchedClass = "idle";
+  # ...and the daemon's builds under the batch tier's ceiling, not merely
+  # its scheduling class. Everything a non-root client builds -- a tenant
+  # user's warm (never a compile by design, but the floor is here), an
+  # operator's `nix build` over ssh -- runs in nix-daemon.service's cgroup,
+  # and until 18 Sep 2026 that was system.slice: unfenced cores, no memory
+  # ceiling, beside the race servers. Root clients (homelab-deploy, the
+  # native CI agent with NIX_REMOTE=local) build in their own units and
+  # are unaffected. batch.slice exists whenever enforce.slices is on.
+  systemd.services.nix-daemon.serviceConfig.Slice =
+    lib.mkIf config.homelab.enforce.slices "batch.slice";
   nix.gc = {
     automatic = true;
     dates = "weekly";
