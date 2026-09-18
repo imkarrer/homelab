@@ -108,7 +108,7 @@ build found that the WSL experiments had not:
   for that one process. Nothing is written by agent-hub's hook, so this is
   benign; a hook with side effects would run once with unreviewed values.
 
-## 2. `[services]` under systemd — partial (answered on WSL, not yet on the box)
+## 2. `[services]` under systemd — answered (on the box, 18 Sep 2026: arcade runs two stubs from one environment; agent-hub one)
 
 **`flox activate -- <binary>` is what systemd can supervise. `[services]` is a
 dev-shaped process manager.**
