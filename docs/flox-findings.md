@@ -54,7 +54,12 @@ locally; it is not offline-safe from a lock alone.**
 - An environment with only `manifest.lock` present (what "pulled, never
   activated" looks like; produced with `flox lock-manifest`) fails offline,
   exit 1: `unable to download https://github.com/flox/nixpkgs/archive/….tar.gz`.
-  One online activation fixes it permanently.
+  One online activation fixes it permanently. For a FloxHub *tracking*
+  checkout (`flox pull owner/name`, `.5`) a second thing must be local:
+  the owner's floxmeta clone under `$HOME/.local/share/flox/meta/`. With
+  it absent, even `flox activate -d` of a checkout whose run links exist
+  tries to re-clone from api.flox.dev and fails offline (WSL, 18 Sep 2026,
+  1.14.0). The pull unit checks for it before saying "already applied".
 - Activation registers `.flox/run/<system>.<name>-{dev,run}` as nix GC roots
   (`/nix/var/nix/gcroots/auto/*`), so a warmed environment survives
   `nix-collect-garbage` while `.flox/run` stays.
@@ -180,6 +185,32 @@ tenant. One detail the path environment adds: the link is named from
 `.flox/env.json`'s `name`, not from the directory, so the pull reads the
 name from there rather than guessing it from the tenant.
 
+Written as of `homelab-158.5` (arcade, `source.kind = floxhub`; the
+box-side verification is the first generation's pull, WSL proved the
+shape with flox 1.14.0 against `imkarrer/hub-spike-2026-09-18`): **the
+box runs a tracking checkout pinned at activation, and the generation is
+ours to record.** `flox pull owner/name` keeps flox's own identity beside
+ours — `.flox/env.json` (owner, name, hub) and `.flox/env.lock` (`rev`,
+the floxmeta commit; `local_rev`, null unless someone edited in place) —
+and `flox generations list --json` reads the generation table offline
+from the owner's floxmeta clone under `$HOME/.local/share/flox/meta/`.
+What no file in `.flox/` says is *which generation the unit runs*: the
+live links follow the last pull, and `flox pull -g N --copy` (the only
+pinned pull) throws the identity away. So the pull unit activates `-d
+<dir> -g N`, which makes `.flox/run/<system>.<name>.genN-run` beside the
+live links, writes N to `/var/lib/homelab/pinned-environment-<tenant>`
+for the stub's wrapper, and records `{env, generation, run_path, ...}`
+in `last-applied-environment-<tenant>.json`; hub-status prints `staged
+gN / applied gN (run <hash7>)` with the tenant commit that pushed N
+beside it. Two facts the shape depends on: the floxmeta clone is
+load-bearing (§1 — without it even an offline activation of the tracking
+checkout re-clones from api.flox.dev), and FloxHub's floxmeta is readable
+without an account the way flox itself reads it, HTTP basic auth as
+`oauth` with an empty password (a request with no credential is a 401),
+which is what lets the pull unit fetch generation N's lock and run the
+substitute-only guard *before* `flox pull` builds anything. The product
+asks: a `flox pull --generation N` that keeps the tracking identity, and
+a generation number in `.flox/` itself.
 ## 4. Secrets — answered (nothing changes)
 
 Every secret consumer on this box takes a **path**: Grafana's `$__file{}`,

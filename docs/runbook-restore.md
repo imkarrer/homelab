@@ -152,7 +152,7 @@ Always restore to a scratch target and compare before putting anything back.
 | Tenant | Dir | Stopping it |
 |---|---|---|
 | `assetto` | `/var/lib/ac-host` | **Never outside a window.** `quiet.drainable = false`; `ac-host-static`'s `ExecStop` is `docker rm -f` on live race servers. Drain with `acctl.py` first. |
-| `arcade` | `/var/lib/arcade` | Freely (standing authority, 9 Sep 2026). |
+| `arcade` | `/var/lib/arcade` | Freely (standing authority, 9 Sep 2026). An environment tenant once its stub is on (`homelab-158.5`): after the copy, §4d re-pulls `env/` rather than starting the units by hand. |
 | `agent-hub` | `/var/lib/agent-hub` | Freely. An environment tenant: after the copy, §4d re-clones `env/` rather than starting the unit by hand. |
 | `observability` | `/var/lib/grafana` | Freely — `systemctl stop grafana`. The dir is `0700 grafana:grafana` (uid 196); the staged copy carries that. |
 | `observability` | `/var/lib/prometheus2` | Freely — `systemctl stop prometheus`. `0700 prometheus:prometheus` (uid 255). Restoring the TSDB is rarely worth a window: 14 d of samples, and the box regrows them. |
@@ -253,6 +253,28 @@ starting anything:
    `/var/lib/agent-hub` is empty (the restored worktree *is* the tree at that
    sha); the stub is running. Remove `env.restored` by hand once it has been
    watched running.
+
+**A FloxHub tenant (`arcade`, `environment.source.kind = floxhub`,
+`homelab-158.5`) is the same procedure with a generation in place of the
+sha, and two differences.** The restored `env/` is flox's tracking
+checkout of `imkarrer/arcade` minus `.flox/run` and minus the floxmeta
+clone under `/var/lib/arcade/.local/share/flox/meta/` (both excluded, both
+re-made by the pull), so it does not need moving aside: the pull unit
+recognises its own checkout by `.flox/env.json`'s owner/name and re-pulls
+into it — what it refuses is a `.git` inside `env/` or an `env.lock` with
+`local_rev` set. The unit to re-stage is `.generation` in
+`last-applied-environment-arcade.json` (the pending record carries the
+same number, plus the tenant commit as `rev`); with no records left, the
+pin file `/var/lib/homelab/pinned-environment-arcade` is one line, the
+generation, and FloxHub itself lists them (`flox generations list -r
+imkarrer/arcade`, from a logged-in WSL). Re-stage by re-running
+home-arcade's last green `main` build (its push step triggers homelab with
+`HOMELAB_STAGE_GENERATION`/`HOMELAB_STAGE_ENV`) or write the pending file
+by hand as `scripts/hub-queue-environment.sh` would; then `systemctl start
+arcade-environment-pull.service`. The stub's wrapper refuses to start
+without the pin file, so if `/var/lib/homelab` was lost too, the pull must
+land before the units are started — the order §4c's step 5 would
+otherwise get wrong.
 
 ---
 
