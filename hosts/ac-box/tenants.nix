@@ -677,7 +677,9 @@
       # have staged the very change -- HAZARD 2 by a new road. Read by the
       # ci environment pull only (drainable = true keeps modules/deploy out
       # of it); in the compose era nothing consults it. Exit 0 = busy.
-      quiet.busyCheck = "pgrep -f 'buildkite-agent bootstrap' >/dev/null";
+      # `[b]uildkite`: pgrep -f matches its own `sh -c` command line otherwise,
+      # and the first native pull (18 Sep 17:08 CDT) read ci as busy forever.
+      quiet.busyCheck = "pgrep -f '[b]uildkite-agent bootstrap' >/dev/null";
 
       # The unit modules/ci creates once homelab.ci.enable is on. Declared
       # here so the inventory (/etc/homelab/tenants.json), drain planning and
