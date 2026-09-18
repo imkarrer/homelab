@@ -247,6 +247,31 @@ BOXTXT=$("${SSH[@]}" '
   echo "CLAPPLIED=$(grep -oE "[0-9a-f]{40}" $h/last-applied-closure.json 2>/dev/null | head -1)"
   echo "CLTIMER=$(systemctl is-enabled homelab-deploy.timer 2>/dev/null)"
   echo "CLPATH=$(systemctl is-enabled homelab-deploy.path 2>/dev/null)"
+  # The ENVIRONMENT deploy pairs (ADR 0009), one per flox tenant, beside the
+  # closure pair. Which tenants have one is the running closure'"'"'s fact --
+  # /etc/homelab/environments.json, written by modules/tenant/
+  # environment-pull.nix -- not the presence of a pending file, so a tenant
+  # whose pull unit exists and has never been staged still gets a line.
+  # queue-environment (Buildkite, via the tenant'"'"'s trigger) writes pending;
+  # the pull unit writes applied after the restart. Same grep shape as the
+  # closure pair: every record is one line of JSON with known keys.
+  e=/etc/homelab/environments.json
+  echo "ENVTENANTS=$(grep -oE "\"[A-Za-z0-9_-]+\":\{\"applied\":" $e 2>/dev/null | cut -d\" -f2 | tr "\n" " ")"
+  for t in $(grep -oE "\"[A-Za-z0-9_-]+\":\{\"applied\":" $e 2>/dev/null | cut -d\" -f2); do
+    p=$h/pending-environment-$t.json; a=$h/last-applied-environment-$t.json
+    echo "ENVSTUB_$t=$(grep -oE "\"$t\":\{[^}]*\"enable\":(true|false)" $e | grep -oE "(true|false)$")"
+    echo "ENVTREE_$t=$(grep -oE "\"$t\":\{[^}]*\"tree\":\"[^\"]*\"" $e | grep -oE "[^\"]*\"$" | tr -d "\"")"
+    echo "ENVPENDING_$t=$(grep -oE "\"sha\":\"[0-9a-f]{40}\"" $p 2>/dev/null | grep -oE "[0-9a-f]{40}" | head -1)"
+    echo "ENVQUEUED_$t=$(grep -oE "\"queued_at\":\"[^\"]*\"" $p 2>/dev/null | cut -d\" -f4)"
+    echo "ENVAPPLIED_$t=$(grep -oE "\"sha\":\"[0-9a-f]{40}\"" $a 2>/dev/null | grep -oE "[0-9a-f]{40}" | head -1)"
+    echo "ENVRUN_$t=$(grep -oE "\"run_path\":\"[^\"]*\"" $a 2>/dev/null | cut -d\" -f4 | sed "s|^/nix/store/||")"
+    echo "ENVAPPLIEDAT_$t=$(grep -oE "\"applied_at\":\"[^\"]*\"" $a 2>/dev/null | cut -d\" -f4)"
+    # is-failed prints the state either way; "failed" is the verdict, and
+    # the last journal line is why (the script logs its own refusals).
+    echo "ENVPULL_$t=$(systemctl is-failed $t-environment-pull.service 2>/dev/null)"
+    echo "ENVPATH_$t=$(systemctl is-enabled $t-environment-pull.path 2>/dev/null)"
+    echo "ENVLOG_$t=$(journalctl -u $t-environment-pull.service -n1 -o cat --no-pager 2>/dev/null | tail -1)"
+  done
 ' 2>/dev/null)
 
 get() { echo "$BOXTXT" | grep "^$1=" | head -1 | cut -d= -f2-; }
@@ -438,6 +463,43 @@ else
   if [ -n "$SYSREV" ] && [ -n "$CLAPPLIED" ] && [ "${SYSREV%-dirty}" != "$CLAPPLIED" ]; then
     echo "             running rev ${SYSREV:0:7} != last deploy-unit apply ${CLAPPLIED:0:7} - a hand switch happened since"
   fi
+  # One line per flox tenant (ADR 0009): what CI staged against what the
+  # pull unit applied, the run store path as the content stamp (docs/
+  # flox-findings.md 3), and whether the stub runs from it. A staged sha
+  # the pull has not landed is a state for ~15 min (the path unit fires
+  # at once; the warm can take minutes online) and a verdict after it --
+  # the pull failed soft, the tenant was busy, or nothing is watching. A
+  # stub that is on with nothing applied is the one state modules/tenant/
+  # environment-pull.nix's first-switch order exists to prevent, and it
+  # is named as such. The tenant's origin HEAD is held against the staged
+  # sha the way the closure's is: a green push whose trigger did not stage
+  # is otherwise invisible (the trigger is async and soft_fail).
+  s7() { if [ -n "$1" ]; then echo "${1:0:7}"; else echo none; fi; }
+  for t in $(get ENVTENANTS); do
+    EP=$(get "ENVPENDING_$t"); EA=$(get "ENVAPPLIED_$t"); ER=$(get "ENVRUN_$t"); ES=$(get "ENVSTUB_$t")
+    EPULL=$(get "ENVPULL_$t"); EPATH=$(get "ENVPATH_$t"); ELOG=$(get "ENVLOG_$t"); ET=$(get "ENVTREE_$t")
+    stub=$([ "$ES" = true ] && echo "stub ON" || echo "stub off")
+    echo "$t env    : staged $(s7 "$EP") / applied $(s7 "$EA")${ER:+ (run ${ER:0:7})} - $stub, pull unit ${EPULL:-absent}, path ${EPATH:-absent}"
+    if [ "$EPULL" = failed ]; then
+      note "$t env: $t-environment-pull.service failed - ${ELOG:-see journalctl -u $t-environment-pull}"
+    fi
+    if [ -n "$EP" ] && [ "$EP" != "$EA" ]; then
+      qage=$(( $(date +%s) - $(date -d "$(get "ENVQUEUED_$t")" +%s 2>/dev/null || date +%s) ))
+      if [ "$EPATH" != enabled ]; then
+        note "$t env: ${EP:0:7} is staged but $t-environment-pull.path is ${EPATH:-absent} - nothing will pull it"
+      elif [ "$qage" -gt 900 ]; then
+        note "$t env: ${EP:0:7} staged $(ago $(( $(date +%s) - qage ))) ago, applied is $(s7 "$EA") - the pull has not landed it (${ELOG:-journalctl -u $t-environment-pull})"
+      else
+        echo "             $t env: ${EP:0:7} is staged; $t-environment-pull applies it within minutes (${ELOG:-no journal line yet})"
+      fi
+    fi
+    if [ "$ES" = true ] && [ -z "$EA" ]; then
+      note "$t env: the stub is ON and nothing has been applied - its unit activates an empty ${t} environment; stage a sha now (environment-pull.nix's first-switch order was not followed)"
+    fi
+    if [ -n "$ET" ] && [ -n "${OHEAD[$ET]:-}" ] && [ "${OHEAD[$ET]}" != "$EP" ] && [ $(( $(date +%s) - ${OHEADT[$ET]:-0} )) -gt 1800 ]; then
+      note "$t env: $ET origin HEAD ${OHEAD[$ET]:0:7} ($(ago "${OHEADT[$ET]}") ago) is not staged on the box (staged $(s7 "$EP")) - its build's trigger did not run queue-environment (red gate? trigger missing? HOMELAB_STAGE_ENVIRONMENT not routed?)"
+    fi
+  done
   echo "homelab    : HEAD ${HEADSHA:0:7}$([ "$(git -C "$HL" status --porcelain 2>/dev/null | wc -l)" != 0 ] && echo ' (+ uncommitted changes)')"
 
   if [ -n "$SYSREV" ]; then
