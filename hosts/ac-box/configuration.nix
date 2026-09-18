@@ -372,6 +372,22 @@ in
     vectors.enable = true;
   };
 
+  # A closure switch must not restart the model server. switch-to-configuration
+  # restarts a unit whose file changed; six restarts on 18 Sep 2026, four of
+  # them from generations 90-93 that touched nothing the model needed, each
+  # dropped the resident 85 GB model and the prompt cache mid-request (a
+  # bead-loop review call waited five minutes and got a 502). The unit is
+  # restarted on purpose by exactly one thing: the environment pull
+  # (modules/tenant/environment-pull.nix, "restart the stub"), under the
+  # tenant's quiet policy, when a new agent-hub sha is staged. A changed
+  # unit file applies at that next deliberate restart, or at a human's
+  # `systemctl restart agent-hub-llm` -- the same shape as the pull unit's
+  # own restartIfChanged = false and modules/deploy's. homelab-7bu.
+  systemd.services.agent-hub-llm = {
+    restartIfChanged = false;
+    stopIfChanged = false;
+  };
+
   # Where the model server's threads and memory go. Set directly on the
   # unit rather than as a stub field because every value is a fact about
   # THIS host's sockets and fence, not part of the unit's skeleton
