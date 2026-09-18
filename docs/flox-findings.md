@@ -16,7 +16,20 @@ environment is either untested or a docs claim until an operator runs
 exit 7, nix "could not resolve github.com"); `unshare -rn` maps to uid 0 and
 sends flox looking in `/root`, so it is not a usable cut.
 
-## 1. Deploy-time network dependency — partial
+## 1. Deploy-time network dependency — answered (on the box, 18 Sep 2026)
+
+**On the box:** the first pull (08:53 CDT) substituted every path the lock
+named from MinIO in 2 s, activated once online, and wrote the record; the
+stub then started from the warmed checkout with no network. The one thing
+the box did that WSL had not shown: flox realises the *whole* derivation of a
+flake package, and `stable-diffusion-cpp`'s `-dev` output had never been
+pushed (the plugin pushed the environment's closure, which links only
+`out`), so nix built the derivation to produce it — three minutes at
+`SCHED_BATCH` while the substitute-only step had reported success. Closed
+from both sides the same morning: the plugin pushes every lock output
+(`flox-buildkite-plugin` `a0cea9b`), the pull demands every lock output
+(`a177338`). The product-side note: an environment's closure is not the
+set of paths needed to activate it elsewhere; the lock's `outputs` is.
 
 **Activation is offline-safe once the environment's store paths exist
 locally; it is not offline-safe from a lock alone.**

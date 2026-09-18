@@ -1,8 +1,11 @@
 # ADR 0009: Tenants Become Flox Environments; The Closure Keeps The Host And The Contract
 
-**Status:** Proposed, 17 Sep 2026. Epic `homelab-158` carries the steps in
-order; the ADR moves to Accepted when step 1 (agent-hub) has reached the box
-through the new edge and been watched surviving a restart.
+**Status:** Accepted, 18 Sep 2026. Step 1 landed: `agent-hub-llm.service`
+on ac-box has run from `/var/lib/agent-hub/env` via `flox activate` since
+09:08 CDT (`22e85c4`), and a push to agent-hub main (`942f327`) was staged,
+pulled, warmed and restarted it through the new edge with no closure switch.
+Epic `homelab-158` carries the remaining steps; `docs/flox-findings.md` is the
+record of what each taught.
 
 ## Context
 
@@ -135,9 +138,10 @@ box applied, with the environment's run store path as the exact stamp,
 beside the closure's rev pair. The record is the pull unit's own (findings
 §3).
 
-**`docs/architecture.md` Part II changes**, once accepted: L3 is no longer
-"flake inputs — declare, never reach" but "environments, with a stub in the
-closure"; row 24 (`bump-lock`) applies only to trees that are still inputs.
+**`docs/architecture.md` Part II changed on acceptance**: L3 reads "declare,
+never reach — as flake inputs, or as a flox environment with a unit stub in
+the closure"; II.1 draws the environment as a third path; row 24
+(`bump-lock`) applies only to trees that are still inputs.
 
 **Flox's own version becomes a host fact.** `hub-gates.sh` already pins
 `v1.14.0` because a lock written by a newer flox was unreadable in CI. With

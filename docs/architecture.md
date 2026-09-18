@@ -30,7 +30,7 @@ cannot show is that the dependency arrow only ever points one way.
 
 ```mermaid
 flowchart TD
-    L3["<b>L3 · tenants</b><br/>ac-host · home-arcade · agent-hub<br/><i>flake inputs — declare, never reach</i>"]
+    L3["<b>L3 · tenants</b><br/>ac-host · home-arcade · agent-hub<br/><i>declare, never reach — as flake inputs, or (agent-hub since 18 Sep 2026, ADR 0009) as a flox environment with a unit stub in the closure</i>"]
     L2["<b>L2 · shared services</b><br/>modules/observability · modules/ci · modules/deploy<br/><i>consume the contract</i>"]
     L1["<b>L1 · the contract</b><br/>modules/tenant<br/>schema · ports · resources · metrics · quiet"]
     L0["<b>L0 · platform</b><br/>modules/platform<br/>hardware · NICs · identity · Docker · Nix · sshd · boot"]
@@ -220,9 +220,14 @@ diagram.
 
 ## II.1 How code reaches the box
 
-Both paths staged in CI, both applied on the box by systemd inside the
-maintenance window, both reported as a pending/applied pair. **No human at an
-SSH prompt on the path.** (ADR 0006, `README.md` goal 3.)
+Three paths now, all staged in CI and applied on the box by systemd, all
+reported as a pending/applied pair. **No human at an SSH prompt on the
+path.** (ADR 0006, `README.md` goal 3.) The third — a tenant's **environment**
+(ADR 0009, live for `agent-hub` since 18 Sep 2026) — is the closure's shape
+one layer down: the tenant's CI stages its sha, `<tenant>-environment-pull`
+checks it out, substitutes every path the lock names (never compiles),
+activates once online, records it and restarts the stub; the closure is
+touched only when a host fact changes.
 
 ```mermaid
 flowchart LR
@@ -241,13 +246,23 @@ flowchart LR
         B5 -- "nixos-rebuild switch<br/>--flake …/rev#ac-box" --> B6["/run/current-system<br/>== origin/main"]
     end
 
-    STATUS["hub-status.sh<br/>pending vs applied, both paths<br/>exact via configurationRevision"]
+    subgraph ENV ["tenant environment (ADR 0009)"]
+        direction LR
+        C1["agent-hub<br/>.flox + llama-swap.yaml"] --> C2["origin"] --> C3["Buildkite<br/>under the flox plugin<br/><i>pushes every lock output to MinIO</i>"]
+        C3 -- "trigger: homelab" --> C4["queue-environment<br/>stages sha to<br/>/var/lib/homelab"]
+        C4 --> C5["agent-hub-environment-pull.path<br/>checkout · substitute-only · one warm<br/><b>never compiles</b>"]
+        C5 -- "restart under quiet policy" --> C6["agent-hub-llm.service<br/>flox activate -d /var/lib/agent-hub/env"]
+    end
+
+    STATUS["hub-status.sh<br/>pending vs applied, all three paths<br/>closure exact via configurationRevision,<br/>environment via the run store path"]
     A4 -.-> STATUS
     B4 -.-> STATUS
     B6 -.-> STATUS
+    C4 -.-> STATUS
+    C6 -.-> STATUS
 
     classDef ok fill:#dae8df,stroke:#2c6b4b,color:#101819;
-    class A6,B6 ok;
+    class A6,B6,C6 ok;
 ```
 
 Properties the target must hold, none optional (ADR 0006 "Consequences"):
