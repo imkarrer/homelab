@@ -281,6 +281,12 @@
       # agent forwards it to jobs as HOMELAB_PUSH_TOKEN; absent, bump-lock
       # skips and says so. Minted 14 Sep 2026.
       homelab-push-token = { };
+      # The agent's clone credential for the one private tenant repo: a GitHub
+      # fine-grained token, imkarrer/inquire-platform only, Contents read.
+      # docker-compose.buildkite.yml (ac-host) turns it into a git URL rewrite
+      # for that repo alone, so the agent holds no credential for any other.
+      # Minted 18 Sep 2026.
+      buildkite-clone-token = { };
     };
 
     # /var/lib/ac-host/.env, as of the box on 13 Sep 2026 (sha256 d85835fd...,
@@ -446,6 +452,7 @@
         GITHUB_STATUS_REPO=imkarrer/ac-practice
         AC_PAGES_PUSH=1
         HOMELAB_PUSH_TOKEN=${config.sops.placeholder.homelab-push-token}
+        BUILDKITE_CLONE_TOKEN=${config.sops.placeholder.buildkite-clone-token}
       '';
     };
   };
