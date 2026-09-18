@@ -331,13 +331,18 @@ let
           # (the MinIO substituter, ac-box's nix.nix) is then all it takes.
           # Not put on `flox activate` itself: that also refuses flox's own
           # manifest.drv/environment.drv, which are tiny and must build.
-          # Catalog packages spell the field outputs_to_install, flake
-          # packages outputs-to-install; the fallback is every output.
+          # EVERY output, not only outputs-to-install: flox realises the
+          # whole derivation, and a derivation builds all its outputs at
+          # once, so one output absent from every cache is a full compile.
+          # That is what happened on the first pull on the box (18 Sep
+          # 2026, 08:53): stable-diffusion-cpp's `out` was in MinIO and its
+          # `dev` was not (the plugin pushed the environment's closure,
+          # which links only `out`), and sd.cpp compiled for three minutes
+          # at SCHED_BATCH while this step reported success. The plugin now
+          # pushes every lock output too; this side demands them.
           log "substituting the store paths $dir/.flox/env/manifest.lock names (never building them)"
           if ! jq -r --arg s "$(uname -m)-linux" '
-                .packages[] | select(.system == $s)
-                | (."outputs-to-install" // .outputs_to_install // (.outputs | keys)) as $want
-                | .outputs | to_entries[] | select(.key as $k | $want | index($k)) | .value
+                .packages[] | select(.system == $s) | .outputs[]
               ' "$dir/.flox/env/manifest.lock" | sort -u \
               | as_user xargs nix-store --realise --max-jobs 0 >/dev/null; then
             refuse "a store path the lock names is in no substituter this box trusts (cache.flox.dev, MinIO); refusing to compile it here; leaving $pending staged."
