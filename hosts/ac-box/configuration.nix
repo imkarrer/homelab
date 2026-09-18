@@ -633,6 +633,101 @@ in
     };
 
   # ---------------------------------------------------------------------------
+  # ADR 0009 step 2: arcade's two game servers, run from home-arcade's flox
+  # environment -- and the FloxHub dogfood: nothing the servers need at run
+  # time comes from the tree (both read only /var/lib/arcade), so the deploy
+  # unit is a GENERATION of imkarrer/arcade (source.kind = floxhub), pushed by
+  # home-arcade's CI on green (its scripts/ci_push.sh) and staged here the way
+  # agent-hub's sha is. modules/tenant/environment-pull.nix's "KIND = FLOXHUB"
+  # header is the mechanism; docs/flox-findings.md 3 the record.
+  #
+  # OFF, and the same first-switch order as agent-hub's block above, one
+  # generation in place of one sha: this lands with enable = false (the pull
+  # unit and the pin file appear, arcade-freeciv and arcade-mindustry are
+  # byte-for-byte the module's); home-arcade main pushes generation 1 and
+  # its trigger stages it; arcade-environment-pull pulls the tracking
+  # checkout to /var/lib/arcade/env, warms `-g 1`, pins it; hub-status says
+  # `arcade env: staged g1 / applied g1 (run ...)`; THEN this flips true in
+  # its own push, and the switch restarts both units into `flox activate -d
+  # /var/lib/arcade/env -g 1 -- <server>`, offline. Back to false is the
+  # rollback. Both units are arcade's, drainable (AGENTS.md: bounce freely).
+  #
+  # What each stub changes: ExecStart only, plus mindustry's stdin text and
+  # JAVA_TOOL_OPTIONS. Everything else -- the names, interactive.slice from
+  # tenants.nix, User=arcade, WorkingDirectory, Restart=on-failure,
+  # RestartSec=5, the firewall rules from the tenant's ports -- is whatever
+  # home-arcade's modules/arcade-hub.nix makes it. The values are the
+  # module's own ExecStart minus the store path, read from the same options
+  # (services.arcade-hub.*) so the two cannot drift while both are live:
+  #
+  #   freeciv    freeciv-server --bind <lan> --port <freeciv.port>
+  #                --saves <state>/freeciv --log <state>/freeciv/server.log
+  #   mindustry  mindustry-server, JAVA_TOOL_OPTIONS=-Xms256M -Xmx1G (the
+  #              module's java flags), and the three console lines the
+  #              module's wrapper pipes into java carried as the unit's
+  #              StandardInputText= instead: Mindustry takes startup
+  #              commands on stdin, one per line, and joins argv into one
+  #              command (the module's comment has the history). The
+  #              nixpkgs mindustry-server wrapper execs java, so the unit's
+  #              main PID is java and stdin reaches it through `flox
+  #              activate --` (home-arcade's CI gate feeds it `version` the
+  #              same way).
+  #
+  # NO ARCADE_* variables, on purpose: the manifest has no [hook] (a
+  # `${X:?}` hook fails CI's activation and the pull's warm, both of which
+  # know no LAN address -- home-arcade's manifest header), so every host
+  # fact is argv or stdin here and nothing in the tenant tree can default
+  # one. The `[services]` blocks in the manifest are the developer's shell
+  # (docs/flox-findings.md 2), not what runs here.
+  homelab.tenants.arcade.environment =
+    let
+      hub = config.services.arcade-hub;
+      state = toString hub.stateDir;
+    in
+    {
+      enable = false;
+      source = {
+        kind = "floxhub";
+        env = "imkarrer/arcade";
+      };
+      # Provenance only for this kind (schema.nix): the tree whose CI pushes
+      # the generation, so hub-status can hold its origin HEAD against the
+      # staged record's rev.
+      tree = "home-arcade";
+      # dir: derived to /var/lib/arcade/env (no state.dirs on the tenant;
+      # homelab.host.paths.state/<tenant>/env). Inside the tenant's 0700
+      # home, owned by arcade, as the pull unit creates it.
+      units."arcade-freeciv.service".command = [
+        "freeciv-server"
+        "--bind"
+        hub.lanAddress
+        "--port"
+        (toString hub.freeciv.port)
+        "--saves"
+        "${state}/freeciv"
+        "--log"
+        "${state}/freeciv/server.log"
+      ];
+      units."arcade-mindustry.service" = {
+        command = [ "mindustry-server" ];
+        environment.JAVA_TOOL_OPTIONS = "-Xms256M -Xmx1G";
+      };
+    };
+
+  # The stdin text for the mindustry stub -- the module's three printf lines
+  # verbatim, from the same options. Gated on the stub being on, so with it
+  # off this key is absent and the unit is byte-for-byte the module's (the
+  # drvPath proof homelab-158.5 recorded). systemd appends each
+  # StandardInputText= line to the buffer with a newline, which is what the
+  # module's `printf '%s\n'` produced.
+  systemd.services.arcade-mindustry.serviceConfig.StandardInputText =
+    lib.mkIf config.homelab.tenants.arcade.environment.enable
+      [
+        "config name Arcade"
+        "config port ${toString config.services.arcade-hub.mindustry.port}"
+        "host ${config.services.arcade-hub.mindustry.map} ${config.services.arcade-hub.mindustry.mode}"
+      ];
+  # ---------------------------------------------------------------------------
   # Tier shares, rebalanced to point this machine at the model server.
   #
   # The defaults in modules/tenant/resources.nix (critical 0.35/0.50,
