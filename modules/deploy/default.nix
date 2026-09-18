@@ -353,7 +353,8 @@ in
           nix eval --raw .#nixosConfigurations.ac-box.config.homelab.deploy.scriptPackage
           cat <that>/bin/homelab-deploy
 
-        Same purpose as agent-hub's llm.swapConfigFile. It is also what lets
+        Same purpose as homelab.environments.pull.<tenant> (the pull script,
+        modules/tenant/environment-pull.nix). It is also what lets
         the eval harness assert that the blackout is present under one
         schedule and absent under the other, which is otherwise a fact no
         test can see and no operator can check short of 03:00.
