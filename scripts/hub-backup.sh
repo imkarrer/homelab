@@ -91,6 +91,44 @@
 # nothing, because another copy is authoritative. That is the test to apply
 # before adding one.
 #
+# ADR 0009 environment tenants (homelab-158.9, measured 18 Sep 2026 with
+# `du -sb` on the box, the day agent-hub first ran from its environment).
+# The pull unit (modules/tenant/environment-pull.nix) keeps a git checkout of
+# the tenant tree at `environment.dir` -- for agent-hub, /var/lib/agent-hub/env,
+# INSIDE the declared state dir -- and activates it as the tenant user, whose
+# HOME is that same state dir. Of /var/lib/agent-hub's 516,958 bytes:
+#
+#   env/.git/*           154,052  the clone. Every byte is on GitHub. Grows
+#                                 with every fetched sha. Only .git/HEAD (41
+#                                 bytes, the detached sha) is kept, so the
+#                                 mirror names the tree the box ran without
+#                                 /var/lib/homelab's applied record, which
+#                                 no tenant declares as state.
+#   env/.flox/run            118  two symlinks into /nix/store, re-made by
+#                                 every `flox activate`; dangling anywhere else
+#   env/.flox/cache       16,417  upgrade-checks.json -- flox's own scratch
+#   env/.flox/log         22,978  one file per activation and upgrade check
+#   .cache/flox           27,212  flox's per-process scratch under $HOME
+#   .cache/nix           124,131  eval/fetcher/tarball caches from the pull
+#                                 unit's `nix` calls as the tenant user
+#   .local/share/flox        295  flox's user data (metrics id, no state)
+#   ------------------
+#   345,203 of 516,958 (67%) today. Small -- the number matters less than the
+#   shape: all of it is regrown by one run of the pull unit from the recorded
+#   sha, and .git, .flox/log and the caches are the parts that GROW, so left
+#   in they would become most of the tenant's snapshot for no recovery value.
+#
+#   env/ itself (manifest.toml, manifest.lock, llama-swap.yaml, the tree's
+#   files: ~150 K) is KEPT: it is the exact tree the box ran, and a restore
+#   wants to diff it against the sha the record names.
+#
+# These are not typed per tenant. excludes_for reads the contract's
+# environments (the same set /etc/homelab/environments.json on the box lists)
+# and derives them for every tenant whose environment.dir or whose user's
+# HOME lies inside a backed-up state directory -- declaring a stub on a
+# second tenant gets that tenant's checkout excluded the same way, measured
+# here once for the shape rather than again for each instance.
+#
 # ---------------------------------------------------------------------------
 # THE SECRET
 # ---------------------------------------------------------------------------
@@ -139,12 +177,9 @@ step() { printf '\n== %s ==\n' "$*"; }
 # box: the declaration is a fact about the configuration, and reading it here
 # means a change to a tenant's `state` is picked up the moment it is committed,
 # without waiting for a deploy. ~7s, the same eval the gate runs.
-#
-# One line per directory, "<tenant> <dir>". Emitted as raw text rather than
-# JSON so no parser is needed: a state path is an absolute path with no spaces
-# (the contract's dirSet is types.path), and if that ever stops being true the
-# read below breaks loudly rather than quietly mis-splitting.
-declared_dirs() {
+contract_eval() {
+  # $1 attribute path under nixosConfigurations.ac-box.config (may be
+  # empty: the whole config), $2 the --apply.
   # The unit runs this script as root, but the checkout belongs to the
   # operator, and Nix (libgit2) refuses a git repository "not owned by current
   # user" -- the 16 Sep run failed here before touching anything. Evaluation
@@ -155,28 +190,87 @@ declared_dirs() {
   if [ "$(id -u)" = 0 ] && [ "$owner" != root ]; then
     as_owner=(runuser -u "$owner" -- env "NIX_CONFIG=$NIX_CONFIG" "HOME=$(getent passwd "$owner" | cut -d: -f6)")
   fi
+  "${as_owner[@]}" nix eval --raw "$ROOT#nixosConfigurations.ac-box.config${1:+.$1}" --apply "$2" 2>/dev/null
+}
+
+# One line per directory, "<tenant> <dir>". Emitted as raw text rather than
+# JSON so no parser is needed: a state path is an absolute path with no spaces
+# (the contract's dirSet is types.path), and if that ever stops being true the
+# read below breaks loudly rather than quietly mis-splitting.
+declared_dirs() {
   # shellcheck disable=SC2016  # the ${n} below is Nix syntax, not a shell expansion
-  "${as_owner[@]}" nix eval --raw "$ROOT#nixosConfigurations.ac-box.config.homelab.tenants" --apply '
+  contract_eval homelab.tenants '
     ts:
       let
         wanted = builtins.filter (n: ts.${n}.state.backup) (builtins.attrNames ts);
         lines  = builtins.concatLists (map (n: map (d: n + " " + d) ts.${n}.state.dirs) wanted);
       in builtins.concatStringsSep "\n" lines
-  ' 2>/dev/null
+  '
+}
+
+# The environment tenants (ADR 0009), one line each: "<tenant> <dir> <home>".
+# Read from the same JSON the closure installs as /etc/homelab/environments.json
+# -- which tenants keep a checkout, where, and as which user -- so this script
+# and hub-status.sh agree on what an environment IS without a second
+# derivation of it here; the user's HOME is what flox's own caches hang off.
+# Empty when no tenant declares a stub (the etc entry is not defined then,
+# and this must not fail on a tree without environments).
+environment_dirs() {
+  # shellcheck disable=SC2016  # ${n} and ${u} are Nix syntax
+  contract_eval '' '
+    c:
+      let
+        etc  = c.environment.etc;
+        envs = if etc ? "homelab/environments.json"
+               then (builtins.fromJSON etc."homelab/environments.json".text).environments
+               else { };
+        home = u: toString (c.users.users.${u}.home or "");
+      in builtins.concatStringsSep "\n"
+           (map (n: n + " " + envs.${n}.dir + " " + home envs.${n}.user) (builtins.attrNames envs))
+  '
 }
 
 # rsync excludes for one directory. Keyed on the path, with the measurement
 # that justifies each one in the header above -- the list is short and every
 # entry has a reason, which is the only thing that keeps it from growing into
-# "whatever was big last time somebody looked".
+# "whatever was big last time somebody looked". Anchored (leading /): the
+# tenant tree's own src/, not any nested one.
 excludes_for() {
-  case "$1" in
+  local dir="$1" tenant envdir home rel
+  case "$dir" in
     /var/lib/ac-host)
-      # Anchored (leading /): the tenant tree's own src/, not any nested one.
       printf '%s\n' --exclude=/src --exclude=/dist --exclude=/build \
                     --exclude=/pending-src --exclude=/_local_wipe_backup
       ;;
   esac
+  # Environment tenants, derived rather than listed (header: "ADR 0009").
+  # A checkout inside $dir loses its .git (bar HEAD) and flox's run/cache/log; a tenant
+  # HOME inside (or equal to) $dir loses flox's and nix's user caches. The
+  # worktree files under <envdir> are kept. $ENVIRONMENTS is set by the
+  # caller from environment_dirs; unset (a direct call) means no excludes.
+  while read -r tenant envdir home; do
+    [ -n "${envdir:-}" ] || continue
+    case "$envdir" in
+      "$dir"|"$dir"/*)
+        rel="${envdir#"$dir"}"
+        # .git/HEAD is kept, and it is the bare sha (the pull unit checks out
+        # --detach): 41 bytes that let the mirror itself say which tree the
+        # box ran, since the applied record lives in /var/lib/homelab, which
+        # no tenant declares. Include before exclude: rsync takes the first
+        # matching rule, and .git/* excludes every other child unexpanded.
+        printf '%s\n' "--include=$rel/.git/HEAD" "--exclude=$rel/.git/*" \
+                      "--exclude=$rel/.flox/run" "--exclude=$rel/.flox/cache" \
+                      "--exclude=$rel/.flox/log"
+        ;;
+    esac
+    case "${home:-}" in
+      "$dir"|"$dir"/*)
+        rel="${home#"$dir"}"
+        printf '%s\n' "--exclude=$rel/.cache/flox" "--exclude=$rel/.cache/nix" \
+                      "--exclude=$rel/.local/share/flox"
+        ;;
+    esac
+  done <<< "${ENVIRONMENTS:-}"
 }
 
 write_status() {
@@ -217,7 +311,14 @@ die() { say "FAILED: $*"; write_status failed "$*"; exit 1; }
 if [ "${1:-}" = "--list" ]; then
   d=$(declared_dirs) || die "nix eval failed"
   [ -n "$d" ] || { say "no tenant declares state.backup = true"; exit 1; }
-  say "$d"
+  ENVIRONMENTS=$(environment_dirs) || die "nix eval of the environments failed"
+  # "<tenant> <dir>" per line, as before; excludes on an indented line under
+  # the directory they apply to, so `grep -v '^ '` still yields the bare list.
+  while read -r tenant dir; do
+    say "$tenant $dir"
+    ex=$(excludes_for "$dir" | tr '\n' ' ')
+    [ -z "$ex" ] || say "  excluding ${ex% }"
+  done <<< "$d"
   exit 0
 fi
 [ $# -eq 0 ] || { say "usage: sudo bash $0 [--list]"; exit 2; }
@@ -235,6 +336,8 @@ step "contract: which directories declare state.backup = true"
 DECLARED=$(declared_dirs) || die "nix eval failed"
 [ -n "$DECLARED" ] || die "no tenant declares state.backup = true (did the eval return an empty set?)"
 say "$DECLARED" | sed 's/^/  /'
+ENVIRONMENTS=$(environment_dirs) || die "nix eval of the environments failed"
+[ -z "$ENVIRONMENTS" ] || { say "environments (checkout kept, its .git and flox/nix caches excluded):"; say "$ENVIRONMENTS" | sed 's/^/  /'; }
 
 step "restic repo password"
 # shellcheck source=scripts/lib/sops-secret.sh

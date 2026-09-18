@@ -34,8 +34,12 @@ answer "the file was already wrong yesterday". Reach for the mirror first.
 The directory list is not written down anywhere except the contract. Ask:
 
 ```bash
-bash scripts/hub-backup.sh --list      # ~1s, no root, no network
+bash scripts/hub-backup.sh --list      # ~10s, no root, no network
 ```
+
+Each directory is one `<tenant> <dir>` line; where the backup leaves things
+out, the rsync filters follow on an indented line (`grep -v '^ '` for the
+bare list).
 
 On 16 Sep 2026 that is `/var/lib/ac-host` (assetto), `/var/lib/arcade`,
 `/var/lib/agent-hub`, `/var/lib/qdrant` (declared, absent on the box),
@@ -49,6 +53,19 @@ added to the backup by setting `state.backup = true` in
   excluded on purpose: 7.9 GB of the 12 GB, all of it in git or rebuildable
   from it. `src` is a checkout of ac-host at the sha in `last-applied.json`;
   `scripts/hub-status.sh` compares it to git file by file. Restore it from git.
+- **Environment tenants (ADR 0009).** `agent-hub` runs from a flox
+  environment, and the pull unit keeps its git checkout at
+  `/var/lib/agent-hub/env` and its caches under the tenant user's `HOME`,
+  which is `/var/lib/agent-hub` itself. Excluded (measured 18 Sep 2026,
+  345 KB of the 517 KB — small today, but all of it grows and all of it is
+  regrown by one run of the pull unit): `env/.git/*` except `HEAD`,
+  `env/.flox/{run,cache,log}`, `.cache/flox`, `.cache/nix`,
+  `.local/share/flox`. The worktree under `env/` (manifest, lock,
+  `llama-swap.yaml`, the tree's files) is kept for the restore diff, and
+  `env/.git/HEAD` is the bare sha the box ran. The excludes are not written
+  per tenant: `hub-backup.sh` derives them from the contract's environments
+  (`environment.dir`, the stub user's `HOME`), so a second environment tenant
+  gets the same shape without a change to the script.
 - `/var/lib/monitoring` — declared until 16 Sep 2026 (`homelab-bqo.58`), and
   the only thing observability declared. Its `secrets/` holds four symlinks
   into `/run/secrets`, installed at every switch by `modules/platform/
