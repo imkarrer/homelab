@@ -65,7 +65,8 @@ added to the backup by setting `state.backup = true` in
   `env/.git/HEAD` is the bare sha the box ran. The excludes are not written
   per tenant: `hub-backup.sh` derives them from the contract's environments
   (`environment.dir`, the stub user's `HOME`), so a second environment tenant
-  gets the same shape without a change to the script.
+  gets the same shape without a change to the script. Section 4d has the
+  restore.
 - `/var/lib/monitoring` — declared until 16 Sep 2026 (`homelab-bqo.58`), and
   the only thing observability declared. Its `secrets/` holds four symlinks
   into `/run/secrets`, installed at every switch by `modules/platform/
@@ -152,7 +153,7 @@ Always restore to a scratch target and compare before putting anything back.
 |---|---|---|
 | `assetto` | `/var/lib/ac-host` | **Never outside a window.** `quiet.drainable = false`; `ac-host-static`'s `ExecStop` is `docker rm -f` on live race servers. Drain with `acctl.py` first. |
 | `arcade` | `/var/lib/arcade` | Freely (standing authority, 9 Sep 2026). |
-| `agent-hub` | `/var/lib/agent-hub` | Freely. |
+| `agent-hub` | `/var/lib/agent-hub` | Freely. An environment tenant: after the copy, §4d re-clones `env/` rather than starting the unit by hand. |
 | `observability` | `/var/lib/grafana` | Freely — `systemctl stop grafana`. The dir is `0700 grafana:grafana` (uid 196); the staged copy carries that. |
 | `observability` | `/var/lib/prometheus2` | Freely — `systemctl stop prometheus`. `0700 prometheus:prometheus` (uid 255). Restoring the TSDB is rarely worth a window: 14 d of samples, and the box regrows them. |
 
@@ -205,6 +206,53 @@ code bug.
 
 Leave `/var/lib/<tenant>.broken-<date>` in place until the tenant has been
 watched working, then remove it by hand. Nothing removes it for you.
+
+### 4d. Restoring an environment tenant (ADR 0009)
+
+For a tenant that runs from a flox environment (`agent-hub`; `bash
+scripts/hub-backup.sh --list` shows which, by the excludes under its
+directory), a restore is **restore state, then re-stage the applied sha and
+let the pull unit warm it**. The restored `env/` is the worktree at the sha
+the box ran — good for a diff, useless to run from: it has no `.git` and no
+`.flox/run`, and `flox activate` against it would go to the network. Worse,
+it carries the tracked `.flox/env/manifest.lock`, which is exactly what the
+pull unit checks before saying "already applied; nothing to do" — left in
+place, the unit would never rebuild it. So after step 3 of 4c, and before
+starting anything:
+
+1. Move the restored worktree aside: `ssh ac-box 'mv /var/lib/agent-hub/env
+   /var/lib/agent-hub/env.restored'`. (Left in place without `.git`, the pull
+   unit refuses to clone over it anyway — "exists and is not a git
+   checkout".)
+2. Find the sha to re-stage. It is `.sha` in
+   `/var/lib/homelab/last-applied-environment-agent-hub.json` (and the same
+   sha in `pending-environment-agent-hub.json`, which the pull unit leaves in
+   place after applying). `/var/lib/homelab` is not a declared state
+   directory; if it went too, the sha is the 41 bytes in the mirror's
+   `env/.git/HEAD` — the backup keeps that one file for this reason.
+3. Re-stage it and let the pull unit do the rest. If the pending file is
+   still there: `ssh ac-box 'systemctl start
+   agent-hub-environment-pull.service'` (its timer would fire within ten
+   minutes anyway). If it is gone: either re-run the tenant tree's last green
+   `main` build in Buildkite (its `trigger: homelab` step writes the pending
+   file through `scripts/hub-queue-environment.sh`), or write the pending
+   file on the box as root the way that script does, then start the unit.
+   The unit clones the tree, `git checkout --detach`es the sha as the tenant
+   user, activates once online and restarts the stub under the quiet policy
+   — so 4c's step 5 is *not* run by hand for this tenant. The by-hand
+   equivalent, for a box whose pull unit is itself broken, is the same clone
+   and checkout as the tenant user (`runuser -u agent-hub -- git clone
+   --no-checkout <remote> /var/lib/agent-hub/env`, then `runuser -u
+   agent-hub -- git -C /var/lib/agent-hub/env checkout --detach <sha>`),
+   followed by `systemctl start agent-hub-environment-pull.service` once it
+   works again to warm it. Do not `flox activate` by hand as root: that
+   leaves root-owned caches under the tenant's `HOME`, in the way of the
+   stub's own activation.
+4. Check: `scripts/hub-status.sh` shows `agent-hub env: staged X / applied
+   X`; `diff -r --exclude=.git --exclude=.flox env env.restored` under
+   `/var/lib/agent-hub` is empty (the restored worktree *is* the tree at that
+   sha); the stub is running. Remove `env.restored` by hand once it has been
+   watched running.
 
 ---
 
