@@ -556,15 +556,27 @@ in
   # ---------------------------------------------------------------------------
   # ADR 0009 step 1: the same unit, run from agent-hub's flox environment.
   #
-  # OFF. With enable = false this block contributes nothing to the closure
+  # ON as of homelab-158.3 -- and flipping it was that bead's LAST commit,
+  # landed as a separate push, for a reason this file cannot enforce:
+  # enable = true replaces agent-hub-llm.service's ExecStart with an
+  # activation of `dir`, and the switch that carries it restarts the unit.
+  # Against an empty `dir` that activation cannot succeed and Restart=
+  # loops it. So `dir` must already hold a checkout of agent-hub, owned by
+  # the agent-hub user and activated once online (docs/flox-findings.md
+  # 1), BEFORE this line is true. Declaring the stub (units below) is what
+  # makes modules/tenant/environment-pull.nix keep that checkout, enable on
+  # or off; the order is: land the pull unit with this false, push agent-hub
+  # main so its trigger stages a sha, watch hub-status say
+  # `agent-hub env: staged X / applied X (run ...)`, THEN land this true.
+  # hub-status names the state where that order was not followed ("the
+  # stub is ON and nothing has been applied"). Turning it back to false is
+  # the rollback: the unit returns to the module's ExecStart at the next
+  # switch, and the checkout stays where it is.
+  #
+  # With enable = false this block contributes nothing to the unit
   # (modules/tenant/environment.nix emits no key; homelab-158.2 proved the
-  # toplevel drvPath unchanged with it declared). It is here, complete,
-  # so that flipping it is one line and every value it carries has already
-  # been reviewed against the unit the box runs today. Flipping it is
-  # homelab-158.3's step, and it has preconditions this file cannot meet: a
-  # checkout of agent-hub at `dir` (its `.flox/` beside its llama-swap.yaml
-  # and nix/sd-ui.html), owned by the agent-hub user, activated once online
-  # so the unit's own activation never fetches (docs/flox-findings.md 1).
+  # toplevel drvPath unchanged with it declared, and 158.3 proved the pull
+  # unit is the only addition).
   #
   # What the stub changes on agent-hub-llm.service: ExecStart becomes
   # `flox activate -d <dir> -- llama-swap -config <dir>/llama-swap.yaml
@@ -589,7 +601,7 @@ in
       listen = "${if llm.llm.landingPage then "127.0.0.1" else llm.lanAddress}:${toString llm.llm.port}";
     in
     {
-      enable = false;
+      enable = true;
       # dir: left null, i.e. derived by modules/tenant/environment.nix to
       # <state dir>/env = /var/lib/agent-hub/env, which is right; `env.dir`
       # above reads the resolved value, so the -config path and the
