@@ -27,11 +27,11 @@
         ]
       },
       "locked": {
-        "lastModified": 1789740548,
-        "narHash": "sha256-fdopEMs1ZLk7cOKjxPzEYsMRjDRaeKFnE8pA1oexDtc=",
+        "lastModified": 1789756385,
+        "narHash": "sha256-HzC37GITWeBgIu/++/F+zDqLbPhaU3phCdgsoZmfyD4=",
         "owner": "imkarrer",
         "repo": "agent-hub",
-        "rev": "942f3274b35a20b254feb705b0e6b1be80dd22c6",
+        "rev": "db48ddd654a0453e52791dafc2759f64f88f9829",
         "type": "github"
       },
       "original": {
