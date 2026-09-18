@@ -7,11 +7,12 @@
 # /var/lib/monitoring, corrected 16 Sep to the Grafana and Prometheus dirs --
 # freeciv's real LAN-announce UDP port being 4555 not 5556).
 #
-# Takes `config` for exactly one reason: agent-hub's metrics.address must be
+# Takes `config` for two reasons: agent-hub's metrics.address must be
 # a REFERENCE to homelab.host.networks.lan.address, never a literal -- the
 # same way configuration.nix feeds services.agent-hub.lanAddress. A literal
-# passes today and fails evaluation the day the box's address moves.
-{ config, ... }:
+# passes today and fails evaluation the day the box's address moves. And
+# ci's `units` (below) follows homelab.ci.native.enable, since 18 Sep 2026.
+{ config, lib, ... }:
 
 {
   homelab.tenants = {
@@ -685,7 +686,21 @@
       # It also does not bounce the unit on switch: modules/ci sets
       # restartIfChanged = false and stopIfChanged = false for HAZARD 2, and
       # those hold regardless of Slice=.
-      units = [ "ac-host-ci.service" ];
+      #
+      # With homelab.ci.native.enable on (ADR 0009 step 3, modules/ci's NATIVE
+      # header) ac-host-ci.service is the Buildkite agent's stub -- a real
+      # process in this slice at last -- and the cache is two more units of
+      # its own. Conditional, not unconditional: environment.nix refuses a
+      # stub outside this list, and a name here with native off would put a
+      # unit nothing declares into the inventory and the slice map, which
+      # is exactly the closure change the flag's default promises not to make.
+      units = [
+        "ac-host-ci.service"
+      ]
+      ++ lib.optionals config.homelab.ci.native.enable [
+        "ac-host-ci-minio.service"
+        "ac-host-ci-minio-init.service"
+      ];
 
       ports = {
         minio-api = {

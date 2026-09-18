@@ -126,6 +126,35 @@ in
   # is starting on boot instead of a human remembering docker compose up -d.
   systemd.services.ac-host-ci.wantedBy = [ "multi-user.target" ];
 
+  # The ci tenant as a flox environment (ADR 0009 step 3, modules/ci/default
+  # .nix's NATIVE header): the agent, minio and its init as stubs from
+  # homelab's own .flox/ checked out at /var/lib/ci/env, in place of the
+  # compose unit. OFF: the line above is the whole of what runs, and the
+  # closure is byte-identical with or without this block (homelab-158.6).
+  # Flipping it is the cutover, docs/runbook-ci-native-cutover.md -- one
+  # push, after the box-side steps, never before -- because the switch that
+  # carries `true` stops the compose stack. jobEnvironment is set here
+  # regardless, since it reaches nothing while native is off: the paths
+  # ac-host's pipeline reads on the box, spelled from the tenant's own
+  # options rather than repeated (compose/docker-compose.buildkite.yml had
+  # them as literals), plus the two non-secret pages defaults that file
+  # carried; the secret and identity values are the ci-env render's.
+  homelab.ci.native.enable = false;
+  homelab.ci.native.jobEnvironment =
+    let
+      ac = config.services.ac-host;
+      state = toString ac.stateDir;
+    in
+    {
+      AC_STATE = state;
+      AC_CONTENT = "${state}/content";
+      AC_SRC = toString ac.repoDir;
+      AC_BUILD = "${state}/build";
+      AC_SERVE_CONTENT = "${state}/content";
+      AC_PAGES_CHECKOUT = "";
+      GITHUB_STATUS_BRANCH = "main";
+    };
+
   # ---------------------------------------------------------------------------
   # The closure deploys itself (ADR 0006). This is the flag that makes ac-box
   # self-switching: homelab's Buildkite pipeline stages a green revision into
