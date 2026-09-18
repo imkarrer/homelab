@@ -402,13 +402,21 @@ never a missing lobby. 03:00 no longer reaches PyPI or Docker Hub.
 - Environments are pushed **public** by default; `imkarrer/arcade` will be
   (its manifest holds no host fact or secret — by construction, "Beyond
   the six" for `.5`). Private is a FloxHub-side setting.
-- **floxmeta is not anonymously readable over git** even for a public
-  environment (`api.flox.dev/git/<owner>/floxmeta` answers 401; on this
-  WSL git then reached Windows' credential manager and popped a dialog),
-  while `flox pull` of the same environment needs no token. So the pull
-  unit cannot read a generation's lock *before* pulling without carrying the
-  token; the box carries none, and the "never compiles" guard for the
-  floxhub kind is checked after the pull rather than before.
+- **floxmeta IS readable without an account, but not without an
+  `Authorization` header.** `api.flox.dev/git/<owner>/floxmeta` answers a
+  bare request with 401 (`WWW-Authenticate: Basic realm="Login Required"`),
+  which is what sent git on this WSL to Windows' credential manager and a
+  desktop dialog; the same URL with HTTP basic auth as user `oauth` and an
+  **empty password** answers 200, and that pair is exactly what flox's own
+  logged-out git sends (its credential helper echoes `username=oauth`,
+  `password=$FLOX_FLOXHUB_TOKEN`, empty). Verified 18 Sep 2026 with curl
+  (401 / 200) and with a prompt-proof git -- `GIT_TERMINAL_PROMPT=0`,
+  global and system config off, helper list reset, one inline helper
+  scoped to api.flox.dev answering the empty password -- which cloned
+  `--bare --depth 1 --single-branch --branch <env>` in 4 s, exit 0,
+  spawning nothing (`.5`). So the pull unit does read generation N's lock
+  *before* pulling, carries no token, and runs the "never compiles" guard
+  first; a git that is allowed to prompt is the hazard, not the endpoint.
 - Two more throwaway environments exist on FloxHub from proving the
   first-push and next-generation paths (`imkarrer/hub-arcade-spike`,
   `imkarrer/hub-arcade-spike-first`), and cannot be removed from the CLI.
