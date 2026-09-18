@@ -618,23 +618,30 @@ let
           else
             # THIS tenant's quiet policy only. busyCheck's contract
             # (schema.nix): exit 0 means BUSY; 126/127 means the question
-            # could not be asked, which is a deferral.
+            # could not be asked, which is a deferral. Unlike modules/deploy,
+            # which asks only NON-drainable tenants, this restart asks a
+            # busyCheck whenever one is declared: drainable = true with a
+            # check means "any hour, but not mid-job" -- the ci tenant, whose
+            # agent may be running the very job that staged this (a restart
+            # then is HAZARD 2 by a new road). The closure switch is not
+            # coupled to it, because drainable stays true.
             drainable=$(jq -r --arg t "$tenant" '.tenants[] | select(.name == $t) | .quiet.drainable' "$inventory")
+            check=$(jq -r --arg t "$tenant" '.tenants[] | select(.name == $t) | .quiet.busyCheck // empty' "$inventory")
             case "$drainable" in
-              true) ;;
-              false)
-                check=$(jq -r --arg t "$tenant" '.tenants[] | select(.name == $t) | .quiet.busyCheck // empty' "$inventory")
-                if [ -z "$check" ]; then
+              true|false)
+                if [ "$drainable" = false ] && [ -z "$check" ]; then
                   log "$tenant is not drainable and has no busyCheck; a human restarts it. $what is warmed; deferring."
                   exit 0
                 fi
-                if sh -c "$check"; then rc=0; else rc=$?; fi
-                if [ "$rc" -eq 0 ]; then
-                  log "$tenant is busy; deferring the restart to $what."
-                  exit 0
-                elif [ "$rc" -eq 126 ] || [ "$rc" -eq 127 ]; then
-                  log "$tenant's busyCheck could not run (exit $rc: $check); deferring rather than guessing." >&2
-                  exit 0
+                if [ -n "$check" ]; then
+                  if sh -c "$check"; then rc=0; else rc=$?; fi
+                  if [ "$rc" -eq 0 ]; then
+                    log "$tenant is busy; deferring the restart to $what."
+                    exit 0
+                  elif [ "$rc" -eq 126 ] || [ "$rc" -eq 127 ]; then
+                    log "$tenant's busyCheck could not run (exit $rc: $check); deferring rather than guessing." >&2
+                    exit 0
+                  fi
                 fi
                 ;;
               *)

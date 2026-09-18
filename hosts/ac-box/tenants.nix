@@ -671,6 +671,14 @@
       description = "Self-hosted Buildkite agent (Flox sandbox) with a loopback MinIO Nix binary cache.";
       tier = "batch";
 
+      # Drainable (no window; a switch never waits on CI) but never mid-job:
+      # the native agent forks `buildkite-agent bootstrap` per job, and a
+      # restart of ac-host-ci.service while one runs kills the job that may
+      # have staged the very change -- HAZARD 2 by a new road. Read by the
+      # ci environment pull only (drainable = true keeps modules/deploy out
+      # of it); in the compose era nothing consults it. Exit 0 = busy.
+      quiet.busyCheck = "pgrep -f 'buildkite-agent bootstrap' >/dev/null";
+
       # The unit modules/ci creates once homelab.ci.enable is on. Declared
       # here so the inventory (/etc/homelab/tenants.json), drain planning and
       # the reconciliation diff all know the unit belongs to someone -- an

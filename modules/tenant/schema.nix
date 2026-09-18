@@ -83,7 +83,7 @@ let
       busyCheck = mkOption {
         type = types.nullOr types.str;
         default = null;
-        description = "Command; exit 0 means BUSY. Consulted only when drainable = false.";
+        description = "Command; exit 0 means BUSY. The closure switch (modules/deploy) consults it only when drainable = false; a tenant's environment pull (modules/tenant/environment-pull.nix) consults it whenever set, so drainable = true with a check means \"any hour, but not mid-job\".";
       };
       drain = mkOption { type = types.nullOr types.str; default = null; };
       resume = mkOption { type = types.nullOr types.str; default = null; };
