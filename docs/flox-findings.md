@@ -557,3 +557,24 @@ it explicit). What the cutover taught, beyond the runbook's own section:
 - The 11-hour-old finding stands sharper: the `.deb`-in-a-`/nix`-volume
   trap (item 10) is gone entirely once the agent is native — there is no
   image, no volume, one pin.
+
+### The nested-activation surprise (19 Sep, agent-hub build 17 — cause unverified)
+
+agent-hub's manifest hook sets its laptop defaults only when
+`INVOCATION_ID` is unset (`.12`). On the native CI agent — a job is a
+grandchild of `flox activate -d /var/lib/ci/env -- buildkite-agent start`,
+which systemd started — the agent's environment hook unsets
+`INVOCATION_ID` and `JOURNAL_STREAM` in the job (Buildkite's diff logs both
+as removed), and the plugin then nests agent-hub's activation inside the
+agent's. The inner hook set nothing: `AGENT_HUB_SWAP_CONFIG: unbound
+variable`. Evidence against the obvious explanations: the same
+`flox activate -c` as root in that checkout, outside the agent, with the ID
+unset, applies the defaults; a nested activation on WSL whose outer
+activation was started with `INVOCATION_ID` set and whose inner shell
+unset it also applies them; the outer activation's `_FLOX_HOOK_DIFF` names
+no such variable. So something about an activation nested under one that
+systemd started makes the inner hook see a unit — reproducible only on the
+box so far. The fix taken is the robust one either way: a tenant gate
+names every value it needs (`cb9036a`) rather than reading a hook's guess.
+The product note: hooks have no reliable way to know their context, and a
+nested activation's environment is not simply the job's environment.
