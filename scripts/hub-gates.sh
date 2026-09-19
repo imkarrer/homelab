@@ -295,6 +295,13 @@ if [ -f flake.nix ]; then
       done
     fi
   fi
+elif [ "$DEPLOY" = environment ]; then
+  # A manifest-only environment tree (home-arcade since 19 Sep 2026: its
+  # module and flake left with homelab-158.11). Nothing of it reaches the
+  # closure, so there is no Nix to evaluate and no gate went missing: the
+  # tenant gate ran above under flox, which is the whole of what the box
+  # will run. Said out loud rather than counted as a skip.
+  echo "== nix eval: $REPO is manifest-only (deploy=environment); the closure holds its unit, nothing to evaluate here =="
 else
   # Not a Nix tree at all. Nothing here reaches ac-box
   # through a system closure, so there is no eval to run -- but it is still a
