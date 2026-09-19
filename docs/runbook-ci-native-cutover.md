@@ -180,7 +180,13 @@ http://minio:9000` from its three pipeline files (agent-hub's and
 home-arcade's too); then `networking.hosts`'s `minio` line in modules/ci
 can go. Until then the compose file is what rollback needs -- keep it.
 
-## 6. Rollback -- human
+## 6. Rollback -- human (taken 19 Sep 2026, ADR 0011)
+
+ADR 0011 took this rollback as a push, not by hand: the native agent builds
+homelab fine, so a commit with `native.enable = false` builds and switches
+through the ordinary edge. The optional minio copy below is the only
+box-side step, and skipping it costs a cache that refills.
+
 
 A push with `native.enable = false` cannot build if the native agent is
 what is broken. Switch by hand, from ssh, to the generation before the

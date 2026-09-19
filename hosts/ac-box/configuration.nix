@@ -139,10 +139,16 @@ in
   # options rather than repeated (compose/docker-compose.buildkite.yml had
   # them as literals), plus the two non-secret pages defaults that file
   # carried; the secret and identity values are the ci-env render's.
-  # ON since 18 Sep 2026 (runbook step 1): pre-flight done, MinIO data
-  # copied to /var/lib/ci/minio, queue drained. The switch stops the compose
-  # stack; step 3 stages this commit's own sha and starts the pull.
-  homelab.ci.native.enable = true;
+  # ON 18 Sep 2026 (runbook step 1: pre-flight done, MinIO data copied to
+  # /var/lib/ci/minio, queue drained), OFF 19 Sep 2026 by ADR 0011: a CI job
+  # is not a deployment to the box, so it runs in a container, and the
+  # container the agent ran in was also the job's sandbox -- /bin/bash, UTC,
+  # a checkout that goes with it, processes that die with a cancelled job.
+  # inquire-platform's memory-transport smoke fails on the native agent
+  # only (inquire inq-29g). The switch that carries false stops the three
+  # stubs and starts the compose unit again (runbook section 6). Back to
+  # true only once jobs have a sandbox of their own.
+  homelab.ci.native.enable = false;
   homelab.ci.native.jobEnvironment =
     let
       ac = config.services.ac-host;
