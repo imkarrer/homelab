@@ -184,8 +184,22 @@ can go. Until then the compose file is what rollback needs -- keep it.
 
 ADR 0011 took this rollback as a push, not by hand: the native agent builds
 homelab fine, so a commit with `native.enable = false` builds and switches
-through the ordinary edge. The optional minio copy below is the only
-box-side step, and skipping it costs a cache that refills.
+through the ordinary edge. **The switch does not restart the agent.** The
+stub and the compose unit share the name `ac-host-ci.service`, and that unit
+is `restartIfChanged = false` on purpose (a switch must never bounce the
+agent from under a job), so after the switch the unit *file* is the compose
+one while the *process* is still the native agent, and no container exists.
+One hand step finishes it, once the queue is quiet:
+
+```bash
+sudo systemctl restart ac-host-ci     # stops the native agent, compose up on the named volumes
+```
+
+Seen 19 Sep 2026: `docker ps` then shows `ac-host-ci-agent-1` and
+`ac-host-ci-minio-1`, and the journal the native agent's "Disconnected".
+The minio stubs, having their own names, are stopped by the switch itself.
+The optional minio copy below is the only other box-side step, and skipping
+it costs a cache that refills.
 
 
 A push with `native.enable = false` cannot build if the native agent is
