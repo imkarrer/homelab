@@ -11,7 +11,9 @@
     "trigger_mode": "code",
     "build_branches": true,
     "build_pull_requests": true,
-    "publish_commit_status": true
+    "publish_commit_status": true,
+    "publish_commit_status_per_step": true,
+    "use_step_key_as_commit_status": true
   },
   "cancel_intermediate_builds": true,
   "skip_queued_branch_builds": true
