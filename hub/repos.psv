@@ -35,3 +35,7 @@ homelab|/home/nixos/src/homelab|git@github.com:imkarrer/homelab|buildkite|yes
 # hop, and hub-status prints the staged/applied pair per tenant.
 agent-hub|/home/nixos/src/agent-hub|git@github.com:imkarrer/agent-hub|environment|yes
 home-arcade|/home/nixos/src/home-arcade|git@github.com:imkarrer/home-arcade|environment|yes
+# bead-loop: deploy=none for ac-box -- the loop runs on the workstation and deploys
+# itself by a pull (bead-loop systemd/bead-loop-deploy.timer); its pipeline only tests
+# and automerges. Object: hub/pipelines/bead-loop.json (20 Sep 2026).
+bead-loop|/home/nixos/src/bead-loop|git@github.com:imkarrer/bead-loop|none|yes
