@@ -501,10 +501,11 @@ in
     (mkIf cfg.enable {
       # The cache CI fills is a substituter for the box itself. ADR 0009's
       # deploy edge warms a flox tenant's environment on the box with one
-      # activation; agent-hub's flake packages (the ik_llama.cpp fork,
-      # stable-diffusion.cpp) exist in no cache but this one, so without this
-      # the first activation compiles them through nix-daemon -- unfenced, in
-      # system.slice, on 56 threads beside the race servers. MinIO is loopback
+      # activation; agent-hub's flake package (the ik_llama.cpp fork; also
+      # stable-diffusion.cpp until 20 Sep 2026) exists in no cache but this
+      # one, so without this the first activation compiles it through
+      # nix-daemon -- unfenced, in system.slice, on 56 threads beside the
+      # race servers. MinIO is loopback
       # only (127.0.0.1:9000, header above), the bucket is anonymous-download
       # since ac-host 141280e (minio-init.sh), and the two keys are the public
       # halves of the signing pairs already listed in every pipeline's
