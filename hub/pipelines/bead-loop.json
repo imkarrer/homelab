@@ -1,0 +1,18 @@
+{
+  "name": "bead-loop",
+  "slug": "bead-loop",
+  "description": "Object managed by homelab scripts/hub-pipeline.sh from hub/pipelines/bead-loop.json; the steps are bead-loop/.buildkite/pipeline.yml. Do not edit here.",
+  "repository": "https://github.com/imkarrer/bead-loop.git",
+  "default_branch": "main",
+  "branch_configuration": "main",
+  "cluster_id": "9c1e5f56-22de-42cf-aa00-4b91d5583922",
+  "configuration": "agents:\n  queue: self\nsteps:\n  - label: \":pipeline: upload .buildkite/pipeline.yml\"\n    command: buildkite-agent pipeline upload\n",
+  "provider_settings": {
+    "trigger_mode": "code",
+    "build_branches": true,
+    "build_pull_requests": true,
+    "publish_commit_status": true
+  },
+  "cancel_intermediate_builds": true,
+  "skip_queued_branch_builds": true
+}
