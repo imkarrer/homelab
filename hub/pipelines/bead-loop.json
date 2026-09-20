@@ -12,5 +12,7 @@
     "build_branches": true,
     "build_pull_requests": true,
     "publish_commit_status": true
-  }
+  },
+  "cancel_intermediate_builds": true,
+  "skip_queued_branch_builds": true
 }
