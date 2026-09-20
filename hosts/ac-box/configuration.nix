@@ -297,7 +297,7 @@ in
     llm = {
       enable = true;
 
-      # The three models behind the one port, by the names llama-swap.yaml
+      # The four models behind the one port, by the names llama-swap.yaml
       # spells them and the request names. Only `kind` and `description`
       # are read (the landing page's models.json); the GGUF paths, flags
       # and aliases are the table's. The reasoning behind each choice --
@@ -323,6 +323,11 @@ in
           kind = "embedding";
           description = "Qwen3-Embedding-0.6B Q8_0 -- 1024-dim embeddings for Qdrant on :6333. POST /v1/embeddings.";
         };
+        # Dense 4B for the cheap calls (opencode's small_model: titles,
+        # summaries; pre-checks), so they never take one of coder's two
+        # slots. ~12 tok/s and no faster: bandwidth-bound, all 4.3 GB read
+        # per token. The bench and the thread choice are in the table.
+        utility.description = "Qwen3-4B-Instruct-2507 Q8_0 -- titles, summaries, pre-checks; ~12 tok/s. Chat tab.";
         # No image models since 20 Sep 2026 (homelab-b9u): FLUX.2 klein 4B/9B
         # and Z-Image-Turbo on stable-diffusion.cpp were here from 14 Sep;
         # generating with the two not in the resident set evicted both 80Bs
@@ -636,16 +641,19 @@ in
     };
     background = {
       # ~203 GiB, sized to hold everything llama-swap.yaml's `matrix` (agent-hub;
-      # the resident set: coder, instruct, embed) keeps loaded at once, worst case:
+      # the resident set: coder, instruct, embed, utility) keeps loaded at once, worst case:
       #     coder     80.5 GiB   measured, anonymous under -rtr, with KV
       #     instruct  80.4 GiB   measured (RSS, 14 Sep 2026)
       #     embed     ~2 GiB     0.6 GB of weights + KV for 8k, estimated
-      #     caches    20 GiB     --cache-ram 12288 + 8192, both ceilings
+      #     utility   ~6 GiB     4.3 GB of weights + KV for 16k, estimated
+      #     caches    21 GiB     --cache-ram 12288 + 8192 + 1024, all ceilings
       #     qdrant    ~0 GiB     an empty store; grows with the HNSW index
-      #               ~183 GiB
-      # The ~19 GiB above that was klein 9B's (resident until 20 Sep 2026,
-      # homelab-b9u) is kept in this ceiling for the second-family reviewer
-      # (homelab-e00) and the utility model (homelab-8r5); size those here.
+      #               ~190 GiB
+      # Measured 20 Sep 2026 with both 80Bs warm and nothing else loaded:
+      # AnonPages 161.9 GiB, MemAvailable 83.8 of 251.8 GiB. The ~13 GiB
+      # this ceiling still has over the table is for the second-family
+      # reviewer (homelab-e00) -- NOT enough for gpt-oss-120b (~63 GiB)
+      # beside both 80Bs; that one replaces instruct or the tiers move.
       # Was 0.70 (~176 GiB) for the two Qwens alone. memoryShare is a
       # CEILING, not a reservation, so the unused part costs nothing at
       # runtime -- but it does consume the 0.9 budget, and the extra 0.11 is
