@@ -305,7 +305,7 @@ in
       # quantization that preserves code quality; CPU rate tracks ACTIVE
       # parameters, 3B vs 35B), the prompt-cache sizes (--cache-ram 12288
       # for coder: ~2.5 GiB per 32k conversation, agents alternate, five
-      # fit; 8192 for instruct), the embedding model at the unit's 23
+      # fit; 8192 for reviewer), the embedding model at the unit's 23
       # threads not 4 (prefill is compute-bound: 6.7 s per 938-token chunk
       # at 4 threads, 16 Sep 2026), and the flags every llama backend gets
       # (-rtr: repack at load, disables mmap so the model is anonymous
@@ -318,7 +318,12 @@ in
       # entry in its llama-swap.yaml, which is where a table change is made.
       models = {
         coder.description = "Qwen3-Coder-Next 80B-A3B Q8_0 -- code. Chat tab.";
-        instruct.description = "Qwen3-Next-80B-A3B-Instruct Q8_0 -- prose, judgement, inquire-platform scoring. Chat tab.";
+        # gpt-oss-120b replaced Qwen3-Next-80B-A3B-Instruct on 20 Sep 2026
+        # (homelab-e00): a second model family for bead-loop's review call,
+        # which was most of what instruct did; inquire-platform's claude-*
+        # aliases moved with it. The bench and the no--rtr finding are in
+        # the table.
+        reviewer.description = "gpt-oss-120b MXFP4 -- the second-family code reviewer; prose, judgement, inquire-platform scoring. Chat tab.";
         embed = {
           kind = "embedding";
           description = "Qwen3-Embedding-0.6B Q8_0 -- 1024-dim embeddings for Qdrant on :6333. POST /v1/embeddings.";
@@ -641,19 +646,22 @@ in
     };
     background = {
       # ~203 GiB, sized to hold everything llama-swap.yaml's `matrix` (agent-hub;
-      # the resident set: coder, instruct, embed, utility) keeps loaded at once, worst case:
+      # the resident set: coder, reviewer, embed, utility) keeps loaded at once, worst case:
       #     coder     80.5 GiB   measured, anonymous under -rtr, with KV
-      #     instruct  80.4 GiB   measured (RSS, 14 Sep 2026)
+      #     reviewer  ~62 GiB    59 GiB of MXFP4 weights, mmap'd (no -rtr:
+      #                          it is fatal for MXFP4 on ik, see the table),
+      #                          so PAGE CACHE, reclaimable; + KV for 32k
       #     embed     ~2 GiB     0.6 GB of weights + KV for 8k, estimated
       #     utility   ~6 GiB     4.3 GB of weights + KV for 16k, estimated
       #     caches    21 GiB     --cache-ram 12288 + 8192 + 1024, all ceilings
       #     qdrant    ~0 GiB     an empty store; grows with the HNSW index
-      #               ~190 GiB
-      # Measured 20 Sep 2026 with both 80Bs warm and nothing else loaded:
-      # AnonPages 161.9 GiB, MemAvailable 83.8 of 251.8 GiB. The ~13 GiB
-      # this ceiling still has over the table is for the second-family
-      # reviewer (homelab-e00) -- NOT enough for gpt-oss-120b (~63 GiB)
-      # beside both 80Bs; that one replaces instruct or the tiers move.
+      #               ~172 GiB
+      # Measured 20 Sep 2026 with both Qwens warm, before the swap: AnonPages
+      # 161.9 GiB, MemAvailable 83.8 of 251.8 GiB -- which is why gpt-oss-120b
+      # REPLACED instruct (homelab-e00) rather than joining it: three
+      # 80-GiB-class models do not fit under this ceiling, two do with
+      # ~30 GiB over. The reviewer's weights being page cache is the thing to
+      # watch: at the ceiling they are reclaimed first and re-read from NVMe.
       # Was 0.70 (~176 GiB) for the two Qwens alone. memoryShare is a
       # CEILING, not a reservation, so the unused part costs nothing at
       # runtime -- but it does consume the 0.9 budget, and the extra 0.11 is
