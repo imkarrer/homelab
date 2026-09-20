@@ -297,7 +297,7 @@ in
     llm = {
       enable = true;
 
-      # The six models behind the one port, by the names llama-swap.yaml
+      # The three models behind the one port, by the names llama-swap.yaml
       # spells them and the request names. Only `kind` and `description`
       # are read (the landing page's models.json); the GGUF paths, flags
       # and aliases are the table's. The reasoning behind each choice --
@@ -307,11 +307,9 @@ in
       # for coder: ~2.5 GiB per 32k conversation, agents alternate, five
       # fit; 8192 for instruct), the embedding model at the unit's 23
       # threads not 4 (prefill is compute-bound: 6.7 s per 938-token chunk
-      # at 4 threads, 16 Sep 2026), the image models' recipes (4-step
-      # klein, 8-step Z-Image, cfg 1.0, --diffusion-fa), and the flags every
-      # llama backend gets (-rtr: repack at load, disables mmap so the
-      # model is anonymous memory under this unit's NUMAPolicy below, ~6 %
-      # prefill; --flash-attn on; --jinja: tool calls, without it every
+      # at 4 threads, 16 Sep 2026), and the flags every llama backend gets
+      # (-rtr: repack at load, disables mmap so the model is anonymous
+      # memory under this unit's NUMAPolicy below, ~6 % prefill; --flash-attn on; --jinja: tool calls, without it every
       # request carrying `tools` is a 500; --metrics) and the ones removed
       # by measurement (--numa distribute: sets no memory policy and fights
       # the cgroup fence, 30 -> 16 tok/s; --threads-batch 46: SMT siblings
@@ -325,18 +323,12 @@ in
           kind = "embedding";
           description = "Qwen3-Embedding-0.6B Q8_0 -- 1024-dim embeddings for Qdrant on :6333. POST /v1/embeddings.";
         };
-        flux2-klein-4b = {
-          kind = "image";
-          description = "FLUX.2 klein 4B Q8_0 -- images, fastest here; also edits. Images tab only.";
-        };
-        flux2-klein-9b = {
-          kind = "image";
-          description = "FLUX.2 klein 9B Q8_0 -- images, best quality here; also edits. Images tab only.";
-        };
-        z-image-turbo = {
-          kind = "image";
-          description = "Z-Image-Turbo Q8_0 -- images, ~4 min per 512x512 on this CPU. Images tab only.";
-        };
+        # No image models since 20 Sep 2026 (homelab-b9u): FLUX.2 klein 4B/9B
+        # and Z-Image-Turbo on stable-diffusion.cpp were here from 14 Sep;
+        # generating with the two not in the resident set evicted both 80Bs
+        # (a minute's reload, a cold prompt cache for the next review), and
+        # the ~19 GiB klein 9B held resident is wanted for a second-family
+        # reviewer (homelab-e00) and a utility model (homelab-8r5).
       };
 
       # PHYSICAL cores inside background.slice's fence, not logical threads
@@ -363,12 +355,12 @@ in
       contextSize = 32768;
 
       # nginx in front, so http://<lan>:8100/ is a page that lists chat
-      # models and image models apart and opens each in its own UI.
-      # llama-swap's /ui cannot: it shows every model on every playground
-      # tab, and the first person to try it picked the image model on the
-      # Chat tab. llama-swap itself moves to 127.0.0.1:8100; nginx.service
-      # joins this tenant's units in tenants.nix so it lives in the same
-      # slice.
+      # models and the embedding model apart and opens each chat model in
+      # its own UI. llama-swap's /ui cannot: it shows every model on every
+      # playground tab, and the first person to try it picked the (then)
+      # image model on the Chat tab. llama-swap itself moves to
+      # 127.0.0.1:8100; nginx.service joins this tenant's units in
+      # tenants.nix so it lives in the same slice.
       landingPage = true;
     };
 
@@ -495,9 +487,6 @@ in
           # llama-swap.yaml's `startPort`; one spelling, the option's.
           AGENT_HUB_BACKEND_PORT = toString llm.llm.backendPort;
           AGENT_HUB_SWAP_CONFIG = "${toString env.dir}/llama-swap.yaml";
-          # nix/sd-ui.html, the image backends' page, is a file of the
-          # tenant tree at `<dir>/nix`, read from the checkout.
-          AGENT_HUB_ASSETS = "${toString env.dir}/nix";
         };
       };
     };
@@ -640,21 +629,23 @@ in
     };
     interactive = {
       # 5 GiB for arcade + observability; 1.0 GiB current, 1.3 GiB peak
-      # since boot. Was 0.05; the 0.03 went to background with klein 9B and
-      # the embedding model.
+      # since boot. Was 0.05; the 0.03 went to background with the embedding
+      # model (and klein 9B, resident until 20 Sep 2026).
       memoryShare = 0.02;
       cpuShare = 0.05;
     };
     background = {
       # ~203 GiB, sized to hold everything llama-swap.yaml's `matrix` (agent-hub;
-      # the resident set: coder, instruct, klein 9B, embed) keeps loaded at once, worst case:
+      # the resident set: coder, instruct, embed) keeps loaded at once, worst case:
       #     coder     80.5 GiB   measured, anonymous under -rtr, with KV
       #     instruct  80.4 GiB   measured (RSS, 14 Sep 2026)
-      #     klein 9B  ~19 GiB    17 GiB of weights + working memory, estimated
       #     embed     ~2 GiB     0.6 GB of weights + KV for 8k, estimated
       #     caches    20 GiB     --cache-ram 12288 + 8192, both ceilings
       #     qdrant    ~0 GiB     an empty store; grows with the HNSW index
-      #               ~202 GiB
+      #               ~183 GiB
+      # The ~19 GiB above that was klein 9B's (resident until 20 Sep 2026,
+      # homelab-b9u) is kept in this ceiling for the second-family reviewer
+      # (homelab-e00) and the utility model (homelab-8r5); size those here.
       # Was 0.70 (~176 GiB) for the two Qwens alone. memoryShare is a
       # CEILING, not a reservation, so the unused part costs nothing at
       # runtime -- but it does consume the 0.9 budget, and the extra 0.11 is
@@ -667,11 +658,12 @@ in
       #
       # Page cache counts against this ceiling too and is what gets reclaimed
       # first, so the cached copies of the resident GGUFs go -- the cost is
-      # that a reload after klein 4B or Z-Image evicts them reads from NVMe
-      # (~30 s) instead of from cache (~20 s). Past reclaim there is no swap:
-      # the ceiling is enforced by an OOM kill inside the slice, which
-      # llama-swap survives (it restarts the backend), so the ~1 GiB of
-      # margin above is thin on purpose rather than by accident.
+      # that a reload after an eviction (none in the table today: all three
+      # are one set) reads from NVMe (~30 s) instead of from cache (~20 s).
+      # Past reclaim there is no swap: the ceiling is enforced by an OOM
+      # kill inside the slice, which llama-swap survives (it restarts the
+      # backend), so the ~1 GiB of margin above is thin on purpose rather
+      # than by accident.
       memoryShare = 0.81;
       cpuShare = 0.70; # CPUWeight 700, and cores 3-25 + siblings via the fence.
       # resources.nix defaults this to 10, which niced the inference server
@@ -683,8 +675,8 @@ in
       # 12.5 GiB. Was the default 0.10 (~25 GiB), the figure ac-host's
       # docker-compose.buildkite.yml cites as the number to revisit if a
       # build OOMs -- revisit it there too if one does. The 0.05 went to
-      # background with klein 9B (see the arithmetic there). CPU is where CI
-      # must yield, hence the small cpuShare below.
+      # background (see the arithmetic there). CPU is where CI must yield,
+      # hence the small cpuShare below.
       memoryShare = 0.05;
       # Sizes batch's OWN fence block (cores 26-27) as well as its weight.
       # Before the resources.nix fix, batch and background shared one

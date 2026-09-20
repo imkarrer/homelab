@@ -124,8 +124,7 @@ in
         Runtime state. <stateDir>/env is the tenant's checked-out flox
         environment (modules/tenant/environment.nix derives the stub's
         `dir` from the tenant's first state dir), so this is also where
-        AGENT_HUB_SWAP_CONFIG (<env>/llama-swap.yaml) and AGENT_HUB_ASSETS
-        (<env>/nix) point.
+        AGENT_HUB_SWAP_CONFIG (<env>/llama-swap.yaml) points.
       '';
     };
 
@@ -191,8 +190,9 @@ in
         default = false;
         description = ''
           Multi-model mode only. Put nginx on `lanAddress`:`port` serving
-          ./agent-hub/index.html at / -- chat models and image models
-          listed apart, each linking to its backend's own UI -- and
+          ./agent-hub/index.html at / -- chat models and the embedding
+          model listed apart, each chat model linking to its backend's
+          own UI -- and
           proxying everything else to llama-swap, which then listens on
           127.0.0.1:`port` instead. The stub reads it to decide
           AGENT_HUB_LISTEN (loopback with nginx in front, the LAN address
@@ -223,16 +223,15 @@ in
               kind = lib.mkOption {
                 type = lib.types.enum [
                   "llama"
-                  "image"
                   "embedding"
                 ];
                 default = "llama";
                 description = ''
-                  "llama": a chat model (llama-server). "image": a
-                  diffusion model (stable-diffusion.cpp's sd-server, the
-                  same OpenAI images API llama-swap routes). "embedding":
+                  "llama": a chat model (llama-server). "embedding":
                   /v1/embeddings and nothing else. Read by the landing
-                  page, which puts each kind on its own tab.
+                  page, which puts each kind on its own tab. ("image", a
+                  stable-diffusion.cpp backend, left with the image models
+                  on 20 Sep 2026, homelab-b9u.)
                 '';
               };
 
