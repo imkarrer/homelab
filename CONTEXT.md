@@ -1,35 +1,52 @@
 # homelab
 
-The platform layer for one home server, and the hub from which its four source
+The platform layer for two home servers (ADR 0010), and the hub from which the four source
 trees are coordinated. This glossary is the vocabulary those trees, the docs
 and the agent skills share; a term used here means exactly this.
 
-## The machine
+## The machines
 
-**ac-box** (or **the box**):
-The single physical home server (an HP Z840) that runs every workload. Its
-hostname is `ac-box`; "the box" in any doc, verdict or skill means this
-machine and nothing else.
-_Avoid_: the server, the host, prod, the Z840
+**Box**:
+Any one of the physical hosts, always named. There is no "the box":
+since ADR 0010 a verdict, runbook or skill says which one.
+_Avoid_: the box, the server, the host, prod
+
+**llm-box**:
+The HP Z840 (formerly `ac-box`), which runs `agent-hub` and nothing else:
+all of its cores and memory, unfenced. The rename is part of the split
+(ADR 0010); until it lands, `ac-box` in an older doc means this machine.
+_Avoid_: ac-box (after the rename), the Z840
+
+**arcade-box**:
+The small always-on host (a Lenovo M920q Tiny) that runs every tenant but
+`agent-hub`: `assetto`, `bot`, `arcade`, `observability` and `ci` — what
+people notice when it breaks, plus the pipelines. The router's forwards
+and the stations' SMB mount point here.
+
+**ci-box**:
+A deferred host (ADR 0010) that would take `ci` off arcade-box if its
+queue or its switch windows start to hurt. Not built; named so the trigger
+has a name.
 
 **Platform layer**:
-Everything on the box that is not a workload — hardware, identity, the
+Everything on a box that is not a workload — hardware, identity, the
 Docker daemon, Nix, boot — owned by this repository (`homelab`).
 _Avoid_: base system, OS config
 
 **Tenant**:
-One workload on the box, declared against the contract by name. There are
-exactly six: `assetto`, `bot`, `arcade`, `agent-hub`, `observability`, `ci`.
+One workload, declared against the contract by name and assigned to one box
+by that box's host facts. There are exactly six: `assetto`, `bot`, `arcade`,
+`agent-hub`, `observability`, `ci`.
 _Avoid_: service, app, project, workload
 
 **Contract**:
 The schema every tenant declares itself against — its units, ports, tier,
 state path and secrets — and the only thing the platform layer knows about a
-tenant.
+tenant. One instance per box.
 _Avoid_: tenant module, interface
 
 **Tier**:
-A named share of the box's capacity (`critical`, `interactive`, `background`,
+A named share of a box's capacity (`critical`, `interactive`, `background`,
 `batch`) that a tenant is placed in. A share, never an absolute amount.
 _Avoid_: priority, class, cgroup
 
