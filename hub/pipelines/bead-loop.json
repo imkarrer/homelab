@@ -11,6 +11,10 @@
     "trigger_mode": "code",
     "build_branches": true,
     "build_pull_requests": true,
+    "build_pull_request_labels_changed": true,
+    "skip_pull_request_builds_for_existing_commits": false,
+    "filter_enabled": true,
+    "filter_condition": "build.source_action != \"labeled\" && build.source_action != \"unlabeled\" || build.source_action == \"labeled\" && build.pull_request.label == \"automerge\"",
     "publish_commit_status": true,
     "publish_commit_status_per_step": true,
     "use_step_key_as_commit_status": true
