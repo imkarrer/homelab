@@ -33,6 +33,7 @@ logged in to.
 | OS | NixOS, `OpenSSH_10.5`; root login offers `publickey,password,keyboard-interactive` |
 | Host key (ed25519) | `AAAAC3NzaC1lZDI1NTE5AAAAILcHBx8G0JLhFqlGgD+1ajjrIhiOVqCfHRGhJalc9vYj` |
 | Its age recipient (`ssh-to-age` of that key) | `age15lpvpdcg6k7jt82wk4fwmu7a3gtgkf2mwk6cxfst5r2xura8u9xsuz33rr` |
+| Accounts | `root` and a login named `arcade` (the operator, 26 Sep 2026). Neither holds the operator's key yet. The name matters: in the closure `arcade` is the **tenant's system user** (`hosts/*/tenants/arcade.nix`, `isSystemUser`, home `/var/lib/arcade`), and the human accounts on every homelab host are `nixosuser` and `ac` (`modules/platform/identity.nix`, key-only). See 5.4's precondition |
 | Hardware | **not measured.** ADR 0010's table says i7-9700T 8c/8t; bead `homelab-bfq.6`'s description says the unit ordered was an i7-8700T, 6c/12t. `lscpu` decides, in phase 1 |
 
 And the side of ac-box that matters here, read the same day:
@@ -253,6 +254,20 @@ when they are not. `--spawn` stays 1 until `homelab-bfq.5`-style numbers
 exist for this host.
 
 ### 5.4 The first switch -- box action on arcade-box
+
+**Precondition: the installer's `arcade` login is gone.** With
+`users.mutableUsers` at its default, NixOS keeps an existing user's uid when
+the declaration names none, so the first switch would turn the installer's
+uid-1000 `arcade` into the tenant's "system" user with a leftover
+`/home/arcade` -- working, and wrong-shaped for good. While the box is still
+the installer's, as root:
+
+```bash
+ssh arcade-box 'id arcade; userdel -r arcade; id arcade || echo removed'
+```
+
+The operator's key must therefore be on **root** (0.1), not on `arcade`;
+after the switch `nixosuser` and `root` carry it, exactly as on ac-box.
 
 ```bash
 # the sha is on origin and green (hub-status's CI section says so)
