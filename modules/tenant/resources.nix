@@ -65,6 +65,24 @@ let
           serviceConfig instead).
         '';
       };
+
+      fence = mkOption {
+        type = types.bool;
+        default = true;
+        description = ''
+          Whether this tier's slice carries the AllowedCPUs fence computed
+          below. Only background and batch are ever fenced, so the flag is
+          read for those two and inert on critical and interactive. true is
+          ac-box's shape: 28 physical cores, and the fence is what keeps a
+          Nix build or the model server off the cores the lobbies run on.
+          false is ADR 0010's shape for arcade-box ("tier -> slice without
+          the cpuset fence"): on six cores the fence would idle one or two
+          of them for every CI build, and CPUWeight under contention plus
+          MemoryMax is the whole of what a small host wants. MemoryMax,
+          CPUWeight and IOWeight are unaffected by this flag; it removes
+          exactly one line from the slice.
+        '';
+      };
     };
   };
 
@@ -178,7 +196,9 @@ let
     batch = logicalCPUs (backgroundLastCore + 1) (physicalCores - 1);
   };
 
-  sliceUnitsAreFenced = tierName: tierAllowedCPUs ? ${tierName};
+  # A tier is fenced when it is one of the two the arithmetic above covers
+  # AND its `fence` flag is on (the per-host opt-out, see the option).
+  sliceUnitsAreFenced = tierName: (tierAllowedCPUs ? ${tierName}) && cfg.tiers.${tierName}.fence;
 
   mkSlice = tierName: tierCfg: {
     description = "homelab ${tierName} tier";
@@ -347,6 +367,10 @@ in
         cpuShare = mkDefault v.cpuShare;
         ioWeight = mkDefault v.ioWeight;
         nice = mkDefault v.nice;
+        # Not in tierDefaults: the fence is not a share, and every tier
+        # defaults to fenced (the option's own default) so no existing host
+        # changes shape by this line existing.
+        fence = mkDefault true;
       }) tierDefaults;
 
       # Evaluation-time only -- costs nothing in the closure -- so it runs

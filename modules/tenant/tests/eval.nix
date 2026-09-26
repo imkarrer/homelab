@@ -51,11 +51,15 @@ let
       fixture,
       extraModules ? [ ],
       checks ? (_: [ ]),
+      # The host stub: stub-host.nix (lan + a mgmt with no address, ac-box's
+      # shape) unless a case says otherwise -- the singleNic* cases swap in
+      # stub-host-single-nic.nix, which declares no mgmt network at all.
+      stub ? stubHost,
     }:
     let
       evaluated = lib.evalModules {
         modules = [
-          stubHost
+          stub
           schema
           enforce
           ports
@@ -160,6 +164,41 @@ in
     ];
   };
 
+  # --- a host with no mgmt network at all (homelab-ygc.3, 26 Sep 2026) ---
+
+  # stub-host-single-nic.nix is arcade-box's shape: one wired port, `lan`
+  # declared and nothing else. Until ports.nix learned `hasMgmt` it read
+  # networks.mgmt.interface unconditionally and this evaluation died with
+  # "attribute 'mgmt' missing" -- an error naming no option and no tenant.
+  # Clean fixture, firewall on: must evaluate cleanly, emit exactly ONE
+  # interface entry (the lan NIC) and nothing under a made-up or null name
+  # for the mgmt side, and the lan rules themselves must be unaffected.
+  singleNicNoMgmt = mkCase {
+    stub = ./stub-host-single-nic.nix;
+    fixture = ./fixtures/clean.nix;
+    extraModules = [ { homelab.enforce.firewall = true; } ];
+    checks = cfg: [
+      {
+        assertion = lib.attrNames cfg.networking.firewall.interfaces == [ "eno2" ];
+        message = "a host without a mgmt network must get exactly one firewall interface entry (its lan NIC), got: ${
+          lib.concatStringsSep ", " (lib.attrNames cfg.networking.firewall.interfaces)
+        }";
+      }
+      {
+        assertion = lib.elem 8100 cfg.networking.firewall.interfaces.eno2.allowedTCPPorts;
+        message = "the lan rules must still be emitted on a single-NIC host (agent-hub's 8100 on eno2)";
+      }
+    ];
+  };
+
+  # The same single-NIC host with a claim scoped to mgmt (the mgmt-no-address
+  # fixture): must fail, and through the module's own assertion, whose text
+  # now says the network is not declared rather than that it has no address.
+  singleNicMgmtClaim = mkCase {
+    stub = ./stub-host-single-nic.nix;
+    fixture = ./fixtures/mgmt-no-address.nix;
+  };
+
   # Case name -> whether `<case>.checked` must evaluate cleanly (true) or
   # throw (false, for the fixtures above that exist to prove a bad config is
   # rejected). Read by modules/tenant/tests/check.nix, which is what makes
@@ -176,5 +215,7 @@ in
     allFalseCollisionStillFails = false;
     allFalseNoFirewallEmitted = true;
     allTrueFirewallEmitted = true;
+    singleNicNoMgmt = true;
+    singleNicMgmtClaim = false;
   };
 }

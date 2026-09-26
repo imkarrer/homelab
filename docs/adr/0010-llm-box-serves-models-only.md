@@ -56,7 +56,7 @@ already exists.**
 | Host | Hardware | Tenants | Delivery |
 | --- | --- | --- | --- |
 | **llm-box** | the existing Z840, renamed from `ac-box` | `agent-hub` only (llama-server, nginx, qdrant) | **none.** No Buildkite agent, no `modules/deploy`, no `environment-pull`, no tiers, no fence. The operator runs `nixos-rebuild switch --flake .#llm-box --target-host llm-box` when a homelab build is green, and pulls + restarts the agent-hub environment by hand. CI gates this host (`flake check` evaluates `nixosConfigurations.llm-box`; agent-hub's pipeline proves its manifest) and stages nothing on it |
-| **arcade-box** | Lenovo ThinkCentre M920q Tiny, i7-9700T (8c/8t), 32 GB dual-channel, 1 TB NVMe (~$300 used) | `assetto`, `bot`, `arcade`, `observability`, `ci` | as ac-box today: `modules/deploy` timer with the window (ADR 0006/0008), `environment-pull` (ADR 0009), tier → slice (ADR 0002) without the cpuset fence. The Buildkite agent runs `--spawn 2`, in `batch.slice`, with a `MemoryMax` so a runaway job OOMs itself and not a lobby |
+| **arcade-box** | Lenovo ThinkCentre M920q Tiny, i7-8700T (6c/12t -- measured 26 Sep 2026 by `lscpu`; drafted here as an i7-9700T), 31 GiB usable of 32 GB dual-channel, 954 GB NVMe (~$300 used) | `assetto`, `bot`, `arcade`, `observability`, `ci` | as ac-box today: `modules/deploy` timer with the window (ADR 0006/0008), `environment-pull` (ADR 0009), tier → slice (ADR 0002) without the cpuset fence. The Buildkite agent runs `--spawn 2`, in `batch.slice`, with a `MemoryMax` so a runaway job OOMs itself and not a lobby |
 
 **Why llm-box gets no machinery.** The deploy edge exists for hosts where a
 switch has a window and a hazard. llm-box has one tenant, no lobbies, no

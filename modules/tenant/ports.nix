@@ -118,12 +118,22 @@ let
 
   mgmtClaims = filter (c: c.scope == "mgmt") allClaims;
 
+  # A host may have no mgmt network AT ALL -- arcade-box (hosts/arcade-box/
+  # host.nix) has one wired port and declares only `lan`. That is a different
+  # fact from ac-box's "mgmt declared, address null" (eno1, no carrier), and
+  # until 26 Sep 2026 (homelab-ygc.3) this file could not tell them apart:
+  # `netCfg.mgmt.interface` below was read unconditionally, so a single-NIC
+  # host failed evaluation with "attribute 'mgmt' missing" -- an error that
+  # named no option and no tenant. Absent counts as "nothing may be scoped
+  # here", exactly like a null address, and the assertion says which.
+  hasMgmt = netCfg ? mgmt;
+
   mgmtAssertions = optionals (mgmtClaims != [ ]) [
     {
-      assertion = netCfg.mgmt.address != null;
-      message = "homelab.host.networks.mgmt has no address, but ${concatStringsSep ", " (
-        map (c: c.label) mgmtClaims
-      )} declare scope = \"mgmt\". Nothing may be scoped to mgmt until that interface is up.";
+      assertion = hasMgmt && netCfg.mgmt.address != null;
+      message = "homelab.host.networks.mgmt ${
+        if hasMgmt then "has no address" else "is not declared on this host"
+      }, but ${concatStringsSep ", " (map (c: c.label) mgmtClaims)} declare scope = \"mgmt\". Nothing may be scoped to mgmt until that interface is up.";
     }
   ];
 
@@ -134,7 +144,7 @@ let
     map (c: c.number) (filter (c: c.enable && c.scope == scope && c.proto == proto) perProto);
 
   lanIface = netCfg.lan.interface;
-  mgmtIface = netCfg.mgmt.interface;
+  mgmtIface = if hasMgmt then netCfg.mgmt.interface else null;
 
   lanTcp = portsOn "lan" "tcp" ++ portsOn "forwarded" "tcp";
   lanUdp = portsOn "lan" "udp" ++ portsOn "forwarded" "udp";
@@ -170,12 +180,14 @@ in
             allowedUDPPorts = lanUdp;
           };
         }
-        {
+        # Nothing at all for a host without a mgmt network: not an entry
+        # under a made-up interface name, and not one under `null`.
+        (mkIf hasMgmt {
           ${mgmtIface} = {
             allowedTCPPorts = mgmtTcp;
             allowedUDPPorts = mgmtUdp;
           };
-        }
+        })
       ];
     })
   ];
