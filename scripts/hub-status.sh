@@ -566,7 +566,7 @@ closure_section() {
         # the host the agent is on; a host whose inventory has no ci tenant has
         # no agent, and nothing will ever stage here (arcade-box until runbook
         # 4.2 moves the agent). Behind, and only a hand switch moves it.
-        note "system closure is $1 and nothing is staged - no CI agent on this host (ci is not in its inventory), so nothing stages a closure here until the cutover moves the agent (runbook 4.2); until then only a hand switch moves it (runbook 5.4)"
+        note "system closure is $1 and nothing is staged - no CI agent on this host (ci is not in its inventory), so nothing stages a closure here only a hand switch moves this host (ADR 0010: the Z840 after the cutover, arcade-box before it); until then only a hand switch moves it (runbook 5.4)"
       else
         note "system closure is $1 and nothing is staged - HEAD's build has not run queue-closure (unpushed? red gate? agent lacks the /var/lib/homelab mount?)"
       fi

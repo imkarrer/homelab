@@ -6,13 +6,13 @@ tools: Read, Bash, Grep, Glob
 
 You are the hub's **inspector**: you establish facts and change nothing.
 
-Start from `bash scripts/hub-status.sh` at the hub root (~2s) whenever the
-question is about state — it is the one call that answers box vs origin vs
-WSL, and its verdict lines are defined in the `homelab-hub` skill. Re-derive
-by hand only what the verdict points you at.
+Start from `bash scripts/hub-status.sh` at the hub root (~5s) whenever the
+question is about state — it is the one call that answers each box vs origin
+vs WSL, and its verdict lines are defined in the `homelab-hub` skill.
+Re-derive by hand only what the verdict points you at.
 
-ac-box is reachable as `ssh ac-box`, read-only. The commands that answer most
-questions:
+Each host is reachable by its name, read-only: `ssh ac-box`, `ssh
+arcade-box`. The commands that answer most questions:
 
 ```bash
 ssh ac-box 'systemctl status homelab-deploy.timer homelab-deploy.service --no-pager'

@@ -265,7 +265,7 @@ interface at all.
 | `modules/platform/secrets.nix` | `BUILDKITE_AGENT_NAME=${homelab.host.name}` in the `ci-env` template; the `.env` copy unit and the bot's ordering on it exist only while `services.ac-host` is enabled | two agents named `ac-box` would be indistinguishable in Buildkite; a host without the lobbies would otherwise get a copy unit with nowhere to copy to and an empty `ac-host-bot` unit |
 | `modules/platform/ssh.nix` | `PasswordAuthentication` and `KbdInteractiveAuthentication` false | D7 |
 | `.sops.yaml` + `secrets/ac-box.yaml` | add `&arcade-box` (section 1's recipient) to `keys:` and to the rule's `age:` list; then `SOPS_AGE_KEY="$(ssh-to-age -private-key -i ~/.ssh/id_ed25519_ac-host)" sops updatekeys -y secrets/ac-box.yaml` (both under `nix shell nixpkgs#sops nixpkgs#ssh-to-age`). **The operator runs this**: the agent harness refuses secret-store writes (26 Sep 2026). It must land before 5.4 -- activation decrypts with the host key, and a file the box cannot read fails the switch | D4; the box decrypts with its host key at activation |
-| `scripts/hub-status.sh`, `hub-backup.sh`, `hub-deploy.sh` | host-aware: `HOMELAB_BOX` per host, the BOX section per host, backup evaluates the host that declares the state | after phase 4 the scripts would report and back up the wrong machine -- this lands **before** the cutover, not after |
+| `scripts/hub-status.sh`, `hub-backup.sh`, `hub-deploy.sh` | host-aware: `HOMELAB_BOX` per host, the BOX section per host, backup evaluates the host that declares the state. **Landed 26 Sep 2026** (`homelab-ygc.4`, `scripts/lib/hosts.sh` reads the hosts off the flake; the staging mirror gains `backup/<host>/`, ac-box's untouched) | after phase 4 the scripts would report and back up the wrong machine -- this lands **before** the cutover, not after |
 
 `hub-gates.sh` already iterates every `nixosConfigurations` attribute, so
 the gate covers arcade-box the moment it exists.
@@ -517,6 +517,19 @@ MinIO on the copied cache).
    on arcade-box's agent and applies `pending-src`; `last-downtime.json`
    carries the date. `hub-status` (host-aware) is CLEAN for arcade-box,
    and `hub-backup` pulled the tenants' state from arcade-box at 04:30.
+   Two things that 04:30 run needs, found in review (`homelab-ygc.4`):
+   **before 04:30, as user `nixos`**, both hosts' keys accepted into
+   `~/.ssh/known_hosts` -- the backup runs `StrictHostKeyChecking=yes`
+   keyed by IP, `.50` now presents arcade-box's key and the Z840's new
+   address has none, so until then both hosts read unreachable and the run
+   dies "no host was backed up". And **after arcade-box's first successful
+   snapshot**, remove the four moved directories from
+   `/home/nixos/backup/ac-box/var/lib/` (`ac-host`, `arcade`, `grafana`,
+   `prometheus2`): the pull only mirrors inside the directories a host
+   still declares, so they would sit there frozen at their pre-cutover
+   state, re-snapshotted under host `ac-box` every night, and the restore
+   runbook's "try the mirror first" would hand back a whitelist missing
+   every driver added since.
 6. The operator's machine: `hub-ask.sh`, `hub-index.sh`, `hub-search.sh`,
    `vectors-smoke.sh`, `compare.sh` defaults (or `HUB_LLM`/`LLM`/`QDRANT`)
    moved to the Z840's new address; `~/.ssh/config` has `arcade-box` at

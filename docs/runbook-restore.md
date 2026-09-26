@@ -18,7 +18,7 @@ marked as a box action and carries its own abort criteria.
 |---|---|
 | Runs on | the operator's WSL machine, **not** ac-box. A backup that lives on the machine it is backing up is not one. |
 | Schedule | `hub-backup.timer`, 04:30 **America/Chicago** (09:30 UTC), `Persistent=true` |
-| Staging mirror | `/home/nixos/backup/ac-box/<the box's absolute path>` — last night's tree, readable directly |
+| Staging mirror | `/home/nixos/backup/<host>/<that host's absolute path>` — last night's tree, readable directly. `ac-box/` is where it has always been; `arcade-box/` beside it since 26 Sep 2026 (`homelab-ygc.4`), and each host is its own restic host and forget group |
 | restic repo | `/home/nixos/backup/restic` |
 | Repo password | `restic-repo-password` in `secrets/ac-box.yaml` (sops; two recipients, the box's host key and the operator's) |
 | Retention | 7 daily, 4 weekly, 6 monthly |
@@ -37,13 +37,18 @@ The directory list is not written down anywhere except the contract. Ask:
 bash scripts/hub-backup.sh --list      # ~10s, no root, no network
 ```
 
-Each directory is one `<tenant> <dir>` line; where the backup leaves things
-out, the rsync filters follow on an indented line (`grep -v '^ '` for the
-bare list).
+Each directory is one `<host> <tenant> <dir>` line -- the host whose
+configuration enables that tenant, which is where its state is pulled from;
+where the backup leaves things out, the rsync filters follow on an indented
+line (`grep -v '^ '` for the bare list).
 
 On 16 Sep 2026 that is `/var/lib/ac-host` (assetto), `/var/lib/arcade`,
 `/var/lib/agent-hub`, `/var/lib/qdrant` (declared, absent on the box),
-`/var/lib/grafana` and `/var/lib/prometheus2` (observability). A tenant is
+`/var/lib/grafana` and `/var/lib/prometheus2` (observability). Since 26 Sep
+2026 the list is built per host from that host's configuration -- a
+directory is pulled from the host whose `hosts/<host>/configuration.nix`
+enables the tenant, so the same declaration moves with the tenant at the
+cutover and no script changes. A tenant is
 added to the backup by setting `state.backup = true` in
 `hosts/ac-box/tenants.nix` and nothing else.
 

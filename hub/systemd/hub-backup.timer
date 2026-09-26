@@ -15,7 +15,7 @@
 # skipped in silence. That plus hub-status.sh's staleness line is the whole
 # "did the backup happen?" story.
 [Unit]
-Description=Nightly backup of ac-box's declared state
+Description=Nightly backup of each homelab host's declared state
 
 [Timer]
 OnCalendar=*-*-* 04:30:00 America/Chicago

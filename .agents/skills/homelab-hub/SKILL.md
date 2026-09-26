@@ -19,12 +19,31 @@ bash /home/nixos/src/homelab/scripts/hub-status.sh
 ```
 
 Exit 0 means reconciled; exit 1 prints a numbered verdict of what is not. It
-takes ~2s. Reading the verdict is the whole survey — re-derive with
-`git status`, `ssh ac-box`, or `docker ps` only what the verdict points you at.
+takes ~5s for the two hosts (`HOMELAB_BOX=<host>` asks about one). Reading
+the verdict is the whole survey — re-derive with `git status`, `ssh <host>`,
+or `docker ps` only what the verdict points you at.
 
 ## Reading the verdict
 
+The BOX, tenant-tree and closure sections run once per host declared in
+`flake.nix`, and every line from inside them starts with the host's name.
 Each line names a distinct failure, and they are not interchangeable:
+
+- **\<host\>: unreachable** — that host did not answer; its sections are
+  skipped and its state is unknown, which is not clean. The other host's
+  report is still complete.
+- **\<host\>: runs \<sha\>, which homelab HEAD does not contain (UNMERGED)** —
+  the box was switched from a branch (a hand switch during a build-up, as
+  arcade-box was on 26 Sep 2026). Land the branch; a box is not where work
+  lives.
+- **\<host\>: the ssh alias reached a machine calling itself \<hostname\>** —
+  `~/.ssh/config` points the alias at the wrong machine. The cutover swaps
+  `192.168.1.50` between the two hosts and nothing else would notice; fix
+  the alias before believing any other line for that host.
+- **\<host\>: nothing is staged — no CI agent on this host** — a state line,
+  not a failure: a host whose inventory has no `ci` tenant has no agent to
+  write `pending-closure.json`, so only a hand switch moves its closure
+  (arcade-box before the cutover, the Z840 after it, ADR 0010).
 
 - **uncommitted / untracked** — work exists only on this machine. CI cannot see
   it and it will be lost by any tree operation.
@@ -82,7 +101,7 @@ Each line names a distinct failure, and they are not interchangeable:
   unpushed, a red gate, or the CI agent lacking its `/var/lib/homelab` mount.
   Green here means only that no commit is newer than the last switch, which
   is consistent with current, not proof of it — `HUB_STATUS_EXACT=1` proves
-  it by comparing store paths, for ~7s instead of ~2s.
+  it by comparing store paths, for ~7s more per host.
 - **switched since boot** — the closure was activated but not rebooted into, so
   `systemctl` reflects the new config while the kernel and initrd are still the
   old one. A kernel or boot-parameter change looks applied and is not.
