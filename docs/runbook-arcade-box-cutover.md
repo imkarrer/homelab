@@ -397,6 +397,24 @@ hosts. Run the sandbox probe here and record it.
 **Rehearse the delta.** Time a second rsync pass of each tree; phase 4's
 budget is that number, and it should be seconds.
 
+### Status, 26 Sep 2026 (13:06-13:12 CDT)
+
+Done, box-to-box with the operator's agent forwarded, ownership mapped by
+name, `nice -n 19 ionice -c3` on ac-box's side:
+
+| What | Measured |
+| --- | --- |
+| `/var/lib/ac-host` | 12.64 GB, 2,989 files, 154 s at 82 MB/s; **delta pass 1 s** (2 files) |
+| `ac-host-env:latest`, `ac-host-server:latest` | `docker save \| docker load` through ac-box, 108 s |
+| `/srv/arcade`, `/var/lib/arcade` (minus `env/`, `secrets/`, flox scratch) | 464 MB + 19 MB, 9 s |
+| `/var/lib/grafana`, `/var/lib/prometheus2` | 93 MB + 107 MB, arcade-box's services stopped for it and active again after |
+| `ac-host-ci_minio-data` | 3.9 GB, 5,913 files, 67 s into a pre-created volume of that name |
+| arcade generation 2 | staged by hand as the record ac-box holds; `arcade-environment-pull` pulled, pinned and warmed it in 23 s to run path `f6m1q3pd…`, **the same path ac-box's applied record names**; `environment.enable = true` landed as `abf44ac` (CI build 145) and the switch started both game servers on `.218` |
+
+Left for this phase: the agent image build, MinIO up on the copied cache,
+the sandbox probe (all one job), and a reboot to settle the kernel
+hostname and prove the box comes back on its own.
+
 ---
 
 ## 7. Phase 4 -- the cutover
