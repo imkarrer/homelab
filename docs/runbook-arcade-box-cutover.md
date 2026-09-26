@@ -411,9 +411,16 @@ name, `nice -n 19 ionice -c3` on ac-box's side:
 | `ac-host-ci_minio-data` | 3.9 GB, 5,913 files, 67 s into a pre-created volume of that name |
 | arcade generation 2 | staged by hand as the record ac-box holds; `arcade-environment-pull` pulled, pinned and warmed it in 23 s to run path `f6m1q3pd…`, **the same path ac-box's applied record names**; `environment.enable = true` landed as `abf44ac` (CI build 145) and the switch started both game servers on `.218` |
 
-Left for this phase: the agent image build, MinIO up on the copied cache,
-the sandbox probe (all one job), and a reboot to settle the kernel
-hostname and prove the box comes back on its own.
+Then, 13:11-13:20:
+
+| What | Measured |
+| --- | --- |
+| `ac-host-buildkite-agent:flox` | built by hand from the compose file (`docker compose … build agent`), 4 min 10 s, 6.36 GB; the agent itself stays down (D1) |
+| MinIO on the copied volume | **Docker Hub refused** `minio/minio:latest` and `minio/mc:latest` ("pull access denied … repository does not exist"), so both images came from ac-box by `docker save \| docker load`; `up -d --pull never minio minio-init`; `nix-cache-info` served on `127.0.0.1:9000`, bucket 3.6 GiB / 2,355 objects, the `flox-cache` user enabled with readwrite. **The compose file's `image:` lines are no longer pullable on a fresh daemon** -- an ac-host bead, not a blocker here |
+| Sandbox probe (`homelab-bfq.11`'s one-liner, inside the built image) | `--security-opt seccomp=unconfined`: "this system does not support the kernel namespaces"; `--privileged`: the sandbox engages and the probe builds. **Same answer as ac-box**, so the compose file's `privileged: true` stands on this host too, and ADR 0012's "a modern chip likely only needs seccomp" is not what this kernel and image do |
+
+Then a reboot: kernel hostname, booted == switched, and every unit back
+without a hand -- the last proof of this phase (below, when it ran).
 
 ---
 
