@@ -78,7 +78,13 @@ added to the backup by setting `state.backup = true` in
   secrets.nix` from the sops file in git; a copy of it is four dangling links.
   Restore it by switching, not from here.
 - Anything outside the declared state directories: `/etc`, the Docker images,
-  the Nix store. The box is rebuildable from git; its state is not.
+  the Nix store. The box is rebuildable from git; its state is not. **One
+  exception, found at the cutover (26 Sep 2026):** the racing project's named
+  volume `ac-host_ac-server` holds the Assetto Corsa dedicated server, which
+  steamcmd installed once and cannot reinstall anonymously -- a fresh host
+  crash-loops its lobbies without it. Until `homelab-ygc.12` declares it,
+  copy `/var/lib/docker/volumes/ac-host_ac-server/_data` by hand from the
+  old host before `ac-host-static` first starts.
 
 ### What is in it only as a live copy
 
