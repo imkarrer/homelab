@@ -39,7 +39,7 @@ if ! command -v jq >/dev/null; then
 fi
 
 # The LAN address homelab.host declares; the port services.agent-hub.llm opens.
-LLM="${HUB_LLM:-http://192.168.1.50:8100}"
+LLM="${HUB_LLM:-http://192.168.1.51:8100}"
 SYSTEM=""; FILES=(); MAXTOK=1024; TEMP=0.2; BUDGET=6000; FORCE=0; MODEL=coder
 while [ $# -gt 0 ]; do
   case "$1" in

@@ -27,8 +27,9 @@
 # for it (hub-status.sh reports one host and a verdict, hub-backup.sh stops).
 #
 # The ssh alias for a host IS its attribute name, and so is what the machine
-# calls itself: ~/.ssh/config carries both aliases (ac-box -> 192.168.1.50,
-# arcade-box -> 192.168.1.218 during the build-up), and networking.hostName
+# calls itself: ~/.ssh/config carries both aliases (ac-box -> 192.168.1.51 since
+# the cutover, .50 before it;
+# arcade-box -> 192.168.1.50, .218 during the build-up), and networking.hostName
 # is homelab.host.name, which modules/platform/identity.nix ties to
 # hosts/<name>/. Reading homelab.host.name out of the flake to confirm that
 # would cost a ~7 s evaluation per host against hub-status.sh's ~2 s

@@ -31,8 +31,8 @@ shopt -s inherit_errexit
 
 HUB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REG="${HUB_REGISTRY:-$HUB/hub/repos.psv}"
-LLM="${LLM:-192.168.1.50:8100}"
-QDRANT="${QDRANT:-192.168.1.50:6333}"
+LLM="${LLM:-192.168.1.51:8100}"
+QDRANT="${QDRANT:-192.168.1.51:6333}"
 MODEL="${MODEL:-embed}"
 COLLECTION="${COLLECTION:-hub}"
 CHUNK="${CHUNK:-80}"      # lines per chunk
