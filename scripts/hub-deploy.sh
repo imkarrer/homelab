@@ -15,13 +15,13 @@ ORG=isaac-karrer
 PIPELINE=ac-host-ops
 MODE="${1:-downtime}"
 # The host the lobbies are on -- the one whose leaderboard says whether
-# anyone is racing and whose pending-deploy.json holds the staged sha. ac-box
-# until docs/runbook-arcade-box-cutover.md phase 4 moves the assetto tenant
-# to arcade-box (ADR 0010); that bead moves this default with it, in the same
-# push that flips hosts/*/configuration.nix. HOMELAB_BOX names another host
+# anyone is racing and whose pending-deploy.json holds the staged sha. arcade-box
+# since docs/runbook-arcade-box-cutover.md phase 4 moved the assetto tenant
+# there (ADR 0010), in the same push that flipped hosts/*/configuration.nix;
+# HOMELAB_BOX names another host
 # meanwhile, the same variable hub-status.sh and hub-backup.sh narrow on
 # (scripts/lib/hosts.sh). The ssh alias is the host's name.
-BOX="${HOMELAB_BOX:-ac-box}"
+BOX="${HOMELAB_BOX:-arcade-box}"
 
 # shellcheck source=scripts/lib/buildkite-token.sh
 . "$(cd "$(dirname "$0")" && pwd)/lib/buildkite-token.sh"

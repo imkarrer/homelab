@@ -11,7 +11,13 @@
     networks = {
       lan = {
         interface = "enp8s0";
-        address = "192.168.1.50";
+        # Since the cutover (docs/runbook-arcade-box-cutover.md 4.1, decision D2):
+        # 192.168.1.50 went to arcade-box with the lobbies, the forwards, the
+        # stations' SMB path and Grafana's URL that name it. This is the Dream
+        # Router reservation for enp8s0's MAC c8:d3:ff:b9:28:0b, read off the
+        # router, never guessed: the /24 is one DHCP pool (.6-.254) and this was
+        # its lowest free address beside the old one on 26 Sep 2026.
+        address = "192.168.1.51";
         prefixLength = 24;
       };
       # NO-CARRIER as of 12 Sep 2026 (`cat /sys/class/net/eno1/carrier` = 0,

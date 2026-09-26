@@ -205,8 +205,11 @@
         # this is the only place the flake input is in scope.
         ./modules/platform/flox.nix
         { homelab.flox.package = flox.packages.${system}.flox; }
-        sops-nix.nixosModules.sops
-        ./modules/platform/secrets.nix
+        # sops and modules/platform/secrets.nix are NOT here: they are per host
+        # since the cutover (ADR 0010). arcade-box holds every secret the six
+        # tenants declare; the Z840 runs agent-hub alone and needs none, and
+        # secrets.nix reads options of modules the Z840 no longer imports
+        # (homelab.ci.envFile, services.ac-host.enable).
       ];
     in
     {
@@ -228,50 +231,21 @@
       nixosConfigurations.ac-box = nixpkgs.lib.nixosSystem {
         inherit system;
         modules = commonModules ++ [
-          # L2: shared services that cross tenants. Lifted out of ac-host in
-          # phase 8 -- see modules/observability/default.nix for why it lived
-          # inside a tenant repo until now.
-          ./modules/observability
-
-          # modules/ci: the Buildkite agent + MinIO cache under systemd.
-          # Imported inert in f461509 (proven by unchanged toplevel drvPath),
-          # enabled in 4257aea, and LIVE since generation 31, 12 Sep 2026,
-          # after a human ran the module header's HAZARD 1 adoption sequence
-          # from a plain SSH session. HAZARD 2 stands permanently: a
-          # nixos-rebuild that bounces this unit can never be shipped as a
-          # step run BY the Buildkite agent this unit is -- which is why the
-          # closure's deploy path is a systemd unit (modules/deploy) and not a
-          # pipeline step.
-          ./modules/ci
-
-          # modules/deploy: imported but inert (ADR 0006's applying half).
-          # homelab.deploy.enable defaults false and nothing sets it, so this
-          # contributes nothing to the composed config -- same discipline, and
-          # same proof, as modules/ci above.
-          #
-          # Flipping it makes ac-box self-switching, which is ADR 0006's
-          # deliberate choice and NOT a side effect of importing the module.
-          # Do not flip it from an agent-authored change: the module's header
-          # documents the gate it is waiting on (every tree reaching the box
-          # needs a real evaluation gate, and agent-hub's composed eval is
-          # still thin because its enable flag defaults false), and it must
-          # not go true before the CI adoption sequence has been run by a
-          # human -- the same ordering modules/ci's HAZARD 1 describes.
+          # ADR 0010, the cutover (docs/runbook-arcade-box-cutover.md 4.2): the
+          # Z840 is llm-box in everything but name. What left with the lobbies,
+          # the arcade, observability and ci: modules/observability, modules/ci,
+          # sops + modules/platform/secrets.nix, the ac-host input and the arcade
+          # host-side file -- all on arcade-box now. Docker leaves with them (no
+          # tenant here declares needsDocker). modules/deploy stays and idles: the
+          # CI agent that stages a closure writes on the host it runs on, which is
+          # arcade-box, so this host is switched by hand from now on (ADR 0010,
+          # "no machinery"); the rename to llm-box is homelab-ygc.9.
           ./modules/deploy
 
-          # L3: the tenants. ac-host is the one still composed as an input
-          # (its module owns the lobbies, the bot's compose project and
-          # ac-host-dev). agent-hub and arcade are flox environments (ADR
-          # 0009, homelab-158.11): their units are the stubs
-          # hosts/ac-box/configuration.nix declares, rendered by
-          # modules/tenant/environment.nix above, and what the box owes
-          # each -- identity, directories, nginx and qdrant for agent-hub,
-          # samba and rsyncd for arcade -- is the host's own file below,
-          # which took the tenant module's non-unit half verbatim when the
-          # module left. Neither tenant tree is composed here any more; a
-          # tenant author writes no Nix.
-          ac-host.nixosModules.ac-host
-          ./hosts/arcade-box/tenants/arcade.nix
+          # L3: the one tenant. agent-hub is a flox environment (ADR 0009); its
+          # unit is the stub hosts/ac-box/configuration.nix declares, rendered by
+          # modules/tenant/environment.nix, and what the host owes it -- identity,
+          # directories, nginx, qdrant -- is the file below.
           ./hosts/ac-box/tenants/agent-hub.nix
 
           # This host.
@@ -287,10 +261,14 @@
       # and the same arcade host-side file (it moved here from hosts/ac-box/
       # tenants/ and ac-box imports it from its new place until the cutover
       # drops it) -- and no agent-hub. Which of its tenants are live today is
-      # hosts/arcade-box/configuration.nix to say, by its BUILD-UP markers.
+      # hosts/arcade-box/configuration.nix to say (its BUILD-UP markers, all ON
+      # since the cutover, runbook 4.2).
       nixosConfigurations.arcade-box = nixpkgs.lib.nixosSystem {
         inherit system;
         modules = commonModules ++ [
+          # The secrets: every one the tenants declare lives here since the cutover.
+          sops-nix.nixosModules.sops
+          ./modules/platform/secrets.nix
           ./modules/observability
           ./modules/ci
           ./modules/deploy

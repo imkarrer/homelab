@@ -22,12 +22,12 @@
       # host that has the interface.
       lan = {
         interface = "eno2";
-        # The BUILD-UP address: DHCP, pinned by a Dream Router reservation
-        # for the MAC above (runbook phase 0.2). It becomes 192.168.1.50 at
-        # the cutover (runbook phase 4, decision D2), the address the nine
-        # hand-set lobby forwards, the stations' SMB path and Grafana's URL
-        # already name -- ac-box gives it up in the same hour.
-        address = "192.168.1.218";
+        # Since the cutover (runbook phase 4, decision D2): the address the nine
+        # hand-set lobby forwards, the stations' SMB path and Grafana's URL have
+        # always named, taken over from ac-box by swapping the two Dream Router
+        # reservations (this MAC -> .50). DHCP, pinned by that reservation; the
+        # build-up ran on .218 from 26 Sep 2026.
+        address = "192.168.1.50";
         prefixLength = 24;
       };
     };
