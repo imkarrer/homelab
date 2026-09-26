@@ -419,8 +419,13 @@ Then, 13:11-13:20:
 | MinIO on the copied volume | **Docker Hub refused** `minio/minio:latest` and `minio/mc:latest` ("pull access denied … repository does not exist"), so both images came from ac-box by `docker save \| docker load`; `up -d --pull never minio minio-init`; `nix-cache-info` served on `127.0.0.1:9000`, bucket 3.6 GiB / 2,355 objects, the `flox-cache` user enabled with readwrite. **The compose file's `image:` lines are no longer pullable on a fresh daemon** -- an ac-host bead, not a blocker here |
 | Sandbox probe (`homelab-bfq.11`'s one-liner, inside the built image) | `--security-opt seccomp=unconfined`: "this system does not support the kernel namespaces"; `--privileged`: the sandbox engages and the probe builds. **Same answer as ac-box**, so the compose file's `privileged: true` stands on this host too, and ADR 0012's "a modern chip likely only needs seccomp" is not what this kernel and image do |
 
-Then a reboot: kernel hostname, booted == switched, and every unit back
-without a hand -- the last proof of this phase (below, when it ran).
+**Reboot, 13:20:12.** Back in ~25 s with nobody at it: kernel and static
+hostname both `arcade-box`, `booted == current` (the flake closure of
+`abf44ac`, the installer generation left behind), zero failed units, every
+unit above active again, both game servers listening, the hand-started
+MinIO container back on its own (`restart: unless-stopped`), Grafana 200,
+generation 2 still pinned. Phase 3 is complete; 5.4 and 6 are the
+build-up state the cutover starts from.
 
 ---
 
