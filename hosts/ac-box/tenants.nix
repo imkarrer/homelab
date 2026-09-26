@@ -36,14 +36,15 @@
 
       description = "LAN-only llama.cpp model server for the local coding agent (phase 1: serving only).";
 
-      # Deliberately still "background", not a promotion to "critical", even
-      # though this box's whole point is now the model server. background is
-      # the tier that CAN be fenced and capped; critical is the tier that is
-      # never sliced at all (see resources.nix's sliceableTenants). Routing
-      # the machine's resources here is done by moving the SHARES in
-      # configuration.nix's homelab.tiers block -- background now holds 0.81
-      # of memory and the bulk of the cores -- not by moving the tenant into
-      # the tier that opts out of resource control entirely.
+      # Still "background", and on this host the word is inert: since
+      # homelab-ygc.13 (26 Sep 2026) configuration.nix sets
+      # homelab.enforce.slices = false, so no slice, ceiling or fence is
+      # derived from it -- the model server runs in system.slice with the
+      # whole machine (ADR 0010: llm-box has no tiers). The tier stays
+      # declared because the contract requires one and because it is the
+      # right word if this tenant ever shares a host again: background is
+      # the tier that CAN be fenced and capped, critical the one that is
+      # never sliced at all (resources.nix's sliceableTenants).
       tier = "background";
 
       # nginx: the landing page in front of llama-swap (services.agent-hub

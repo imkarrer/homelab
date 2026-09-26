@@ -98,13 +98,25 @@ in
     # work while five tenants shared this machine: background.slice fenced the
     # model server to cores 3-25 under a 0.81 memory ceiling, batch fenced CI
     # to 26-27. With agent-hub alone here there is nothing to fence anything
-    # from: no slices, no MemoryMax, no AllowedCPUs -- agent-hub-llm runs in
-    # system.slice on all 28 cores, 56 threads and 251 GiB, which is what
-    # lets llama-swap keep a second 80B resident. resources.nix's budget
-    # assertion still evaluates (the defaults sum to 0.9); nothing is emitted.
-    # Docker, CI and the lobbies left with the cutover, so the switch that
-    # carries this bounces no unit but the model server's own restart, which
-    # restartIfChanged = false below leaves to a hand `systemctl restart`.
+    # from: no slices, no MemoryMax, no fence -- agent-hub-llm runs in
+    # system.slice on all 28 physical cores (its own cpuset below, a placement
+    # fact rather than a fence) and all 251 GiB, which is what lets llama-swap
+    # keep a second 80B resident. resources.nix's budget assertion still
+    # evaluates (the defaults sum to 0.9); nothing is emitted.
+    #
+    # THE SWITCH THAT CARRIES THIS RESTARTS THE MODEL SERVER, once. Live,
+    # background.slice is an active unit with agent-hub-llm, nginx and qdrant
+    # as members, and each carries Requires=background.slice. The new
+    # generation has no slice files, so switch-to-configuration stops the
+    # slice before activating (an active unit whose file is gone is stopped;
+    # a .slice is exempt from restart, not from stop), Requires= takes the
+    # three services down with it, and the target start brings them back
+    # under the new files: no slice, no cpuset but the one below, 28 threads.
+    # restartIfChanged = false governs a unit's OWN file comparison and does
+    # not reach this; it protects every later switch, once no slice exists to
+    # remove. So: dry-activate first and expect "would stop background.slice",
+    # switch with the model server idle, and skip the hand restart -- the
+    # switch is the restart (review of homelab-ygc.13, 26 Sep 2026).
     slices = false;
   };
 
@@ -203,8 +215,8 @@ in
   # agent-hub tree, read from the checkout at <environment.dir>. This block
   # used to set those as options the module rendered into the table; the
   # module stopped reading them on 18 Sep 2026 (.12) and they are gone with
-  # it. What stays is what the HOST decides: the threads and context the
-  # tier's fence affords, the port, the landing page, which models exist by
+  # it. What stays is what the HOST decides: the threads and context this
+  # host affords, the port, the landing page, which models exist by
   # name and kind (the landing page lists them), and the vector store.
   services.agent-hub = {
     enable = true;
@@ -268,7 +280,7 @@ in
       threads = 28;
 
       # Not larger, even though the model natively supports 262144 and
-      # background.slice's ceiling would hold the KV cache for it. The binding
+      # the machine would hold the KV cache for it. The binding
       # constraint on CPU is PREFILL, not RAM: prompt processing is
       # compute-bound, this is Broadwell (no AVX-512), and ingesting a
       # six-figure-token prompt would take longer than the answer is worth.
@@ -285,7 +297,7 @@ in
       # playground tab, and the first person to try it picked the (then)
       # image model on the Chat tab. llama-swap itself moves to
       # 127.0.0.1:8100; nginx.service joins this tenant's units in
-      # tenants.nix so it lives in the same slice.
+      # tenants.nix as the contract's list of what this tenant owns (no slice is derived from it on this host since homelab-ygc.13).
       landingPage = true;
     };
 
@@ -314,20 +326,25 @@ in
     stopIfChanged = false;
   };
 
-  # Where the model server's memory goes. Set directly on the unit rather
-  # than as a stub field because every value is a fact about THIS host's
-  # sockets, not part of the unit's skeleton (schema.nix says which keys
-  # are). Merges with what modules/tenant/environment.nix emits -- different
-  # keys, no conflict.
-  #
-  # No AllowedCPUs any more (homelab-ygc.13). It was "3-25": the physical
-  # cores inside background.slice's fence, without their SMT siblings, which
-  # bought ~20 % prefill (99 -> 122 tok/s, batch 2 in agent-hub's
-  # docs/prefill-tuning.md) while the fence existed. With the fence gone the
-  # unit's cpuset is the machine; whether the scheduler landing 28 threads on
-  # 56 CPUs costs that 20 % again is the first thing to measure at tuning
-  # time, and a cpuset of "0-27" here is the one-line answer if it does.
+  # Where the model server's threads and memory go. Set directly on the
+  # unit rather than as a stub field because every value is a fact about
+  # THIS host's sockets, not part of the unit's skeleton (schema.nix says
+  # which keys are). Merges with what modules/tenant/environment.nix emits
+  # -- different keys, no conflict.
   systemd.services.agent-hub-llm.serviceConfig = {
+    # Every physical core and none of the SMT siblings. Not a fence -- there
+    # is no other tenant on this host to keep away from (homelab-ygc.13
+    # took the fence down with the slices) -- but a placement fact of the
+    # same class as the NUMA policy below: agent-hub's docs/prefill-tuning.md
+    # measured the same engine and thread count at 99 tok/s prefill on a
+    # cpuset that included the siblings and 122 on physical cores only, and
+    # attributes the gain to the cpuset, not the count. This was "3-25" while
+    # background.slice fenced the unit; now it is the whole machine's cores.
+    # Deleting this line hands the unit all 56 CPUs; `scripts/bench/bench.sh`
+    # in the agent-hub tree is how to decide that, not a guess.
+    AllowedCPUs = "0-27";
+
+
     # Spread the model over both sockets' memory controllers. Without a
     # policy the 85 GB landed wherever the loading thread ran -- 100 % on
     # node 1, measured -- and half the cores read every weight across QPI.
@@ -371,8 +388,8 @@ in
   # network-online.target and WantedBy=multi-user.target (defaults), and
   # TimeoutStopSec=90 -- llama-swap stops its backends itself on SIGTERM,
   # and a model mid-load needs time to die cleanly before systemd
-  # escalates. background.slice is tenants.nix's via resources.nix; the
-  # cpuset and NUMA policy are the host's, just above. Every value below
+  # escalates. No slice on this host since homelab-ygc.13 (enforce.slices
+  # is off); the cpuset and NUMA policy are the host's, just above. Every value below
   # is read from the same option a second reader has (services.agent-hub,
   # hosts/ac-box/tenants/agent-hub.nix) so the two cannot drift.
   homelab.tenants.agent-hub.environment =
