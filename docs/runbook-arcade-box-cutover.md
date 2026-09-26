@@ -546,7 +546,7 @@ MinIO on the copied cache).
   after a race has been run on arcade-box loses that race; from the first
   lap, fix forward.
 
-### As it ran, 26 Sep 2026 (15:20-16:01 CDT, lobbies empty throughout)
+### As it ran, 26 Sep 2026 (15:20-16:01 UTC = 10:20-11:01 CDT, lobbies empty throughout; the clock times below are UTC)
 
 | When | What happened |
 | --- | --- |
