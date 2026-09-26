@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Row 22: back ac-box's DECLARED state up, onto this machine, every night.
+# Row 22: back every host's DECLARED state up, onto this machine, every night.
 #
 # Four tenants set `homelab.tenants.<n>.state.backup = true` and, until this
 # script existed, nothing read it: docs/architecture.md row 22 called it the
@@ -18,6 +18,45 @@
 #      (hub-status.sh reads it; a run older than three days is a verdict).
 #
 # ---------------------------------------------------------------------------
+# TWO HOSTS (26 Sep 2026, homelab-ygc.4)
+# ---------------------------------------------------------------------------
+# flake.nix declares ac-box and arcade-box, and after the cutover
+# (docs/runbook-arcade-box-cutover.md, phase 4) every tenant but agent-hub
+# lives on arcade-box. Everything above is therefore PER HOST, and the host
+# list is never typed here (scripts/lib/hosts.sh reads the flake's
+# nixosConfigurations; HOMELAB_BOX narrows to one host, HOMELAB_HOSTS lists):
+#
+#   which directories   that host's own config -- `homelab.tenants.<n>.state`
+#                       where backup = true AND the tenant is enabled THERE.
+#                       assetto is declared on both hosts and enabled on one,
+#                       so its /var/lib/ac-host is pulled from the host that
+#                       runs the lobbies and from nowhere else; the flip in
+#                       hosts/*/configuration.nix at the cutover moves the
+#                       backup with it, and this file does not change.
+#   from where          root@<that host's homelab.host.networks.lan.address>,
+#                       from the same eval. Not the ssh alias: this runs as
+#                       root from a timer, where ~/.ssh/config does not exist
+#                       (the key and known_hosts are named absolutely below for
+#                       the same reason). The address in git follows the
+#                       machines through the cutover (D2), so the pull does too.
+#   to where            /home/nixos/backup/<host>/<the host's absolute path>.
+#                       ac-box's tree is exactly where it has been since 14 Sep
+#                       2026 -- docs/runbook-restore.md and every restic
+#                       snapshot name that layout -- and arcade-box's is a
+#                       sibling, so /var/lib/arcade from each host is a
+#                       different directory here, as it should be.
+#   restic              one snapshot per host, `--host <host> --tag <host>`,
+#                       which is byte-for-byte the call ac-box always got and
+#                       gives each host its own forget group (restic groups by
+#                       host and paths), so ac-box's history runs on unbroken
+#                       and arcade-box's ages out on its own 7/4/6.
+#   failure             a host that is down or whose pull breaks fails ITS
+#                       snapshot and the run's verdict (LAST_RESULT names it),
+#                       but not the other host's snapshot -- arcade-box being
+#                       off for a night must not cost ac-box's copy. The
+#                       status file carries a RESULT_<host> line per host.
+#
+# ---------------------------------------------------------------------------
 # THE SHAPE, AND WHY IT IS LOCAL AND PULL-BASED
 # ---------------------------------------------------------------------------
 # LOCAL ONLY, on this WSL machine: the operator chose it on 14 Sep 2026. It is
@@ -30,7 +69,7 @@
 # into it, and exposing one is precisely what this avoids. The box never learns
 # this machine exists; every connection is outbound from here, with the key the
 # operator already uses (~/.ssh/id_ed25519_ac-host), and the far side is
-# READ-ONLY -- rsync's sender never writes. Nothing here can damage ac-box.
+# READ-ONLY -- rsync's sender never writes. Nothing here can damage a host.
 #
 # ROOT, here, and why: the state is owned by five different service accounts
 # on the box (root:root under /var/lib/ac-host, arcade:arcade, agent-hub,
@@ -127,7 +166,9 @@
 # and derives them for every tenant whose environment.dir or whose user's
 # HOME lies inside a backed-up state directory -- declaring a stub on a
 # second tenant gets that tenant's checkout excluded the same way, measured
-# here once for the shape rather than again for each instance.
+# here once for the shape rather than again for each instance. Per host,
+# like the directories: a stub declared on one host excludes nothing on the
+# other.
 #
 # ---------------------------------------------------------------------------
 # THE SECRET
@@ -142,20 +183,24 @@
 # file on this disk that no other machine has.
 #
 # Usage:
-#   sudo bash scripts/hub-backup.sh            # the nightly run
+#   sudo bash scripts/hub-backup.sh            # the nightly run, every host
 #   bash scripts/hub-backup.sh --list          # what the contract says to back
-#                                              # up (no root, no network, no run)
-# Environment: HUB_BACKUP_ROOT, HOMELAB_BOX_SSH, HOMELAB_OPERATOR_KEY,
+#                                              # up, "<host> <tenant> <dir>"
+#                                              # (no root, no network, no run)
+# Environment: HOMELAB_BOX (one host), HOMELAB_HOSTS (a list; lib/hosts.sh),
+#              HUB_BACKUP_ROOT, HOMELAB_BOX_SSH (the target for the ONE host
+#              HOMELAB_BOX names -- refused for a list), HOMELAB_OPERATOR_KEY,
 #              HOMELAB_KNOWN_HOSTS, HUB_BACKUP_SKIP_CHECK=1.
-# Exit: 0 backed up and verified, 1 a step failed, 2 misuse/preconditions.
+# Exit: 0 every host backed up and verified, 1 a step or a host failed,
+#       2 misuse/preconditions.
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKUP_ROOT="${HUB_BACKUP_ROOT:-/home/nixos/backup}"
-STAGE="$BACKUP_ROOT/ac-box"          # mirrors the box's absolute paths
+# The staging tree is $BACKUP_ROOT/<host>, mirroring that host's absolute
+# paths (header: "TWO HOSTS"); stage_of names it in one place.
 REPO="$BACKUP_ROOT/restic"
 STATUS="$BACKUP_ROOT/status"         # KEY=VALUE, one per line; hub-status.sh greps it
-BOX_SSH="${HOMELAB_BOX_SSH:-root@192.168.1.50}"
 # One key does both jobs: it is the operator's box key AND (via ssh-to-age) the
 # sops identity. Named absolutely because this runs as root from a timer, where
 # $HOME is /root and ~/.ssh/config does not exist.
@@ -164,11 +209,15 @@ KNOWN="${HOMELAB_KNOWN_HOSTS:-/home/nixos/.ssh/known_hosts}"
 SSH_OPTS=(-i "$KEY" -o BatchMode=yes -o ConnectTimeout=10
           -o UserKnownHostsFile="$KNOWN" -o StrictHostKeyChecking=yes)
 
+# shellcheck source=scripts/lib/hosts.sh
+. "$ROOT/scripts/lib/hosts.sh"
+
 export NIX_CONFIG="experimental-features = nix-command flakes"
 START=$(date +%s)
 
 say()  { printf '%s\n' "$*"; }
 step() { printf '\n== %s ==\n' "$*"; }
+stage_of() { printf '%s/%s' "$BACKUP_ROOT" "$1"; }
 
 # ---------------------------------------------------------------------------
 # 1. WHAT TO BACK UP -- from the contract, not from here.
@@ -176,59 +225,56 @@ step() { printf '\n== %s ==\n' "$*"; }
 # Evaluated against THIS tree (the repo this script ships in), not against the
 # box: the declaration is a fact about the configuration, and reading it here
 # means a change to a tenant's `state` is picked up the moment it is committed,
-# without waiting for a deploy. ~7s, the same eval the gate runs.
-contract_eval() {
-  # $1 attribute path under nixosConfigurations.ac-box.config (may be
-  # empty: the whole config), $2 the --apply.
-  # The unit runs this script as root, but the checkout belongs to the
-  # operator, and Nix (libgit2) refuses a git repository "not owned by current
-  # user" -- the 16 Sep run failed here before touching anything. Evaluation
-  # needs no privilege, so it runs as the checkout's owner; the nix-daemon
-  # serves any user. Everything after this point still needs root (owners).
-  local owner; owner=$(stat -c %U "$ROOT")
-  local -a as_owner=()
-  if [ "$(id -u)" = 0 ] && [ "$owner" != root ]; then
-    as_owner=(runuser -u "$owner" -- env "NIX_CONFIG=$NIX_CONFIG" "HOME=$(getent passwd "$owner" | cut -d: -f6)")
-  fi
-  "${as_owner[@]}" nix eval --raw "$ROOT#nixosConfigurations.ac-box.config${1:+.$1}" --apply "$2" 2>/dev/null
-}
-
-# One line per directory, "<tenant> <dir>". Emitted as raw text rather than
-# JSON so no parser is needed: a state path is an absolute path with no spaces
-# (the contract's dirSet is types.path), and if that ever stops being true the
-# read below breaks loudly rather than quietly mis-splitting.
-declared_dirs() {
-  # shellcheck disable=SC2016  # the ${n} below is Nix syntax, not a shell expansion
-  contract_eval homelab.tenants '
-    ts:
+# without waiting for a deploy. One evaluation covers every host (~7s for two,
+# the same eval the gate runs); lib/hosts.sh runs it as the checkout's owner
+# when this is root, because Nix refuses a repository another user owns.
+#
+# One line per fact, tagged by its first word so no parser is needed:
+#   ssh <host> root@<lan address>       where to pull from
+#   dir <host> <tenant> <dir>           a directory to back up, tenant enabled
+#                                       on that host and state.backup = true
+#   env <host> <tenant> <dir> <home>    an environment tenant (ADR 0009): its
+#                                       checkout and its user's HOME, read from
+#                                       the same JSON the closure installs as
+#                                       /etc/homelab/environments.json so this
+#                                       script and hub-status.sh agree on what
+#                                       an environment IS; empty on a host
+#                                       without a stub (the etc entry is not
+#                                       defined then, and this must not fail)
+# Raw text rather than JSON because a state path is an absolute path with no
+# spaces (the contract's dirSet is types.path), and if that ever stops being
+# true the reads below break loudly rather than quietly mis-splitting.
+contract_lines() {
+  local h nixhosts=""
+  for h in $HOSTS; do nixhosts="$nixhosts \"$h\""; done
+  # shellcheck disable=SC2016  # ${h}, ${n} and ${u} are Nix syntax, not shell expansions
+  hub_nix_eval "$ROOT" --raw "$ROOT#nixosConfigurations" --apply '
+    cs:
       let
-        wanted = builtins.filter (n: ts.${n}.state.backup) (builtins.attrNames ts);
-        lines  = builtins.concatLists (map (n: map (d: n + " " + d) ts.${n}.state.dirs) wanted);
-      in builtins.concatStringsSep "\n" lines
+        hosts = [ '"$nixhosts"' ];
+        forHost = h:
+          let
+            c      = cs.${h}.config;
+            ts     = c.homelab.tenants;
+            wanted = builtins.filter (n: ts.${n}.enable && ts.${n}.state.backup) (builtins.attrNames ts);
+            dirs   = builtins.concatLists
+                       (map (n: map (d: "dir " + h + " " + n + " " + toString d) ts.${n}.state.dirs) wanted);
+            etc    = c.environment.etc;
+            envs   = if etc ? "homelab/environments.json"
+                     then (builtins.fromJSON etc."homelab/environments.json".text).environments
+                     else { };
+            home   = u: toString (c.users.users.${u}.home or "");
+            envl   = map (n: "env " + h + " " + n + " " + envs.${n}.dir + " " + home envs.${n}.user)
+                         (builtins.attrNames envs);
+          in [ ("ssh " + h + " root@" + c.homelab.host.networks.lan.address) ] ++ dirs ++ envl;
+      in builtins.concatStringsSep "\n" (builtins.concatLists (map forHost hosts))
   '
 }
-
-# The environment tenants (ADR 0009), one line each: "<tenant> <dir> <home>".
-# Read from the same JSON the closure installs as /etc/homelab/environments.json
-# -- which tenants keep a checkout, where, and as which user -- so this script
-# and hub-status.sh agree on what an environment IS without a second
-# derivation of it here; the user's HOME is what flox's own caches hang off.
-# Empty when no tenant declares a stub (the etc entry is not defined then,
-# and this must not fail on a tree without environments).
-environment_dirs() {
-  # shellcheck disable=SC2016  # ${n} and ${u} are Nix syntax
-  contract_eval '' '
-    c:
-      let
-        etc  = c.environment.etc;
-        envs = if etc ? "homelab/environments.json"
-               then (builtins.fromJSON etc."homelab/environments.json".text).environments
-               else { };
-        home = u: toString (c.users.users.${u}.home or "");
-      in builtins.concatStringsSep "\n"
-           (map (n: n + " " + envs.${n}.dir + " " + home envs.${n}.user) (builtins.attrNames envs))
-  '
-}
+# Readers of $CONTRACT, per host. host_dirs: "<tenant> <dir>" per line, in the
+# order the contract's attribute names sort -- the order the pull runs in.
+host_ssh()  { awk -v h="$1" '$1=="ssh" && $2==h {print $3; exit}' <<< "$CONTRACT"; }
+host_dirs() { awk -v h="$1" '$1=="dir" && $2==h {print $3, $4}' <<< "$CONTRACT"; }
+host_envs() { awk -v h="$1" '$1=="env" && $2==h {print $3, $4, $5}' <<< "$CONTRACT"; }
 
 # rsync excludes for one directory. Keyed on the path, with the measurement
 # that justifies each one in the header above -- the list is short and every
@@ -247,7 +293,8 @@ excludes_for() {
   # A checkout inside $dir loses its .git (bar HEAD) and flox's run/cache/log; a tenant
   # HOME inside (or equal to) $dir loses flox's and nix's user caches. The
   # worktree files under <envdir> are kept. $ENVIRONMENTS is set by the
-  # caller from environment_dirs; unset (a direct call) means no excludes.
+  # caller from host_envs for the host being pulled; unset (a direct call)
+  # means no excludes.
   while read -r tenant envdir home; do
     [ -n "${envdir:-}" ] || continue
     case "$envdir" in
@@ -273,18 +320,28 @@ excludes_for() {
   done <<< "${ENVIRONMENTS:-}"
 }
 
+# Per-host outcome of this run, filled by pull_host and snapshot_host and
+# written out by write_status. A host with a HOST_FAIL entry failed.
+declare -A HOST_FAIL HOST_SNAP HOST_ADDED HOST_DIRS HOST_ABSENT
+
 write_status() {
   # $1 ok|failed  $2 detail. LAST_SUCCESS is carried forward from the previous
   # file on a failure: "when did this last WORK" is the question hub-status.sh
   # asks, and a failed run must not be able to answer it with today's date.
-  local state="$1" detail="$2" prev_ts prev_epoch prev_snap prev_n tmp
+  # "Work" means every host: a night that snapshotted ac-box and lost
+  # arcade-box is a failure here and an ok on its RESULT_ac-box line.
+  local state="$1" detail="$2" prev_ts prev_epoch prev_snap prev_n tmp h snaps="" added=""
   prev_ts=$(grep '^LAST_SUCCESS=' "$STATUS" 2>/dev/null | cut -d= -f2-)
   prev_epoch=$(grep '^LAST_SUCCESS_EPOCH=' "$STATUS" 2>/dev/null | cut -d= -f2-)
   prev_snap=$(grep '^SNAPSHOT=' "$STATUS" 2>/dev/null | cut -d= -f2-)
   prev_n=$(grep '^SNAPSHOTS=' "$STATUS" 2>/dev/null | cut -d= -f2-)
+  for h in $HOSTS; do
+    [ -z "${HOST_SNAP[$h]:-}" ] || snaps="$snaps ${HOST_SNAP[$h]}"
+    [ -z "${HOST_ADDED[$h]:-}" ] || added="$added + ${HOST_ADDED[$h]}"
+  done
   if [ "$state" = ok ]; then
     prev_ts=$(date -u +%Y-%m-%dT%H:%M:%SZ); prev_epoch=$(date +%s)
-    prev_snap="$SNAPSHOT"; prev_n="$SNAPSHOTS"
+    prev_snap="${snaps# }"; prev_n="$SNAPSHOTS"
   fi
   tmp="$STATUS.tmp"
   {
@@ -295,30 +352,54 @@ write_status() {
     echo "LAST_ATTEMPT=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     echo "LAST_RESULT=$state${detail:+: $detail}"
     echo "SECONDS=$(( $(date +%s) - START ))"
-    echo "ADDED=${ADDED:-}"
+    echo "ADDED=${added# + }"
     echo "REPO_SIZE=${REPO_SIZE:-}"
-    echo "DIRS=${DIRS_DONE:-}"
-    echo "ABSENT=${DIRS_ABSENT:-}"
+    # Per host, since 26 Sep 2026: what was pulled, what was declared but not
+    # there, which snapshot it became, and whether the host succeeded. The
+    # keys above keep their meaning for hub-status.sh (LAST_SUCCESS,
+    # SNAPSHOTS, REPO_SIZE, LAST_RESULT); DIRS= and ABSENT= moved down here
+    # because /var/lib/arcade on two hosts is two directories, not one.
+    echo "HOSTS=$HOSTS"
+    for h in $HOSTS; do
+      echo "RESULT_$h=${HOST_FAIL[$h]:+failed: }${HOST_FAIL[$h]:-ok}"
+      echo "SNAPSHOT_$h=${HOST_SNAP[$h]:-}"
+      echo "ADDED_$h=${HOST_ADDED[$h]:-}"
+      echo "DIRS_$h=${HOST_DIRS[$h]:-}"
+      echo "ABSENT_$h=${HOST_ABSENT[$h]:-}"
+    done
   } > "$tmp" && mv "$tmp" "$STATUS" && chmod 0644 "$STATUS"
   # Readable by the operator: hub-status.sh runs unprivileged and this file
   # holds no secret -- sizes, dates and a snapshot id.
 }
 
-die() { say "FAILED: $*"; write_status failed "$*"; exit 1; }
+# A run-wide failure. The status file is written only once the run has
+# started (RUNNING): --list and the preconditions have nothing to record and
+# no right to touch it (they may not even be root).
+RUNNING=0
+die() { say "FAILED: $*"; [ "$RUNNING" = 1 ] && write_status failed "$*"; exit 1; }
+
+HOSTS=$(hub_hosts "$ROOT") || {
+  say "cannot discover the hosts: nix eval of $ROOT#nixosConfigurations failed"
+  say "(scripts/hub-gates.sh homelab says why; HOMELAB_HOSTS=\"ac-box arcade-box\" names them by hand)"
+  exit 2
+}
 
 # --list answers "what does the contract say?" without root, ssh or restic --
 # the question a reviewer of a tenant change actually has.
 if [ "${1:-}" = "--list" ]; then
-  d=$(declared_dirs) || die "nix eval failed"
-  [ -n "$d" ] || { say "no tenant declares state.backup = true"; exit 1; }
-  ENVIRONMENTS=$(environment_dirs) || die "nix eval of the environments failed"
-  # "<tenant> <dir>" per line, as before; excludes on an indented line under
-  # the directory they apply to, so `grep -v '^ '` still yields the bare list.
-  while read -r tenant dir; do
-    say "$tenant $dir"
-    ex=$(excludes_for "$dir" | tr '\n' ' ')
-    [ -z "$ex" ] || say "  excluding ${ex% }"
-  done <<< "$d"
+  CONTRACT=$(contract_lines 2>/dev/null) || { say "FAILED: nix eval failed for hosts: $HOSTS"; exit 2; }
+  [ -n "$(awk '$1=="dir"' <<< "$CONTRACT")" ] || { say "no enabled tenant on any host ($HOSTS) declares state.backup = true"; exit 1; }
+  # "<host> <tenant> <dir>" per line; excludes on an indented line under the
+  # directory they apply to, so `grep -v '^ '` still yields the bare list.
+  for h in $HOSTS; do
+    ENVIRONMENTS=$(host_envs "$h")
+    while read -r tenant dir; do
+      [ -n "${dir:-}" ] || continue
+      say "$h $tenant $dir"
+      ex=$(excludes_for "$dir" | tr '\n' ' ')
+      [ -z "$ex" ] || say "  excluding ${ex% }"
+    done <<< "$(host_dirs "$h")"
+  done
   exit 0
 fi
 [ $# -eq 0 ] || { say "usage: sudo bash $0 [--list]"; exit 2; }
@@ -330,14 +411,29 @@ fi
   exit 2
 }
 [ -r "$KEY" ] || { say "no operator key at $KEY (set HOMELAB_OPERATOR_KEY)"; exit 2; }
+# One override, one host: a single target pulled twice and staged under two
+# names would be two copies of one machine labelled as two machines.
+if [ -n "${HOMELAB_BOX_SSH:-}" ] && [ "$(wc -w <<< "$HOSTS")" != 1 ]; then
+  say "HOMELAB_BOX_SSH names one ssh target but the run has hosts: $HOSTS -- pair it with HOMELAB_BOX=<host>"
+  exit 2
+fi
 mkdir -p "$BACKUP_ROOT" || { say "cannot create $BACKUP_ROOT"; exit 2; }
+RUNNING=1
 
-step "contract: which directories declare state.backup = true"
-DECLARED=$(declared_dirs) || die "nix eval failed"
-[ -n "$DECLARED" ] || die "no tenant declares state.backup = true (did the eval return an empty set?)"
-say "$DECLARED" | sed 's/^/  /'
-ENVIRONMENTS=$(environment_dirs) || die "nix eval of the environments failed"
-[ -z "$ENVIRONMENTS" ] || { say "environments (checkout kept, its .git and flox/nix caches excluded):"; say "$ENVIRONMENTS" | sed 's/^/  /'; }
+step "contract: which directories declare state.backup = true, per host ($HOSTS)"
+CONTRACT=$(contract_lines 2>/tmp/hub-backup-eval.$$) || {
+  tail -5 /tmp/hub-backup-eval.$$ | sed 's/^/  /'; rm -f /tmp/hub-backup-eval.$$
+  die "nix eval of the contract failed for hosts: $HOSTS (is each a nixosConfigurations attribute of $ROOT?)"
+}
+rm -f /tmp/hub-backup-eval.$$
+for h in $HOSTS; do
+  say "$h (${HOMELAB_BOX_SSH:-$(host_ssh "$h")}):"
+  d=$(host_dirs "$h")
+  if [ -n "$d" ]; then say "$d" | sed 's/^/  /'; else say "  (no enabled tenant declares state.backup = true here)"; fi
+  e=$(host_envs "$h")
+  [ -z "$e" ] || { say "  environments (checkout kept, its .git and flox/nix caches excluded):"; say "$e" | sed 's/^/    /'; }
+done
+[ -n "$(awk '$1=="dir"' <<< "$CONTRACT")" ] || die "no enabled tenant on any host declares state.backup = true (did the eval return an empty set?)"
 
 step "restic repo password"
 # shellcheck source=scripts/lib/sops-secret.sh
@@ -364,84 +460,117 @@ RESTIC=$(nix build --no-link --print-out-paths nixpkgs#restic 2>/dev/null | tail
 [ -x "$RESTIC" ] || die "could not get restic from nixpkgs"
 say "restic $("$RESTIC" version | awk '{print $2}'), rsync $(rsync --version | awk 'NR==1{print $3}')"
 
-step "pull: rsync from $BOX_SSH (read-only on the far side)"
-mkdir -p "$STAGE" || die "cannot create $STAGE"
-DIRS_DONE=""; DIRS_ABSENT=""
-while read -r tenant dir; do
-  [ -n "${dir:-}" ] || continue
-  case " $DIRS_DONE $DIRS_ABSENT " in
-    *" $dir "*) say "  $dir: already pulled (declared by more than one tenant)"; continue ;;
-  esac
-  # stat, not test -d: one round trip answers "does it exist?" and hands back
-  # the directory's OWN owner/group/mode, which the rsync below cannot carry.
-  # shellcheck disable=SC2029  # $dir is meant to expand here, on the client
-  # -n is load-bearing: without it ssh reads this loop's stdin -- the list of
-  # declared directories -- and the loop silently ends after ONE of them.
-  # Found 14 Sep 2026 by a run that backed up /var/lib/agent-hub and nothing
-  # else, and reported success.
-  attrs=$(ssh -n "${SSH_OPTS[@]}" "$BOX_SSH" "stat -c '%u %g %a' $dir" 2>/dev/null)
-  if [ -z "$attrs" ]; then
-    # A declared directory the box does not have. Not a failure of the backup:
-    # the contract is a statement of intent, and /var/lib/qdrant was declared
-    # by agent-hub before qdrant had ever written to it (14 Sep 2026). It IS
-    # reported, here and in the status file, so "declared and never backed up"
-    # cannot hide.
-    say "  $dir ($tenant): DECLARED BUT ABSENT on the box - skipped"
-    DIRS_ABSENT="$DIRS_ABSENT $dir"
-    continue
+# Pull one host's declared directories into its staging tree. Returns 1 with
+# the reason in HOST_FAIL[host]; the caller goes on to the next host.
+pull_host() {
+  local host="$1" stage target tenant dir attrs duid dgid dmode done="" absent=""
+  stage=$(stage_of "$host")
+  target="${HOMELAB_BOX_SSH:-$(host_ssh "$host")}"
+  step "pull $host: rsync from $target (read-only on the far side)"
+  # One round trip before the loop, so a host that is off tonight says so
+  # instead of reporting every directory as DECLARED BUT ABSENT.
+  if ! ssh -n "${SSH_OPTS[@]}" "$target" true 2>/dev/null; then
+    HOST_FAIL[$host]="unreachable at $target"; return 1
   fi
-  read -r duid dgid dmode <<< "$attrs"
-  EX=(); while read -r x; do EX+=("$x"); done < <(excludes_for "$dir")
-  say "  $dir ($tenant, $duid:$dgid $dmode)${EX[0]:+ excluding ${EX[*]}}"
-  # Two things rsync will not do for us, both found by running it (14 Sep 2026):
-  #   - it creates the last component of the destination, not missing PARENTS,
-  #     and exits 11 ("mkdir ... No such file or directory") when they are gone;
-  #   - `src/ -> dst/` says nothing about DST'S OWN attributes, so the leaf
-  #     directory's owner and mode -- /var/lib/arcade is 0700 arcade:arcade,
-  #     /var/lib/ac-host 0750 root:root -- would silently become root 0755 and
-  #     a restore would hand a service a directory it cannot open.
-  # So: create the path, sync into it, then stamp the leaf from the box's stat.
-  mkdir -p "$STAGE$dir" || die "cannot create $STAGE$dir"
-  # --delete so the staging tree is a mirror and a file deleted on the box
-  # stops being re-uploaded forever; the HISTORY lives in restic's snapshots,
-  # which is where deleted-file recovery comes from.
-  if ! rsync -a --numeric-ids --delete --stats \
-        -e "ssh ${SSH_OPTS[*]}" ${EX[@]+"${EX[@]}"} \
-        "$BOX_SSH:$dir/" "$STAGE$dir/" > /tmp/hub-backup-rsync.$$ 2>&1; then
-    tail -5 /tmp/hub-backup-rsync.$$ | sed 's/^/    /'
+  mkdir -p "$stage" || { HOST_FAIL[$host]="cannot create $stage"; return 1; }
+  ENVIRONMENTS=$(host_envs "$host")
+  while read -r tenant dir; do
+    [ -n "${dir:-}" ] || continue
+    case " $done $absent " in
+      *" $dir "*) say "  $dir: already pulled (declared by more than one tenant)"; continue ;;
+    esac
+    # stat, not test -d: one round trip answers "does it exist?" and hands back
+    # the directory's OWN owner/group/mode, which the rsync below cannot carry.
+    # shellcheck disable=SC2029  # $dir is meant to expand here, on the client
+    # -n is load-bearing: without it ssh reads this loop's stdin -- the list of
+    # declared directories -- and the loop silently ends after ONE of them.
+    # Found 14 Sep 2026 by a run that backed up /var/lib/agent-hub and nothing
+    # else, and reported success.
+    attrs=$(ssh -n "${SSH_OPTS[@]}" "$target" "stat -c '%u %g %a' $dir" 2>/dev/null)
+    if [ -z "$attrs" ]; then
+      # A declared directory the box does not have. Not a failure of the backup:
+      # the contract is a statement of intent, and /var/lib/qdrant was declared
+      # by agent-hub before qdrant had ever written to it (14 Sep 2026). It IS
+      # reported, here and in the status file, so "declared and never backed up"
+      # cannot hide.
+      say "  $dir ($tenant): DECLARED BUT ABSENT on $host - skipped"
+      absent="$absent $dir"
+      continue
+    fi
+    read -r duid dgid dmode <<< "$attrs"
+    EX=(); while read -r x; do EX+=("$x"); done < <(excludes_for "$dir")
+    say "  $dir ($tenant, $duid:$dgid $dmode)${EX[0]:+ excluding ${EX[*]}}"
+    # Two things rsync will not do for us, both found by running it (14 Sep 2026):
+    #   - it creates the last component of the destination, not missing PARENTS,
+    #     and exits 11 ("mkdir ... No such file or directory") when they are gone;
+    #   - `src/ -> dst/` says nothing about DST'S OWN attributes, so the leaf
+    #     directory's owner and mode -- /var/lib/arcade is 0700 arcade:arcade,
+    #     /var/lib/ac-host 0750 root:root -- would silently become root 0755 and
+    #     a restore would hand a service a directory it cannot open.
+    # So: create the path, sync into it, then stamp the leaf from the box's stat.
+    mkdir -p "$stage$dir" || { HOST_FAIL[$host]="cannot create $stage$dir"; return 1; }
+    # --delete so the staging tree is a mirror and a file deleted on the box
+    # stops being re-uploaded forever; the HISTORY lives in restic's snapshots,
+    # which is where deleted-file recovery comes from.
+    if ! rsync -a --numeric-ids --delete --stats \
+          -e "ssh ${SSH_OPTS[*]}" ${EX[@]+"${EX[@]}"} \
+          "$target:$dir/" "$stage$dir/" > /tmp/hub-backup-rsync.$$ 2>&1; then
+      tail -5 /tmp/hub-backup-rsync.$$ | sed 's/^/    /'
+      rm -f /tmp/hub-backup-rsync.$$
+      HOST_FAIL[$host]="rsync of $dir failed"; return 1
+    fi
+    chown "$duid:$dgid" "$stage$dir" || { HOST_FAIL[$host]="cannot chown $stage$dir to $duid:$dgid"; return 1; }
+    chmod "$dmode" "$stage$dir" || { HOST_FAIL[$host]="cannot chmod $stage$dir to $dmode"; return 1; }
+    grep -E "^(Number of regular files transferred|Total transferred file size)" \
+      /tmp/hub-backup-rsync.$$ | sed 's/^/    /'
     rm -f /tmp/hub-backup-rsync.$$
-    die "rsync of $dir failed"
-  fi
-  chown "$duid:$dgid" "$STAGE$dir" || die "cannot chown $STAGE$dir to $duid:$dgid"
-  chmod "$dmode" "$STAGE$dir" || die "cannot chmod $STAGE$dir to $dmode"
-  grep -E "^(Number of regular files transferred|Total transferred file size)" \
-    /tmp/hub-backup-rsync.$$ | sed 's/^/    /'
-  rm -f /tmp/hub-backup-rsync.$$
-  DIRS_DONE="$DIRS_DONE $dir"
-done <<< "$DECLARED"
-DIRS_DONE="${DIRS_DONE# }"; DIRS_ABSENT="${DIRS_ABSENT# }"
-[ -n "$DIRS_DONE" ] || die "nothing was pulled; every declared directory was absent"
-say "staged: $(du -sh "$STAGE" | cut -f1) in $STAGE"
+    done="$done $dir"
+  done <<< "$(host_dirs "$host")"
+  HOST_DIRS[$host]="${done# }"; HOST_ABSENT[$host]="${absent# }"
+  [ -n "${done# }" ] || { HOST_FAIL[$host]="nothing was pulled; every declared directory was absent"; return 1; }
+  say "staged: $(du -sh "$stage" | cut -f1) in $stage"
+}
 
-step "restic: snapshot the staging tree into $REPO"
+# Snapshot one host's staging tree: its own restic host and tag, so its
+# history is its own forget group (header: "TWO HOSTS").
+snapshot_host() {
+  local host="$1" stage out="/tmp/hub-backup-restic.$$" snap
+  stage=$(stage_of "$host")
+  step "restic $host: snapshot $stage into $REPO"
+  "$RESTIC" backup "$stage" --tag "$host" --tag hub-backup --host "$host" > "$out" 2>&1 \
+    || { tail -10 "$out" | sed 's/^/    /'; rm -f "$out"; HOST_FAIL[$host]="restic backup failed"; return 1; }
+  grep -E "^(Added to the repo|processed|Files:|Dirs:)" "$out" | sed 's/^/  /'
+  snap=$(grep -oE "snapshot [0-9a-f]{8} saved" "$out" | tail -1 | cut -d' ' -f2)
+  HOST_ADDED[$host]=$(grep -oE "Added to the repo[^:]*: [0-9.]+ [KMGT]?i?B" "$out" | tail -1 | sed 's/.*: //')
+  rm -f "$out"
+  [ -n "$snap" ] || { HOST_FAIL[$host]="restic backup produced no snapshot id"; return 1; }
+  HOST_SNAP[$host]="$snap"
+  say "  snapshot $snap"
+}
+
 if [ ! -f "$REPO/config" ]; then
-  say "  initialising a new repo"
+  step "restic: initialising a new repo at $REPO"
   "$RESTIC" init || die "restic init failed"
 fi
-"$RESTIC" backup "$STAGE" --tag ac-box --tag hub-backup --host ac-box > /tmp/hub-backup-restic.$$ 2>&1 \
-  || { tail -10 /tmp/hub-backup-restic.$$ | sed 's/^/    /'; rm -f /tmp/hub-backup-restic.$$; die "restic backup failed"; }
-grep -E "^(Added to the repo|processed|Files:|Dirs:)" /tmp/hub-backup-restic.$$ | sed 's/^/  /'
-SNAPSHOT=$(grep -oE "snapshot [0-9a-f]{8} saved" /tmp/hub-backup-restic.$$ | tail -1 | cut -d' ' -f2)
-ADDED=$(grep -oE "Added to the repo[^:]*: [0-9.]+ [KMGT]?i?B" /tmp/hub-backup-restic.$$ | tail -1 | sed 's/.*: //')
-rm -f /tmp/hub-backup-restic.$$
-[ -n "$SNAPSHOT" ] || die "restic backup produced no snapshot id"
-say "  snapshot $SNAPSHOT"
 
-step "restic: forget + prune (7 daily, 4 weekly, 6 monthly)"
+for h in $HOSTS; do
+  if ! { pull_host "$h" && snapshot_host "$h"; }; then
+    say "  $h FAILED: ${HOST_FAIL[$h]}"
+  fi
+done
+ANY_SNAPSHOT=0
+for h in $HOSTS; do [ -z "${HOST_SNAP[$h]:-}" ] || ANY_SNAPSHOT=1; done
+FAILED=""
+for h in $HOSTS; do [ -z "${HOST_FAIL[$h]:-}" ] || FAILED="$FAILED; $h: ${HOST_FAIL[$h]}"; done
+FAILED="${FAILED#; }"
+[ "$ANY_SNAPSHOT" = 1 ] || die "no host was backed up: $FAILED"
+
+step "restic: forget + prune (7 daily, 4 weekly, 6 monthly, per host)"
 # The retention the operator chose: a week of dailies covers "I deleted it
 # yesterday", the weeklies and monthlies cover "it has been wrong for a while
 # and nobody noticed". --prune is in the same call so space is actually
-# reclaimed rather than merely unreferenced.
+# reclaimed rather than merely unreferenced. restic applies the policy per
+# (host, paths) group, so each host keeps its own 7/4/6.
 "$RESTIC" forget --prune --keep-daily 7 --keep-weekly 4 --keep-monthly 6 \
   --tag hub-backup > /tmp/hub-backup-forget.$$ 2>&1 \
   || { tail -10 /tmp/hub-backup-forget.$$ | sed 's/^/    /'; rm -f /tmp/hub-backup-forget.$$; die "restic forget/prune failed"; }
@@ -462,7 +591,15 @@ fi
 
 SNAPSHOTS=$("$RESTIC" snapshots --json 2>/dev/null | grep -o '"short_id"' | wc -l)
 REPO_SIZE=$("$RESTIC" stats --mode raw-data 2>/dev/null | awk -F': *' '/Total Size/{print $2}')
+if [ -n "$FAILED" ]; then
+  write_status failed "$FAILED"
+  step "done in $(( $(date +%s) - START ))s, WITH A FAILED HOST"
+  say "FAILED: $FAILED"
+  say "$SNAPSHOTS snapshot(s), repo $REPO_SIZE, status in $STATUS"
+  exit 1
+fi
 write_status ok ""
 step "done in $(( $(date +%s) - START ))s"
-say "snapshot $SNAPSHOT, $SNAPSHOTS snapshot(s), repo $REPO_SIZE, status in $STATUS"
+for h in $HOSTS; do say "$h: snapshot ${HOST_SNAP[$h]} (${HOST_ADDED[$h]:-?} added)"; done
+say "$SNAPSHOTS snapshot(s), repo $REPO_SIZE, status in $STATUS"
 say "restore: docs/runbook-restore.md"
