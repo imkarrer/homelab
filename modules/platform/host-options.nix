@@ -4,9 +4,9 @@
 # set exactly once, in hosts/<name>/host.nix. No other module may hardcode any
 # of it.
 #
-# Shape is pinned against hosts/ac-box/host.nix (the only host that exists
-# today) — do not add fields that file does not set, and do not change the
-# shape of the ones it does without updating it in lockstep.
+# Shape is pinned against the hosts/<name>/host.nix files (ac-box and
+# arcade-box) — do not add a field no host sets, and do not change the shape
+# of one a host does set without updating that file in lockstep.
 { lib, ... }:
 
 let
@@ -40,6 +40,78 @@ let
     };
   };
 
+  # One endpoint this host scrapes on a peer. A list on the peer rather than
+  # an attrset keyed by job, because a peer's job may share its name with a
+  # job this host scrapes locally (node) -- modules/observability/default.nix
+  # then appends the target to the local job -- and that merge rule belongs
+  # to the reader, not to the option's key.
+  peerMetrics = types.submodule {
+    options = {
+      job = mkOption {
+        type = types.str;
+        description = ''
+          The Prometheus job the target is scraped under. Deliberately the
+          name the peer's OWN Prometheus used for the same endpoint before
+          ADR 0010 moved observability to one host: a dashboard keyed on
+          job="node" then sees both machines as instances of one job, and
+          agent-hub's llamacpp:* series keep the job label their history
+          carries. A job this host also scrapes locally gains the peer as a
+          second target; any other name is a job of its own.
+        '';
+      };
+
+      port = mkOption {
+        type = types.port;
+        description = "The port on the peer's address the endpoint listens on.";
+      };
+
+      path = mkOption {
+        type = types.str;
+        default = "/metrics";
+        description = "metrics_path; the default is Prometheus's own.";
+      };
+
+      interval = mkOption {
+        type = types.str;
+        default = "30s";
+        description = "scrape_interval; the default is the collector's global one.";
+      };
+
+      keep = mkOption {
+        type = types.nullOr types.str;
+        default = null;
+        description = ''
+          A metric_relabel `keep` regex over __name__ -- the curation the
+          collecting host applies -- or null to keep everything the endpoint
+          serves. Curation is per job, not per target, so for a job this
+          host also scrapes locally this must equal the local job's regex;
+          modules/observability/default.nix asserts it rather than silently
+          preferring one.
+        '';
+      };
+    };
+  };
+
+  peerFacts = types.submodule {
+    options = {
+      address = mkOption {
+        type = types.str;
+        description = ''
+          The peer's LAN address: THAT host's homelab.host.networks.lan
+          .address, read from its own hosts/<name>/host.nix (the one file
+          that holds its literals) -- never typed a second time, never
+          guessed. hosts/arcade-box/host.nix shows the import.
+        '';
+      };
+
+      metrics = mkOption {
+        type = types.listOf peerMetrics;
+        default = [ ];
+        description = "The endpoints this host's Prometheus scrapes on the peer.";
+      };
+    };
+  };
+
 in
 {
   options.homelab.host = {
@@ -69,6 +141,27 @@ in
         on host.networks.<name>.interface; "forwarded" is lan plus a router
         forward). This is the only place NIC names and addresses are literal —
         every other module, including tenants, must read them from here.
+      '';
+    };
+
+    peers = mkOption {
+      type = types.attrsOf peerFacts;
+      default = { };
+      description = ''
+        Another homelab host this one scrapes, keyed by that host's
+        homelab.host.name. Empty on every host but the one running the
+        collector.
+
+        Why a host fact. ADR 0010 put the two boxes on one LAN with one
+        Prometheus (arcade-box's, modules/observability), and a target on the
+        other machine had no spelling: modules/tenant/metrics.nix admits
+        loopback or one of THIS host's addresses, deliberately, because a
+        tenant's endpoint is on the host the tenant runs on. A peer is the
+        other case -- the machine that runs the collector naming the machine
+        it collects from -- which is a fact about the collector host, so it
+        lives beside its other machine facts and is read by
+        modules/observability/default.nix alone. The Z840's exporter for it
+        is modules/platform/node-exporter.nix.
       '';
     };
 

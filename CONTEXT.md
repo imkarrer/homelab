@@ -28,6 +28,13 @@ A deferred host (ADR 0010) that would take `ci` off arcade-box if its
 queue or its switch windows start to hurt. Not built; named so the trigger
 has a name.
 
+**Peer** (or **peer host**):
+Another homelab host as one host's configuration sees it:
+`homelab.host.peers.<name>` names it, carries its address (read from that
+host's own `host.nix`, never retyped) and lists what this host's Prometheus
+scrapes from it. arcade-box's peer is `ac-box` (llm-box once renamed); the
+host being scraped declares none.
+
 **Platform layer**:
 Everything on a box that is not a workload — hardware, identity, the
 Docker daemon, Nix, boot — owned by this repository (`homelab`).

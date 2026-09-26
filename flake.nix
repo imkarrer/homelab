@@ -210,6 +210,13 @@
         # tenants declare; the Z840 runs agent-hub alone and needs none, and
         # secrets.nix reads options of modules the Z840 no longer imports
         # (homelab.ci.envFile, services.ac-host.enable).
+
+        # The platform's node exporter, for a host a PEER scrapes
+        # (homelab-ygc.10): an option, off by default, so this line adds
+        # nothing to arcade-box, which has modules/observability's own
+        # exporter; hosts/ac-box/configuration.nix turns it on. Appended,
+        # not slotted in above: the prefix's order is load-bearing.
+        ./modules/platform/node-exporter.nix
       ];
     in
     {

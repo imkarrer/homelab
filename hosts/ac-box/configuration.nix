@@ -120,6 +120,10 @@ in
     slices = false;
   };
 
+  # Scraped by arcade-box's Prometheus over the LAN since the cutover left this
+  # host without a collector (hosts/arcade-box/host.nix, peers.ac-box; ADR 0010).
+  homelab.platform.nodeExporter.enable = true;
+
   # ---------------------------------------------------------------------------
   # The closure deploys itself (ADR 0006). This is the flag that makes ac-box
   # self-switching: homelab's Buildkite pipeline stages a green revision into
