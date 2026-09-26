@@ -44,22 +44,232 @@ let
   grafanaAddr = config.homelab.host.networks.lan.address;
   grafanaPort = 3000;
 
-  # The host's name and size, for the alert rules below. Until 26 Sep 2026
-  # (homelab-ygc.3, the second host) the rules carried "ac-box" as the group
-  # name, as four alert-name prefixes and in three summaries, and
-  # `node_load5 > 28` with "(56 threads)" beside it -- ac-box's thread count
-  # halved, as a literal an L2 module is not allowed to hold. Every one of
-  # those now comes from homelab.host, and for ac-box renders to the very
-  # same bytes, so the rules file (and the toplevel drvPath) did not change
-  # for it; on a 12-thread host the load line reads 6 and says so.
+  # The host's name, for the target labels below. Until 26 Sep 2026
+  # (homelab-ygc.3, the second host) the alert rules carried "ac-box" as the
+  # group name, as four alert-name prefixes and in three summaries, and
+  # `node_load5 > 28` with "(56 threads)" beside it; from then until
+  # homelab-ygc.10 the same day they carried THIS host's name and half its
+  # thread count from homelab.host instead -- right while every node series
+  # came from the host running Prometheus, wrong the moment a peer's did.
+  # The rules now name no host at all (see them below); the name is a label.
   host = config.homelab.host;
-  # "ac-box" -> "AcBox", "arcade-box" -> "ArcadeBox": Alertmanager groups by
-  # alertname and the Discord receiver shows it, so the prefix is the host.
-  hostTitle = lib.concatMapStrings (
-    w: lib.toUpper (lib.substring 0 1 w) + lib.substring 1 (-1) w
-  ) (lib.splitString "-" host.name);
-  # Half the threads: the same "sustained, not peak" line ac-box has had.
-  loadHighThreshold = host.capacity.cpuThreads / 2;
+
+  # Every target this Prometheus scrapes carries host=<machine>. `instance`
+  # stopped saying which machine when a second host appeared: "127.0.0.1:9100"
+  # is whichever box Prometheus runs on, and after ADR 0010's cutover
+  # arcade-box's node series CONTINUED ac-box's under exactly that label,
+  # because the TSDB came over by rsync. A label set is a series identity,
+  # so adding the label ends those series and starts new ones once, at the
+  # switch that carries it; nothing keyed on job -- the dashboard's panels,
+  # the alert expressions -- notices, and a legend may now say {{host}}.
+  localTarget = port: {
+    targets = [ "127.0.0.1:${toString port}" ];
+    labels.host = host.name;
+  };
+
+  # One global interval, named once because the peer merge below has to
+  # know what a local job without its own scrape_interval actually runs at.
+  scrapeInterval = "30s";
+
+  # What this host scrapes on its own loopback. A `let` rather than the
+  # option's literal so the peer machinery below can read the job names and
+  # curation off the same list it extends -- a second spelling of the names
+  # would be a duplicate job_name, which Prometheus refuses at startup, the
+  # first time somebody added a local job and forgot the other list.
+  localScrapeConfigs = [
+    {
+      job_name = "node";
+      static_configs = [ (localTarget 9100) ];
+      metric_relabel_configs = [
+        {
+          source_labels = [ "__name__" ];
+          regex = "up|node_cpu_seconds_total|node_memory_MemTotal_bytes|node_memory_MemAvailable_bytes|node_filesystem_avail_bytes|node_filesystem_size_bytes|node_load1|node_load5|node_load15|node_systemd_unit_state";
+          action = "keep";
+        }
+      ];
+    }
+    {
+      job_name = "cadvisor";
+      static_configs = [ (localTarget 9102) ];
+      metric_relabel_configs = [
+        {
+          source_labels = [ "__name__" ];
+          regex = "up|container_cpu_usage_seconds_total|container_memory_working_set_bytes";
+          action = "keep";
+        }
+        {
+          source_labels = [ "cpu" ];
+          regex = "[0-9]+";
+          action = "drop";
+        }
+        {
+          regex = "container_label_.*";
+          action = "labeldrop";
+        }
+      ];
+    }
+    # The two UniFi jobs poll the Dream Router's Network application, a Java
+    # process sharing 2 GB with everything else on the router. In Prometheus
+    # mode unpoller fetches from the controller ON EVERY SCRAPE, so this
+    # interval IS the load we put on it: at 30s it was ~2,900 fetches/day of
+    # ~270 KB each (~2.5s of controller time per fetch, ~8% of wall-clock),
+    # and controller response time crept up ~0.15s/day alongside its memory
+    # until the app wedged on 10 Sep 2026 (see UnifiGatewayMemTrend below).
+    #
+    # 2m, not 5m: Prometheus's staleness lookback is 5m, so a 5m interval
+    # leaves instant selectors (`up == 0`, the dashboard gauges) empty
+    # between samples and silently resets alert `for:` timers. 2m is 4x less
+    # load and still well inside the lookback. The dashboard's rate() windows
+    # over these series are [10m] for the same reason.
+    #
+    # scrape_timeout is raised from the 10s default because a controller that
+    # takes 12s to answer is degraded, not down, and "up" should say so;
+    # UnifiControllerSlow is the alert that reads the duration.
+    {
+      job_name = "unpoller";
+      scrape_interval = "2m";
+      scrape_timeout = "45s";
+      static_configs = [ (localTarget 9130) ];
+      metric_relabel_configs = [
+        {
+          source_labels = [ "__name__" ];
+          # uptime is kept so a router reboot is a visible counter reset,
+          # not something inferred from a gap in the graph.
+          regex = "up|unpoller_device_cpu_utilization_ratio|unpoller_device_memory_utilization_ratio|unpoller_device_uptime_seconds|unpoller_device_wan_.*";
+          action = "keep";
+        }
+      ];
+    }
+    # udr-fw-exporter polls the controller on its own timer (UDR_FW_POLL_SECONDS
+    # in its unit, below) and serves the last result from memory, so this
+    # scrape is a cache read and its interval does not touch the router.
+    {
+      job_name = "udr-fw";
+      scrape_interval = "2m";
+      static_configs = [ (localTarget 9131) ];
+    }
+    {
+      job_name = "docker-names";
+      scrape_interval = "30s";
+      static_configs = [ (localTarget 9132) ];
+    }
+  ];
+
+  # ---- peers -------------------------------------------------------------
+  # What this host scrapes on OTHER homelab hosts: homelab.host.peers, an L0
+  # fact (modules/platform/host-options.nix), flattened to one entry per
+  # endpoint with the peer's name and address on it. Empty on a host that
+  # names no peer, in which case everything from here to peerAssertions is
+  # [] and the scrape config is the local list alone.
+  peers = config.homelab.host.peers;
+  peerEntries = lib.concatLists (
+    lib.mapAttrsToList (
+      peer: p:
+      map (
+        m:
+        m
+        // {
+          inherit peer;
+          inherit (p) address;
+        }
+      ) p.metrics
+    ) peers
+  );
+  peerTarget = e: {
+    targets = [ "${e.address}:${toString e.port}" ];
+    labels.host = e.peer;
+  };
+
+  # The rule, in two halves. A peer endpoint whose job is one this host
+  # scrapes locally (node, today) becomes a second target of THAT job: same
+  # job_name, same interval, same curation, one more instance -- which is
+  # what lets a dashboard keyed on job="node" show both machines without
+  # knowing there are two. Any other peer job is a scrape config of its own,
+  # from the entries' interval/path/keep (agent-hub, today), with every
+  # peer that declares that job as a target of it.
+  localJobNames = map (c: c.job_name) localScrapeConfigs;
+  localByJob = lib.listToAttrs (map (c: lib.nameValuePair c.job_name c) localScrapeConfigs);
+  isLocalJob = e: lib.elem e.job localJobNames;
+  mergedEntries = lib.filter isLocalJob peerEntries;
+  peerOnlyByJob = lib.groupBy (e: e.job) (lib.filter (e: !isLocalJob e) peerEntries);
+
+  # Curation is per job in Prometheus, not per target, so a merged entry's
+  # interval/path/keep cannot be honoured separately from the local job's.
+  # They are asserted equal instead (peerAssertions), so hosts/<name>/host.nix
+  # tells the whole truth about what is scraped from the peer and cannot
+  # drift from what actually is. These read the local job's values back.
+  intervalOf = c: c.scrape_interval or scrapeInterval;
+  pathOf = c: c.metrics_path or "/metrics";
+  keepOf =
+    c:
+    let
+      ks = lib.filter (
+        r: (r.action or "") == "keep" && (r.source_labels or [ ]) == [ "__name__" ]
+      ) (c.metric_relabel_configs or [ ]);
+    in
+    if ks == [ ] then null else (lib.head ks).regex;
+
+  scrapeConfigsWithPeers = map (
+    c:
+    c
+    // {
+      static_configs =
+        c.static_configs ++ map peerTarget (lib.filter (e: e.job == c.job_name) mergedEntries);
+    }
+  ) localScrapeConfigs;
+
+  peerScrapeConfigs = lib.mapAttrsToList (
+    job: es:
+    let
+      e = lib.head es;
+    in
+    {
+      job_name = job;
+      scrape_interval = e.interval;
+      static_configs = map peerTarget es;
+    }
+    // lib.optionalAttrs (e.path != "/metrics") { metrics_path = e.path; }
+    // lib.optionalAttrs (e.keep != null) {
+      metric_relabel_configs = [
+        {
+          source_labels = [ "__name__" ];
+          regex = e.keep;
+          action = "keep";
+        }
+      ];
+    }
+  ) peerOnlyByJob;
+
+  # The addresses this host has, for the first assertion: the inverse of
+  # metrics.nix's rule. A tenant endpoint must be HERE; a peer must not be.
+  hostAddresses = lib.filter (a: a != null) (lib.mapAttrsToList (_: n: n.address) host.networks);
+
+  peerAssertions =
+    lib.mapAttrsToList (name: p: {
+      assertion = p.address != "127.0.0.1" && !(lib.elem p.address hostAddresses);
+      message = "homelab.host.peers.${name}.address = \"${p.address}\" is this host (loopback or one of homelab.host.networks.*.address). A peer is another machine; this host's own exporters are the local jobs in modules/observability/default.nix.";
+    }) peers
+    ++ map (
+      e:
+      let
+        c = localByJob.${e.job};
+        show = k: if k == null then "null" else k;
+      in
+      {
+        assertion = e.interval == intervalOf c && e.path == pathOf c && e.keep == keepOf c;
+        message = "homelab.host.peers.${e.peer}.metrics: job \"${e.job}\" is one this host scrapes locally, so the peer's target joins that job and takes its interval (${intervalOf c}), path (${pathOf c}) and keep regex (${show (keepOf c)}); the entry says interval ${e.interval}, path ${e.path}, keep ${show e.keep}. Curation is per job, not per target: make them equal, or give the peer's endpoint a job of its own.";
+      }
+    ) mergedEntries
+    ++ lib.mapAttrsToList (
+      job: es:
+      let
+        e = lib.head es;
+      in
+      {
+        assertion = lib.all (x: x.interval == e.interval && x.path == e.path && x.keep == e.keep) es;
+        message = "homelab.host.peers: job \"${job}\" is declared by more than one peer with differing interval/path/keep; one job has one curation.";
+      }
+    ) peerOnlyByJob;
 
   # The UniFi controller the two exporters below poll -- read from the host for
   # the same reason grafanaAddr is, three lines up. Until 9 Sep 2026 this module
@@ -162,7 +372,7 @@ in
   };
 
   # See unifiUrl's comment above for why this is an assertion rather than a
-  # gate that builds nothing.
+  # gate that builds nothing; peerAssertions is defined with the peers.
   assertions = [
     {
       assertion = unifiPolled;
@@ -173,7 +383,8 @@ in
         or make this module's UniFi half conditional -- it is not today.
       '';
     }
-  ];
+  ]
+  ++ peerAssertions;
 
   systemd.services.cadvisor.serviceConfig.SupplementaryGroups = [ "docker" ];
 
@@ -251,7 +462,7 @@ in
     # Size wins if it fills first. 2GB is a hard ceiling; WAL can sit a bit above it.
     retentionTime = "14d";
     extraFlags = [ "--storage.tsdb.retention.size=2GB" ];
-    globalConfig.scrape_interval = "30s";
+    globalConfig.scrape_interval = scrapeInterval;
     alertmanagers = [
       {
         static_configs = [
@@ -259,120 +470,68 @@ in
         ];
       }
     ];
-    scrapeConfigs = [
-      {
-        job_name = "node";
-        static_configs = [ { targets = [ "127.0.0.1:9100" ]; } ];
-        metric_relabel_configs = [
-          {
-            source_labels = [ "__name__" ];
-            regex = "up|node_cpu_seconds_total|node_memory_MemTotal_bytes|node_memory_MemAvailable_bytes|node_filesystem_avail_bytes|node_filesystem_size_bytes|node_load1|node_load5|node_load15|node_systemd_unit_state";
-            action = "keep";
-          }
-        ];
-      }
-      {
-        job_name = "cadvisor";
-        static_configs = [ { targets = [ "127.0.0.1:9102" ]; } ];
-        metric_relabel_configs = [
-          {
-            source_labels = [ "__name__" ];
-            regex = "up|container_cpu_usage_seconds_total|container_memory_working_set_bytes";
-            action = "keep";
-          }
-          {
-            source_labels = [ "cpu" ];
-            regex = "[0-9]+";
-            action = "drop";
-          }
-          {
-            regex = "container_label_.*";
-            action = "labeldrop";
-          }
-        ];
-      }
-      # The two UniFi jobs poll the Dream Router's Network application, a Java
-      # process sharing 2 GB with everything else on the router. In Prometheus
-      # mode unpoller fetches from the controller ON EVERY SCRAPE, so this
-      # interval IS the load we put on it: at 30s it was ~2,900 fetches/day of
-      # ~270 KB each (~2.5s of controller time per fetch, ~8% of wall-clock),
-      # and controller response time crept up ~0.15s/day alongside its memory
-      # until the app wedged on 10 Sep 2026 (see UnifiGatewayMemTrend below).
-      #
-      # 2m, not 5m: Prometheus's staleness lookback is 5m, so a 5m interval
-      # leaves instant selectors (`up == 0`, the dashboard gauges) empty
-      # between samples and silently resets alert `for:` timers. 2m is 4x less
-      # load and still well inside the lookback. The dashboard's rate() windows
-      # over these series are [10m] for the same reason.
-      #
-      # scrape_timeout is raised from the 10s default because a controller that
-      # takes 12s to answer is degraded, not down, and "up" should say so;
-      # UnifiControllerSlow is the alert that reads the duration.
-      {
-        job_name = "unpoller";
-        scrape_interval = "2m";
-        scrape_timeout = "45s";
-        static_configs = [ { targets = [ "127.0.0.1:9130" ]; } ];
-        metric_relabel_configs = [
-          {
-            source_labels = [ "__name__" ];
-            # uptime is kept so a router reboot is a visible counter reset,
-            # not something inferred from a gap in the graph.
-            regex = "up|unpoller_device_cpu_utilization_ratio|unpoller_device_memory_utilization_ratio|unpoller_device_uptime_seconds|unpoller_device_wan_.*";
-            action = "keep";
-          }
-        ];
-      }
-      # udr-fw-exporter polls the controller on its own timer (UDR_FW_POLL_SECONDS
-      # in its unit, below) and serves the last result from memory, so this
-      # scrape is a cache read and its interval does not touch the router.
-      {
-        job_name = "udr-fw";
-        scrape_interval = "2m";
-        static_configs = [ { targets = [ "127.0.0.1:9131" ]; } ];
-      }
-      {
-        job_name = "docker-names";
-        scrape_interval = "30s";
-        static_configs = [ { targets = [ "127.0.0.1:9132" ]; } ];
-      }
-    ];
+    scrapeConfigs = scrapeConfigsWithPeers ++ peerScrapeConfigs;
     rules = [
       ''
         groups:
-          - name: ${host.name}
+          - name: homelab
             rules:
-              - alert: ${hostTitle}DiskHigh
+              # The host rules read node series from every machine this
+              # Prometheus scrapes -- the box it runs on and each peer -- and
+              # fire per instance. Renamed with homelab-ygc.10 from
+              # <HostTitle>DiskHigh / LoadHigh / MemLow / ExporterDown
+              # (ArcadeBoxDiskHigh ... since the cutover, AcBoxDiskHigh ...
+              # before it): a prefix that names one host is wrong on a rule
+              # that watches two. Alertmanager groups by alertname, so the
+              # machine is in the summary and the labels instead; the group
+              # was named after the host for the same reason and is not now.
+              - alert: HostDiskHigh
                 expr: 100 * (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="tmpfs"}) > 80
                 for: 10m
                 labels:
                   severity: warning
                 annotations:
-                  summary: "${host.name} root disk is {{ $value | printf \"%.0f\" }}% full"
+                  summary: "{{ $labels.host }} ({{ $labels.instance }}) root disk is {{ $value | printf \"%.0f\" }}% full"
 
-              - alert: ${hostTitle}LoadHigh
-                expr: node_load5 > ${toString loadHighThreshold}
+              # Half the instance's own threads, from the exporter itself: one
+              # node_cpu_seconds_total{mode="idle"} series per logical CPU, so
+              # no thread count is a literal anywhere -- 28 on the Z840, 6 on
+              # the Tiny, the same "sustained, not peak" line each has had.
+              - alert: HostLoadHigh
+                expr: node_load5 > on(instance) group_left() (count by (instance) (node_cpu_seconds_total{mode="idle"}) / 2)
                 for: 10m
                 labels:
                   severity: warning
                 annotations:
-                  summary: "${host.name} 5m load is {{ $value | printf \"%.1f\" }} (${toString host.capacity.cpuThreads} threads)"
+                  summary: "{{ $labels.host }} ({{ $labels.instance }}) 5m load is {{ $value | printf \"%.1f\" }}, over half its threads"
 
-              - alert: ${hostTitle}MemLow
+              - alert: HostMemLow
                 expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
                 for: 10m
                 labels:
                   severity: warning
                 annotations:
-                  summary: "${host.name} has under 10% RAM available"
+                  summary: "{{ $labels.host }} ({{ $labels.instance }}) has under 10% RAM available"
 
-              - alert: ${hostTitle}ExporterDown
-                expr: up{job=~"node|cadvisor"} == 0
+              # Per instance, so a peer's exporter going away is an alert and
+              # not a quiet gap in its graphs. cadvisor is its own rule
+              # because it runs on this host alone; the two were one rule
+              # (up{job=~"node|cadvisor"}) until the split, with no other change.
+              - alert: NodeExporterDown
+                expr: up{job="node"} == 0
                 for: 5m
                 labels:
                   severity: warning
                 annotations:
-                  summary: "Prometheus scrape {{ $labels.job }} is down"
+                  summary: "node exporter on {{ $labels.host }} ({{ $labels.instance }}) is down"
+
+              - alert: CadvisorDown
+                expr: up{job="cadvisor"} == 0
+                for: 5m
+                labels:
+                  severity: warning
+                annotations:
+                  summary: "cadvisor on {{ $labels.host }} ({{ $labels.instance }}) is down"
 
               # The Dream Router rules were rewritten after 10-11 Sep 2026, when
               # the router's Network app ran out of memory over a week and was

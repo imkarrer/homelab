@@ -1,6 +1,6 @@
 {
   "uid": "ac-overview",
-  "title": "ac-box + Dream Router",
+  "title": "Hosts + Dream Router",
   "timezone": "America/Chicago",
   "schemaVersion": 39,
   "refresh": "30s",
@@ -13,7 +13,7 @@
     {
       "id": 1,
       "type": "timeseries",
-      "title": "ac-box CPU (%)",
+      "title": "Host CPU (%)",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -23,15 +23,15 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "100 * (1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
-          "legendFormat": "CPU"
+          "expr": "100 * (1 - avg by (host) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])))",
+          "legendFormat": "{{host}}"
         }
       ]
     },
     {
       "id": 2,
       "type": "timeseries",
-      "title": "ac-box RAM",
+      "title": "Host RAM",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -42,19 +42,19 @@
         {
           "refId": "A",
           "expr": "node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes",
-          "legendFormat": "used"
+          "legendFormat": "{{host}} used"
         },
         {
           "refId": "B",
           "expr": "node_memory_MemAvailable_bytes",
-          "legendFormat": "available"
+          "legendFormat": "{{host}} available"
         }
       ]
     },
     {
       "id": 3,
       "type": "timeseries",
-      "title": "ac-box root disk (%)",
+      "title": "Root disk (%)",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -65,14 +65,14 @@
         {
           "refId": "A",
           "expr": "100 * (1 - node_filesystem_avail_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"})",
-          "legendFormat": "/"
+          "legendFormat": "{{host}}"
         }
       ]
     },
     {
       "id": 4,
       "type": "timeseries",
-      "title": "ac-box load (56 threads)",
+      "title": "Load (1m, 5m)",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -83,12 +83,12 @@
         {
           "refId": "A",
           "expr": "node_load1",
-          "legendFormat": "1m"
+          "legendFormat": "{{host}} 1m"
         },
         {
           "refId": "B",
           "expr": "node_load5",
-          "legendFormat": "5m"
+          "legendFormat": "{{host}} 5m"
         }
       ]
     },
@@ -266,7 +266,7 @@
         "justifyMode": "center"
       },
       "targets": [
-        { "refId": "A", "expr": "up{job=\"node\"}", "legendFormat": "node", "instant": true }
+        { "refId": "A", "expr": "up{job=\"node\"}", "legendFormat": "{{host}}", "instant": true }
       ]
     },
     {
