@@ -85,7 +85,7 @@ matching the declaration on ports, slice and state path.
 
 | Service | Tenant | Basis |
 | --- | --- | --- |
-| `ac-host-static.service` + 3 `ac-static-*` containers + sidecars | assetto | Lobbies on 9600–9602 / 8081–8083 / 8181–8183 / 11200–11202; sidecar sockets 18080, 11300–11302 — every one declared. Containers in `critical.slice` via `cgroup_parent`; the unit unsliced by design. State at `/var/lib/ac-host`. |
+| `ac-host-static.service` + 3 `ac-static-*` containers + sidecars | assetto | Lobbies on 9600–9602 / 8081–8083 / 8181–8183 / 11200–11202; sidecar sockets 18080, 11300–11302 — every one declared. Containers in `critical.slice` via `cgroup_parent`; the unit unsliced by design. State at `/var/lib/ac-host` and in the `ac-host_ac-server` Docker volume -- the AC dedicated server, which steamcmd cannot reinstall anonymously (`homelab-ygc.12`). |
 | `ac-host-nightly.timer`, `ac-host-dev.service` | assetto | Declared; dev inactive by design. |
 | `arcade-freeciv`, `arcade-mindustry` | arcade | `interactive.slice`. 5556/tcp, 4555/udp, 6567, **20151/udp** all declared and open — LAN discovery now works. |
 | `samba-smbd`, `samba-winbindd`, `rsync` | arcade | **Now in `interactive.slice`** — were `system.slice` until gen 31. |

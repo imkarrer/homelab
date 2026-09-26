@@ -174,7 +174,7 @@ Always restore to a scratch target and compare before putting anything back.
 | Tenant | Dir | Stopping it |
 |---|---|---|
 | `assetto` | `/var/lib/ac-host` | **Never outside a window.** `quiet.drainable = false`; `ac-host-static`'s `ExecStop` is `docker rm -f` on live race servers. Drain with `acctl.py` first. |
-| `assetto` | `/var/lib/docker/volumes/ac-host_ac-server/_data` | Same rules as the row above: **never outside a window**, drain first. The three lobby containers hold it open at `/opt/ac`, and `systemctl stop ac-host-static` (`acctl.py down-static`) removes them; the sidecars stay up. A Docker volume, so §4c's put-back differs in two steps. |
+| `assetto` | `/var/lib/docker/volumes/ac-host_ac-server/_data` | Same rules as the row above: **never outside a window**, drain first. The three lobby containers hold it open at `/opt/ac`, and `systemctl stop ac-host-static` (`acctl.py down-static`) removes them and stops the `details` sidecar with them (the others stay up). A Docker volume, so §4c's put-back differs in two steps. |
 | `arcade` | `/var/lib/arcade` | Freely (standing authority, 9 Sep 2026). An environment tenant once its stub is on (`homelab-158.5`): after the copy, §4d re-pulls `env/` rather than starting the units by hand. |
 | `agent-hub` | `/var/lib/agent-hub` | Freely. An environment tenant: after the copy, §4d re-clones `env/` rather than starting the unit by hand. |
 | `observability` | `/var/lib/grafana` | Freely — `systemctl stop grafana`. The dir is `0700 grafana:grafana` (uid 196); the staged copy carries that. |
@@ -206,7 +206,7 @@ For the `ac-server` volume the staged path is
 (mirror) or the same path under `--target` (restic). Check it the same way,
 and additionally that `_data/acServer` exists and is executable: that one
 file is the reason the volume is backed up. Expected, from
-`hosts/arcade-box/tenants.nix`: `1000:999 0755`, 189 files, ~31 MB. **Abort**
+`hosts/arcade-box/tenants.nix`: `1000:999 0755`, 189 files, ~31 MB (on 26 Sep 2026; a static tree). **Abort**
 if `acServer` is missing -- a volume without it is exactly the empty volume
 that crash-looped the lobbies.
 
@@ -220,7 +220,9 @@ ssh ac-box 'systemctl stop arcade-freeciv arcade-mindustry'
 ssh ac-box 'mv /var/lib/arcade /var/lib/arcade.broken-$(date +%F)'
 
 # 3. push the restored tree, preserving numeric ownership
-sudo rsync -a --numeric-ids /tmp/restore/home/nixos/backup/ac-box/var/lib/arcade \
+sudo rsync -a --numeric-ids \
+  -e "ssh -i /home/nixos/.ssh/id_ed25519_ac-host -o UserKnownHostsFile=/home/nixos/.ssh/known_hosts" \
+  /tmp/restore/home/nixos/backup/ac-box/var/lib/arcade \
   root@192.168.1.50:/var/lib/
 
 # 4. verify before starting anything
@@ -250,7 +252,7 @@ compose, so a plain `docker volume create` is the right shape -- the volumes
 on arcade-box carry no compose labels for that reason.
 
 ```bash
-# 1. stop the lobbies (down-static removes ac-static-*; the sidecars stay)
+# 1. stop the lobbies (down-static removes ac-static-* and stops the details sidecar)
 ssh arcade-box 'systemctl stop ac-host-static'
 
 # 2. make sure the volume exists -- idempotent, and on a fresh host this is
@@ -258,10 +260,13 @@ ssh arcade-box 'systemctl stop ac-host-static'
 ssh arcade-box 'docker volume create ac-host_ac-server'
 
 # 3. move the live contents aside -- never delete; it is the rollback
-ssh arcade-box 'cd /var/lib/docker/volumes/ac-host_ac-server && mv _data _data.broken-$(date +%F) && mkdir _data'
+ssh arcade-box 'cd /var/lib/docker/volumes/ac-host_ac-server && mv -T _data "_data.broken-$(date +%FT%H%M)" && mkdir _data'
 
-# 4. push the restored tree, preserving numeric ownership
+# 4. push the restored tree, preserving numeric ownership. sudo makes ssh run
+#    as root, which on this machine has no key and no config (hub-backup.sh
+#    passes the same -e for the same reason), so the identity is explicit.
 sudo rsync -a --numeric-ids \
+  -e "ssh -i /home/nixos/.ssh/id_ed25519_ac-host -o UserKnownHostsFile=/home/nixos/.ssh/known_hosts" \
   /tmp/restore/home/nixos/backup/arcade-box/var/lib/docker/volumes/ac-host_ac-server/_data/ \
   root@192.168.1.50:/var/lib/docker/volumes/ac-host_ac-server/_data/
 
@@ -273,11 +278,14 @@ ssh arcade-box 'systemctl start ac-host-static; sleep 30; docker ps --format "{{
 ```
 
 **Abort at step 5** unless `stat` prints `1000:999 755`, `acServer ok`
-appears, and the count is 189 (or whatever the moved-aside `_data.broken-*`
-holds, if it was not empty). If the top directory came back as root or the
-mode is wrong, `chown 1000:999` / `chmod 755` it and re-check before step 6
--- the lobby runs as uid 1000 and must be able to write `logs/` and
-`results/` under it. A crash-loop at step 6 with `No subscription` in
+appears, and the count equals what §4b counted in the staged tree (189 on 26
+Sep 2026; the volume is static, so the number moves only when the AC server
+itself is updated -- compare the two trees with each other, not with this
+page; a non-empty moved-aside `_data.broken-*` is a third witness). If the
+top directory came back as root or the mode is wrong, `chown 1000:999` /
+`chmod 755` it and re-check before step 6 -- the lobby runs as uid 1000 and
+owns the tree (results go to the `/results` bind mount, not into the volume,
+so ownership is about reading it as its owner). A crash-loop at step 6 with `No subscription` in
 `docker logs ac-static-blackhawk` means the volume is empty again: go back
 to step 3. `ac-host_steam` needs nothing: `docker run` creates it empty and
 that is its correct state.
