@@ -516,6 +516,30 @@ in
                   tree's origin HEAD against the staged record's `rev`.
                 '';
               };
+
+              # homelab-ygc.14 (26 Sep 2026), an amendment to ADR 0010. The
+              # deploy edge's staging half runs on the CI agent and writes
+              # on the host the agent runs on; since the cutover the only
+              # agent is arcade-box's, so a tenant on a host without one
+              # (agent-hub on the Z840) never sees its green sha staged.
+              # This flag gives that host the staging half itself:
+              # modules/tenant/environment-poll.nix's timer asks GitHub for
+              # the tree's main HEAD and that commit's combined status,
+              # and stages a green sha exactly as queue-environment would.
+              # Only for source.kind = tree (a FloxHub generation is not a
+              # fact GitHub holds); environment-poll.nix asserts it, this
+              # file being vocabulary only.
+              poll = mkOption {
+                type = types.bool;
+                default = false;
+                description = ''
+                  This host has no CI agent to stage this tenant, so it
+                  asks GitHub itself: the tree's main HEAD and that
+                  commit's combined status; a green sha is staged exactly
+                  as queue-environment would stage it, and the pull unit
+                  applies it. Tree-kind sources only.
+                '';
+              };
             };
           };
           default = { };

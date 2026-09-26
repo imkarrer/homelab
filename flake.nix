@@ -176,6 +176,15 @@
         # pull units and /etc/homelab/environments.json and touches no
         # other unit (homelab-158.3's drvPath proof).
         ./modules/tenant/environment-pull.nix
+        # homelab-ygc.14, an amendment to ADR 0010: the STAGING half of that
+        # edge for a host with no CI agent. For a tenant with
+        # environment.poll = true (the Z840's agent-hub, since the cutover
+        # left it without an agent), a timer asks GitHub for the tree's
+        # green main sha and stages it in the record the pull unit expects;
+        # the pull unit is untouched. Emits nothing for a host with no
+        # tenant polling (arcade-box's stamp-stripped drvPath unchanged,
+        # that bead's proof).
+        ./modules/tenant/environment-poll.nix
 
         # L0: the platform. Reproduces what ac-box already runs, deliberately
         # without improving it.

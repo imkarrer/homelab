@@ -20,6 +20,14 @@
 # the script at evaluation time, so the script text is read the way
 # modules/deploy/tests/eval.nix reads homelab-deploy's.
 #
+# The poll unit (modules/tenant/environment-poll.nix, homelab-ygc.14 -- the
+# ADR 0010 amendment) is the staging half for a host with no CI agent. Its
+# contract: environment.poll = false (the default) emits NOTHING; true on a
+# tree-kind tenant with a stub emits a oneshot in the tenant's slice and a
+# 10-minute timer, and the script carries the pull's own registry remote
+# as the record's `tree`; true on a floxhub tenant, or with no stub, is
+# refused. Read the same way, off homelab.environments.poll.
+#
 # Usage:
 #   nix --extra-experimental-features "nix-command flakes" eval \
 #     -f modules/tenant/tests/eval-environment.nix enabled.summary --json
@@ -45,6 +53,7 @@ let
   resources = ../resources.nix;
   environment = ../environment.nix;
   environmentPull = ../environment-pull.nix;
+  environmentPoll = ../environment-poll.nix;
   stubSystemd = ./stub-systemd.nix;
   stubNix = ./stub-nix.nix;
   stubEtc = ./stub-etc.nix;
@@ -75,6 +84,23 @@ let
   pullScript = cfg: name: (cfg.homelab.environments.pull.${name} or null);
   pullText = cfg: name: (pullScript cfg name).text or "";
   pullHas = cfg: name: needle: lib.hasInfix needle (pullText cfg name);
+
+  # The poll script's text, through its module's own readOnly `poll` map
+  # (environment-poll.nix), the way `pull` is read above.
+  pollScript = cfg: name: (cfg.homelab.environments.poll.${name} or null);
+  pollText = cfg: name: (pollScript cfg name).text or "";
+  # The value after `key=` on the script line that starts with it.
+  bakedLine = key: text: lib.removePrefix key (lib.findFirst (lib.hasPrefix key) key (lib.splitString "\n" text));
+  # What poll = false must mean for a tenant: nothing.
+  noPoll = cfg: name: [
+    {
+      assertion =
+        !(cfg.systemd.services ? "${name}-environment-poll")
+        && !(cfg.systemd.timers ? "${name}-environment-poll")
+        && !(cfg.homelab.environments.poll ? ${name});
+      message = "environment.poll = false (the default): no ${name}-environment-poll service, timer or script may exist";
+    }
+  ];
 
   sevenVars = [
     "AGENT_HUB_MODELS"
@@ -107,6 +133,7 @@ let
           resources
           environment
           environmentPull
+          environmentPoll
           { homelab.environments.registry = registry; }
           tenants
           # Slices on, so `Slice` is a real answer and not an absent key.
@@ -141,6 +168,11 @@ let
           restartIfChanged = if pull == null then null else pull.restartIfChanged;
           pathConfig = (cfg.systemd.paths.agent-hub-environment-pull or { }).pathConfig or null;
           timerConfig = (cfg.systemd.timers.agent-hub-environment-pull or { }).timerConfig or null;
+          poll = {
+            exists = cfg.systemd.services ? agent-hub-environment-poll;
+            timerConfig = (cfg.systemd.timers.agent-hub-environment-poll or { }).timerConfig or null;
+            treeLine = bakedLine "tree=" (pollText cfg "agent-hub");
+          };
           restartUnitsLine = lib.findFirst (lib.hasPrefix "restartUnits=") "<none>" (lib.splitString "\n" (pullText cfg "agent-hub"));
           remoteLine = lib.findFirst (lib.hasPrefix "remote=") "<none>" (lib.splitString "\n" (pullText cfg "agent-hub"));
           environmentsJson =
@@ -798,6 +830,168 @@ in
     ];
   };
 
+  # ---------------------------------------------------------------------
+  # environment.poll (homelab-ygc.14, the ADR 0010 amendment): a host with
+  # no CI agent stages its own green sha from GitHub. The default is off,
+  # and off means NOTHING -- no service, no timer, no script -- which is
+  # the inert-by-default rule every module here keeps: the host that HAS
+  # the agent (arcade-box) must not grow a second staging edge by having
+  # the module imported. On, the timer and the oneshot exist beside the
+  # pull unit, in its slice, and the record the script writes carries the
+  # pull's own registry remote, so the pull accepts what the poll stages.
+  # ---------------------------------------------------------------------
+  # The default, for both kinds, with the stubs on (the box's state): no
+  # poll unit anywhere, and the pull units exactly as before.
+  pollOff = mkCase {
+    extraModules = arcadeOn [ { homelab.tenants.agent-hub.environment.enable = true; } ];
+    checks =
+      cfg:
+      noPoll cfg "agent-hub"
+      ++ noPoll cfg "arcade"
+      ++ pullShape cfg [ "agent-hub-llm.service" ]
+      ++ floxhubPullShape cfg [
+        "arcade-freeciv.service"
+        "arcade-mindustry.service"
+      ];
+  };
+
+  # poll = true on the tree kind (ac-box's agent-hub since the cutover):
+  # the oneshot and the timer, placed where the pull is, and a script that
+  # asks api.github.com for imkarrer/agent-hub, writes queue-environment's
+  # record with the pull's registry remote as `tree`, and does nothing
+  # else. The pull unit is unchanged by it.
+  pollOn = mkCase {
+    extraModules = on [ { homelab.tenants.agent-hub.environment.poll = true; } ];
+    checks =
+      cfg:
+      let
+        poll = cfg.systemd.services.agent-hub-environment-poll or null;
+        pull = cfg.systemd.services.agent-hub-environment-pull;
+        timer = cfg.systemd.timers.agent-hub-environment-poll or null;
+        text = pollText cfg "agent-hub";
+        pullT = pullText cfg "agent-hub";
+      in
+      pullShape cfg [ "agent-hub-llm.service" ]
+      ++ [
+        {
+          assertion = poll != null && (poll.serviceConfig.Type or null) == "oneshot";
+          message = "environment.poll = true must emit agent-hub-environment-poll.service, a oneshot";
+        }
+        {
+          assertion = (poll.serviceConfig.ExecStart or null) == lib.getExe (pollScript cfg "agent-hub");
+          message = "the poll unit must run homelab.environments.poll.agent-hub, the script the harness reads";
+        }
+        {
+          assertion =
+            (poll.serviceConfig.Slice or null) == (pull.serviceConfig.Slice or null)
+            && (poll.serviceConfig.Slice or null) == "background.slice"
+            && (poll.serviceConfig.Nice or null) == (pull.serviceConfig.Nice or null);
+          message = "the poll runs where the pull runs: the tenant's slice at the tier's nice, got ${toString (poll.serviceConfig.Slice or null)}";
+        }
+        {
+          assertion = !(poll.serviceConfig ? User) && !(pull.serviceConfig ? User);
+          message = "the poll runs as root, as the pull's staging side does: the state directory is root's";
+        }
+        {
+          assertion = (poll.restartIfChanged or null) == false;
+          message = "the poll unit must be restartIfChanged = false, as the pull is";
+        }
+        {
+          assertion =
+            timer != null
+            && (timer.timerConfig.OnUnitActiveSec or null) == "10min"
+            && (timer.timerConfig.OnBootSec or null) == "5min"
+            && (timer.timerConfig.Persistent or null) == false
+            && timer.wantedBy == [ "timers.target" ];
+          message = "the poll timer must fire 5min after boot and every 10min (Persistent = false), wanted by timers.target; got ${builtins.toJSON (if timer == null then null else timer.timerConfig)}";
+        }
+        {
+          # The load-bearing equality: the pull refuses a record whose
+          # `tree` is not its registryRemote, and the poll writes `tree`
+          # from this line.
+          assertion = bakedLine "tree=" text == bakedLine "registryRemote=" pullT && bakedLine "tree=" text == "git@github.com:imkarrer/agent-hub";
+          message = "the poll's `tree` must be the pull's registryRemote verbatim, got poll '${bakedLine "tree=" text}' vs pull '${bakedLine "registryRemote=" pullT}'";
+        }
+        {
+          assertion = lib.hasInfix "\nownerRepo=imkarrer/agent-hub\n" text && lib.hasInfix "\nbranch=main\n" text;
+          message = "the poll must ask for imkarrer/agent-hub's main, derived from the registry remote";
+        }
+        {
+          assertion =
+            lib.hasInfix "\ndefaultStateDir=/var/lib/homelab\n" text
+            && lib.hasInfix "\npendingName=\"pending-environment-agent-hub.json\"\n" text
+            && lib.hasInfix "\nappliedName=\"last-applied-environment-agent-hub.json\"\n" text
+            && cfg.systemd.paths.agent-hub-environment-pull.pathConfig.PathChanged == "/var/lib/homelab/pending-environment-agent-hub.json";
+          message = "the poll must write the file the pull's path unit watches, and read the applied record the pull writes";
+        }
+        {
+          assertion = lib.hasInfix "{tenant: $tenant, sha: $sha, tree: $tree, queued_at: $at, build: $build, branch: $branch, source: \"github-poll\"}" text;
+          message = "the record must be hub-queue-environment.sh's tree-kind shape, key for key and in order, with source = github-poll";
+        }
+        {
+          assertion =
+            lib.hasInfix "https://api.github.com" text
+            && lib.hasInfix "commits/$sha/status" text
+            && lib.hasInfix "[ \"$state\" != success ]" text
+            && lib.hasInfix "[ \"$sha\" = \"$staged\" ] || [ \"$sha\" = \"$appliedSha\" ]" text;
+          message = "the poll must ask the combined status, stage only on success, and skip a sha already staged or applied";
+        }
+        {
+          assertion = lib.hasInfix "mv -f \"$tmp\" \"$pending\"" text && lib.hasInfix "\"$pending.tmp.$$\"" text;
+          message = "the record must be written beside and renamed into place, so the path unit fires once";
+        }
+        {
+          # `> "$applied` would be a redirect into the applied record and
+          # `"$applied"\n` a mv/cp target at the end of a line; the script
+          # reads that file (`-e "$applied" ]`, `jq ... "$applied" 2>`) and
+          # never ends a line with it.
+          assertion =
+            !(lib.hasInfix "> \"$applied" text)
+            && !(lib.hasInfix "\"$applied\"\n" text)
+            && !(lib.hasInfix "flox" text)
+            && !(lib.hasInfix "git clone" text)
+            && !(lib.hasInfix "git fetch" text)
+            && !(lib.hasInfix "git -C" text)
+            && !(lib.hasInfix "systemctl" text);
+          message = "the poll is the staging half only: no flox, no git, no restart, and it never writes last-applied-environment-agent-hub.json (the pull's record)";
+        }
+        {
+          # The floxhub tenant is not in this case, and the tree-kind arcade
+          # of dirDerivedFromHostPaths is not either: one tenant polls,
+          # exactly one unit pair appears.
+          assertion = builtins.attrNames cfg.homelab.environments.poll == [ "agent-hub" ];
+          message = "exactly the polling tenant gets a script, got ${builtins.toJSON (builtins.attrNames cfg.homelab.environments.poll)}";
+        }
+      ];
+  };
+
+  # MUST THROW: poll on a floxhub tenant. A generation is not a fact
+  # GitHub's commit status holds; the module refuses rather than staging a
+  # tree-kind record the pull would refuse in turn.
+  pollOnFloxhub = mkCase {
+    extraModules = [
+      floxhubFixture
+      { homelab.tenants.arcade.environment.poll = true; }
+    ];
+  };
+
+  # MUST THROW: poll with no stub declared. There is no pull unit on this
+  # host to apply what would be staged, so the poll would write a file
+  # nothing reads.
+  pollWithoutStub = mkCase {
+    extraModules = [
+      {
+        homelab.tenants.arcade = {
+          description = "Kid arcade hub";
+          tier = "interactive";
+          units = [ "arcade-freeciv.service" ];
+          environment.poll = true;
+        };
+      }
+    ];
+  };
+
+
   expected = {
     disabled = true;
     enabled = true;
@@ -816,5 +1010,9 @@ in
     floxhubWithoutEnv = false;
     treeWithEnv = false;
     floxhubBadEnv = false;
+    pollOff = true;
+    pollOn = true;
+    pollOnFloxhub = false;
+    pollWithoutStub = false;
   };
 }
