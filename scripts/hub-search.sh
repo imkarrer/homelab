@@ -15,8 +15,8 @@
 # right file and below ~0.35 is usually noise, but read the snippet.
 set -euo pipefail
 
-LLM="${LLM:-192.168.1.50:8100}"
-QDRANT="${QDRANT:-192.168.1.50:6333}"
+LLM="${LLM:-192.168.1.51:8100}"
+QDRANT="${QDRANT:-192.168.1.51:6333}"
 MODEL="${MODEL:-embed}"
 COLLECTION="${COLLECTION:-hub}"
 K=6; TREE=""; JSON=0; LINES=4
