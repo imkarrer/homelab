@@ -169,8 +169,55 @@
       # Preserved, not derived: /var/lib/ac-host predates this repo and holds
       # the whitelist, race/series history and generated content. Renaming it
       # is a data migration, not a config change (README, "State paths").
+      #
+      # The second entry is a Docker named volume -- /var/lib/docker/volumes/
+      # <name>/_data is where the local driver keeps one. `ac-host_ac-server`
+      # is the racing compose project's `ac-server` volume (ac-host
+      # compose/docker-compose.yml), mounted at /opt/ac in every lobby
+      # container, static and race alike. It holds the Assetto Corsa
+      # dedicated server itself: Steam app 302550, installed once by steamcmd
+      # from a Steam login that owns the game (ac-host
+      # scripts/steamcmd_login.sh). That makes it STATE, not a rebuildable
+      # artefact. image/entrypoint.sh skips steamcmd whenever acServer is
+      # already there, and with STEAMCMD_LOGIN=anonymous (the compose
+      # default) the install fails with "No subscription", so a fresh host
+      # crash-loops its lobbies (exit 8) until the volume is put back. Found
+      # at the cutover, 26 Sep 2026 15:57 CDT, when the three lobbies did
+      # exactly that on this box; fixed by copying the volume off the Z840's
+      # disk (docs/runbook-arcade-box-cutover.md, "As it ran"). Neither git
+      # nor any image can regenerate it; only a Steam login can
+      # (homelab-ygc.12).
+      #
+      # Weight, measured here 26 Sep 2026: 31 M, 189 files, 1000:999 0755.
+      # uid 1000 is the image's `ac` user (image/Dockerfile: `useradd
+      # --system --uid 1000 ac`); the gid happens to print as `nscd` on this
+      # host, which is why the backup carries numeric ids and never names
+      # (scripts/hub-backup.sh, --numeric-ids).
+      #
+      # `ac-host_steam` (the project's `steam` volume, /home/ac/Steam) is
+      # deliberately NOT listed: it is steamcmd's own client data, empty on
+      # this box (0 files, root:root 0755) because the entrypoint never runs
+      # steamcmd while acServer is present, and regrown by steamcmd if a
+      # re-install is ever done. A backup of it would be an empty directory
+      # and one more line in the restore runbook.
+      #
+      # What reads this list, checked 26 Sep 2026 against every module under
+      # modules/tenant: scripts/hub-backup.sh's nix eval (the `dir` lines
+      # `--list` prints) and modules/tenant/environment.nix, which derives
+      # environment.dir from the FIRST entry -- so the volume goes after
+      # /var/lib/ac-host, the derived path stays /var/lib/ac-host/env, and
+      # assetto declares no stub for it to matter to anyway. Not the
+      # inventory: quiet.nix's /etc/homelab/tenants.json carries units,
+      # tier, quiet and ports, no state. No tmpfiles rule, chown, mount or
+      # ReadWritePaths is derived from it (observability's note below says
+      # the same), which is what makes naming a directory Docker owns safe
+      # here -- and why this entry changes nothing in the closure: the
+      # stamp-stripped toplevel drvPath is the same with and without it.
       state = {
-        dirs = [ "/var/lib/ac-host" ];
+        dirs = [
+          "/var/lib/ac-host"
+          "/var/lib/docker/volumes/ac-host_ac-server/_data"
+        ];
         backup = true;
       };
 
