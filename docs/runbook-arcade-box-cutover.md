@@ -49,6 +49,7 @@ And the side of ac-box that matters here, read the same day:
 | `/srv/arcade`, `/var/lib/arcade` | 460 M, 21 M |
 | `/var/lib/prometheus2`, `/var/lib/grafana` | 107 M, 91 M |
 | CI volumes | `ac-host-ci_minio-data` 3.7 G (the flox binary cache -- keep), `ac-host-ci_buildkite-nix` 27 G (the agent's store -- re-warms, do not copy), `ac-host-ci_buildkite-builds` 1.7 G (checkouts -- skip) |
+| Racing project volumes (**missed until the cutover**) | `ac-host_ac-server` 30 MB -- the Assetto Corsa dedicated server itself, installed once by steamcmd into the volume and **not installable anonymously**; `ac-host_steam` (steamcmd's client data, empty). Copy both, or the lobbies crash-loop on a fresh host |
 | Images built on the box, not pulled | `ac-host-env:latest` 4.24 G, `ac-host-server:latest` 187 M, `ac-host-buildkite-agent:flox` 6.39 G |
 | `UNIFI_*` keys in `/var/lib/ac-host/.env` | none: `unifi_pf.py` is off, so the nine `ac-prod-s{0,1,2}-{game,http,details}` forwards on the Dream Router are hand-set and point at `.50` by number |
 
@@ -544,6 +545,25 @@ MinIO on the copied cache).
 - After arcade-box is live: the Z840's copy freezes at 4.4. Rolling back
   after a race has been run on arcade-box loses that race; from the first
   lap, fix forward.
+
+### As it ran, 26 Sep 2026 (15:20-16:01 CDT, lobbies empty throughout)
+
+| When | What happened |
+| --- | --- |
+| 15:20 | 4.1, half: the operator moved the Z840's reservation to `.51`. The UI refused `.50` for the Lenovo while the Z840's lease still held it, so the Lenovo's edit waited for 4.3 |
+| 15:27 | 4.2: PR #11 (`aa48765`) merged; CI build 152 green in a minute; `homelab-deploy` on ac-box found 0 drivers and switched at 15:28. It exited **status 4**: nginx and qdrant bind `.51`, which the box did not have yet. Everything else stopped as designed (lobbies, bot, agent, arcade, observability, docker). The unit's 10-minute retry after the reboot re-ran the switch clean and wrote `applied = aa48765` |
+| 15:33 | 4.4 before 4.3, while ac-box still answered on `.50`: delta rsync (ac-host 7 files, grafana 81 MB, prometheus2 8 MB, minio-data 22 files) with arcade-box's grafana, prometheus and minio stopped; then the hand-started ci stack **down** (no `-v`) so the unit could take the project over |
+| 15:33-15:37 | 4.3: `reboot`; back on `.51` in 3.5 min, booted == current, nginx/qdrant/agent-hub up, landing page 200. Operator's `~/.ssh/config`: `ac-box` -> `.51`; `known_hosts` for `.51` added, the Z840's old `.50` entry removed |
+| 15:43 | 4.1, second half: the operator set the Lenovo's reservation to `.50` |
+| 15:44-15:48 | 4.5, renew: the first `systemd-run` of `nmcli connection down/up` **did nothing** -- a transient unit's PATH has neither `nmcli` nor `sleep` (the 5.4 trap again; pass `--setenv=PATH=/run/current-system/sw/bin:/run/wrappers/bin`). The second landed `.50` in 30 s |
+| 15:51-15:57 | 4.5, switch: `nixos-rebuild switch` to `aa48765` as a transient unit, 5 min 48 s, exit 0, no failed unit. (A watcher that compared `ssh-keyscan`'s output to the expected key never matched: this `ssh-keyscan` prints its banner line on stdout; filter `^#`) |
+| 15:57-16:00 | **The lobbies crash-looped, exit 8.** `ac-host-server`'s entrypoint installs the Assetto Corsa dedicated server with steamcmd into the named volume `ac-host_ac-server` on first start, and anonymous Steam cannot install app 302550. Phase 3 had copied the CI volume and every state directory but not the racing project's two compose volumes, `ac-host_ac-server` (30 MB) and `ac-host_steam`. Copied from the Z840's disk with `ac-host-static` stopped (its `down-static` removes the three containers, the sidecars stay); started again at 15:59:12; all three lobbies up with 9600-9602 tcp+udp, 8081-8083 and 8181-8183 by 16:00:30, details endpoints answering, 0 drivers |
+| 16:00 | Agent `arcade-box` connected on `queue=self`; homelab build 153 (PR #12) running on it; ac-host build 53 started by hand for the local steps |
+
+Lobbies down from 15:28 to 16:00. Two things to carry into the state
+inventory for any future host: the racing project's named volumes, and the
+fact that a fresh `ac-host_ac-server` cannot be rebuilt without a Steam
+login that owns the game (`homelab-ygc.12`).
 
 ---
 
