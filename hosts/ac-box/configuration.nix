@@ -407,6 +407,15 @@ in
     in
     {
       enable = true;
+      # homelab-ygc.14, the ADR 0010 amendment: this host has had no CI
+      # agent since the cutover, so the edge that stages a green agent-hub
+      # sha (queue-environment, run by the agent) writes on arcade-box,
+      # where no stub exists, and the pull unit here idles. With poll on,
+      # agent-hub-environment-poll asks GitHub for main's HEAD and its
+      # commit status every ten minutes and stages a green one here, in
+      # the record queue-environment writes; the pull unit is unchanged
+      # (modules/tenant/environment-poll.nix).
+      poll = true;
       # dir: left null, i.e. derived by modules/tenant/environment.nix to
       # <state dir>/env = /var/lib/agent-hub/env, which is right; `env.dir`
       # above reads the resolved value, so the -config path and the
