@@ -173,15 +173,18 @@ in
       threads = lib.mkOption {
         type = lib.types.int;
         # A conservative placeholder, never llama.cpp's own auto-detect
-        # (which on this box is all 56 threads, starving the race servers).
-        # configuration.nix sets it to the physical cores background.slice's
-        # fence actually grants -- never the host's total thread count.
+        # (which on this box is all 56 threads: the SMT siblings, which cost
+        # a memory-bandwidth-bound workload ~20 %). configuration.nix sets
+        # it to one per PHYSICAL core -- the cores the unit's cpuset grants
+        # (all 28 since homelab-ygc.13; the 23 inside background.slice's
+        # fence before that) -- never the host's total thread count.
         default = 4;
         description = ''
           CPU threads for inference, passed by the stub as
           AGENT_HUB_THREADS (llama-swap.yaml's `threads` macro, every
-          backend). Must match the CPU allowance the tenant's tier grants
-          this unit (resources.nix's AllowedCPUs fence), not a guess.
+          backend). One per physical core the unit may run on
+          (capacity.cpuThreads / threadsPerCore, or the unit's own
+          AllowedCPUs when narrower), never the thread count: not a guess.
         '';
       };
 

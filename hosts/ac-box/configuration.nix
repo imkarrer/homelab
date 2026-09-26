@@ -92,16 +92,32 @@ in
     # job orphans every dashboard built on it.
     scrape = lib.mkDefault true;
 
-    # Phase 6. The only flag with real service churn, deliberately taken in its
-    # own switch rather than riding along with the three quiet ones.
+    # OFF since the cutover (ADR 0010: llm-box has "no tiers, no fence";
+    # homelab-ygc.13, the operator's ask the evening of 26 Sep 2026). It was
+    # phase 6's flag, on from generation 31 to the cutover, and it did real
+    # work while five tenants shared this machine: background.slice fenced the
+    # model server to cores 3-25 under a 0.81 memory ceiling, batch fenced CI
+    # to 26-27. With agent-hub alone here there is nothing to fence anything
+    # from: no slices, no MemoryMax, no fence -- agent-hub-llm runs in
+    # system.slice on all 28 physical cores (its own cpuset below, a placement
+    # fact rather than a fence) and all 251 GiB, which is what lets llama-swap
+    # keep a second 80B resident. resources.nix's budget assertion still
+    # evaluates (the defaults sum to 0.9); nothing is emitted.
     #
-    # Safe now because resources.nix assigns Slice= only where tier != critical
-    # AND quiet.drainable. Slice= applies at unit start, so assigning it bounces
-    # the unit -- and bouncing ac-host-static means `docker rm -f` on three live
-    # race servers. assetto is therefore never sliced, which costs nothing: the
-    # guarantee comes from AllowedCPUs fencing background and batch away from
-    # the cores races use, not from confining races.
-    slices = lib.mkDefault true;
+    # THE SWITCH THAT CARRIES THIS RESTARTS THE MODEL SERVER, once. Live,
+    # background.slice is an active unit with agent-hub-llm, nginx and qdrant
+    # as members, and each carries Requires=background.slice. The new
+    # generation has no slice files, so switch-to-configuration stops the
+    # slice before activating (an active unit whose file is gone is stopped;
+    # a .slice is exempt from restart, not from stop), Requires= takes the
+    # three services down with it, and the target start brings them back
+    # under the new files: no slice, no cpuset but the one below, 28 threads.
+    # restartIfChanged = false governs a unit's OWN file comparison and does
+    # not reach this; it protects every later switch, once no slice exists to
+    # remove. So: dry-activate first and expect "would stop background.slice",
+    # switch with the model server idle, and skip the hand restart -- the
+    # switch is the restart (review of homelab-ygc.13, 26 Sep 2026).
+    slices = false;
   };
 
   # ---------------------------------------------------------------------------
@@ -199,8 +215,8 @@ in
   # agent-hub tree, read from the checkout at <environment.dir>. This block
   # used to set those as options the module rendered into the table; the
   # module stopped reading them on 18 Sep 2026 (.12) and they are gone with
-  # it. What stays is what the HOST decides: the threads and context the
-  # tier's fence affords, the port, the landing page, which models exist by
+  # it. What stays is what the HOST decides: the threads and context this
+  # host affords, the port, the landing page, which models exist by
   # name and kind (the landing page lists them), and the vector store.
   services.agent-hub = {
     enable = true;
@@ -253,19 +269,18 @@ in
         # reviewer (homelab-e00) and a utility model (homelab-8r5).
       };
 
-      # PHYSICAL cores inside background.slice's fence, not logical threads
-      # and not the host's 56. The fence (resources.nix) gives background
-      # cores 3-25 plus their SMT siblings; llama.cpp's generation threads
-      # want one per physical core -- oversubscribing to the siblings makes
-      # a memory-bandwidth-bound workload slower, not faster.
-      #
-      # This is the option's own documented contract: "must match the CPU
-      # allowance the platform's tenant tier actually grants this
-      # service". If the tier shares below move, this moves with them.
-      threads = 23;
+      # One per PHYSICAL core, all 28 of them, since the fence came down
+      # (homelab-ygc.13; it was 23, the cores background.slice's fence
+      # granted). Not the host's 56: llama.cpp's generation threads want one
+      # per physical core, and oversubscribing onto the SMT siblings makes a
+      # memory-bandwidth-bound workload ~20 % slower, not faster (agent-hub
+      # docs/prefill-tuning.md). Whether one instance should span both
+      # sockets or one 80B be pinned per NUMA node is a llama-swap.yaml
+      # decision for tuning time (ADR 0010), not a host fact.
+      threads = 28;
 
       # Not larger, even though the model natively supports 262144 and
-      # background.slice's ceiling would hold the KV cache for it. The binding
+      # the machine would hold the KV cache for it. The binding
       # constraint on CPU is PREFILL, not RAM: prompt processing is
       # compute-bound, this is Broadwell (no AVX-512), and ingesting a
       # six-figure-token prompt would take longer than the answer is worth.
@@ -282,7 +297,7 @@ in
       # playground tab, and the first person to try it picked the (then)
       # image model on the Chat tab. llama-swap itself moves to
       # 127.0.0.1:8100; nginx.service joins this tenant's units in
-      # tenants.nix so it lives in the same slice.
+      # tenants.nix as the contract's list of what this tenant owns (no slice is derived from it on this host since homelab-ygc.13).
       landingPage = true;
     };
 
@@ -313,19 +328,22 @@ in
 
   # Where the model server's threads and memory go. Set directly on the
   # unit rather than as a stub field because every value is a fact about
-  # THIS host's sockets and fence, not part of the unit's skeleton
-  # (schema.nix says which keys are). Merges with what
-  # modules/tenant/environment.nix emits -- different keys, no conflict.
+  # THIS host's sockets, not part of the unit's skeleton (schema.nix says
+  # which keys are). Merges with what modules/tenant/environment.nix emits
+  # -- different keys, no conflict.
   systemd.services.agent-hub-llm.serviceConfig = {
-    # Physical cores only: the fence background.slice gets from resources.nix
-    # is 3-25 plus SMT siblings 31-53, and a child cgroup's cpuset must be a
-    # subset of its parent's -- this is that subset. With the siblings
-    # available the scheduler lands some of the 23 compute threads on them
-    # and prefill drops ~20 % (99 -> 122 tok/s with this line, batch 2 in
-    # agent-hub docs/prefill-tuning.md). Coupled to `threads = 23` above and
-    # to the tier shares below exactly as that option's comment says: if the
-    # fence moves, this moves with it.
-    AllowedCPUs = "3-25";
+    # Every physical core and none of the SMT siblings. Not a fence -- there
+    # is no other tenant on this host to keep away from (homelab-ygc.13
+    # took the fence down with the slices) -- but a placement fact of the
+    # same class as the NUMA policy below: agent-hub's docs/prefill-tuning.md
+    # measured the same engine and thread count at 99 tok/s prefill on a
+    # cpuset that included the siblings and 122 on physical cores only, and
+    # attributes the gain to the cpuset, not the count. This was "3-25" while
+    # background.slice fenced the unit; now it is the whole machine's cores.
+    # Deleting this line hands the unit all 56 CPUs; `scripts/bench/bench.sh`
+    # in the agent-hub tree is how to decide that, not a guess.
+    AllowedCPUs = "0-27";
+
 
     # Spread the model over both sockets' memory controllers. Without a
     # policy the 85 GB landed wherever the loading thread ran -- 100 % on
@@ -370,8 +388,8 @@ in
   # network-online.target and WantedBy=multi-user.target (defaults), and
   # TimeoutStopSec=90 -- llama-swap stops its backends itself on SIGTERM,
   # and a model mid-load needs time to die cleanly before systemd
-  # escalates. background.slice is tenants.nix's via resources.nix; the
-  # cpuset and NUMA policy are the host's, just above. Every value below
+  # escalates. No slice on this host since homelab-ygc.13 (enforce.slices
+  # is off); the cpuset and NUMA policy are the host's, just above. Every value below
   # is read from the same option a second reader has (services.agent-hub,
   # hosts/ac-box/tenants/agent-hub.nix) so the two cannot drift.
   homelab.tenants.agent-hub.environment =
@@ -414,111 +432,14 @@ in
     };
 
   # ---------------------------------------------------------------------------
-  # Tier shares, rebalanced to point this machine at the model server.
-  #
-  # The defaults in modules/tenant/resources.nix (critical 0.35/0.50,
-  # interactive 0.15/0.20, background 0.30/0.25, batch 0.10/0.05) were written
-  # before ac-box had an LLM tenant, and they cap agent-hub at 75 GiB of a
-  # 251 GiB machine. Measured on the box 8 Sep 2026 before changing anything:
-  # 4 GiB of 251 in use, load average 0.00, and all thirteen containers
-  # together at 275 MiB. There is nothing to reclaim from the other tenants --
-  # the tier table was the only thing standing between the LLM and the box.
-  #
-  # Every value here is an override of a mkDefault in resources.nix, so no
-  # mkForce is needed and the defaults stay intact for any other host.
-  #
-  # memoryShare must sum to <= 0.9 (resources.nix's budget assertion, which
-  # runs whether or not enforce.slices is on). These sum to exactly 0.90.
-  #
-  # Two consequences worth stating out loud rather than discovering later:
-  #
-  #   1. assetto is never assigned a slice at all (tier = critical AND
-  #      quiet.drainable = false), so its processes and containers run in
-  #      system.slice, whose CPUWeight is unset -- i.e. 100. Giving background
-  #      a CPUWeight of 700 therefore ranks the model server ABOVE the race
-  #      servers under contention, not merely above the other tiers. That is
-  #      the deliberate choice being made here. What protects racing is the
-  #      fence, not the weight: cores 0-2 (plus siblings 28-30) are outside
-  #      background's and batch's AllowedCPUs entirely, so system.slice has
-  #      exclusive use of them no matter what the LLM is doing.
-  #
-  #   2. critical.cpuShare is not about how much CPU assetto gets -- its slice
-  #      is empty. It is the input to reservedForCritical, i.e. how many
-  #      physical cores the fence keeps for everything unsliced. Lowering it
-  #      to 0.10 is what hands the model server the other 23 cores.
-  homelab.tiers = {
-    critical = {
-      # 12.5 GiB. Measured usage of the whole racing stack: well under 1 GiB
-      # (0.1 GiB current, 2.5 GiB peak since boot per memory.peak, 14 Sep
-      # 2026). Was 0.10, then 0.05; each cut went to background so another
-      # model could be resident. 5 GiB now.
-      memoryShare = 0.02;
-      cpuShare = 0.10; # -> 3 physical cores (0-2) reserved outside the fence.
-    };
-    interactive = {
-      # 5 GiB for arcade + observability; 1.0 GiB current, 1.3 GiB peak
-      # since boot. Was 0.05; the 0.03 went to background with the embedding
-      # model (and klein 9B, resident until 20 Sep 2026).
-      memoryShare = 0.02;
-      cpuShare = 0.05;
-    };
-    background = {
-      # ~203 GiB, sized to hold everything llama-swap.yaml's `matrix` (agent-hub;
-      # the resident set: coder, reviewer, embed, utility) keeps loaded at once, worst case:
-      #     coder     80.5 GiB   measured, anonymous under -rtr, with KV
-      #     reviewer  ~62 GiB    59 GiB of MXFP4 weights, mmap'd (no -rtr:
-      #                          it is fatal for MXFP4 on ik, see the table),
-      #                          so PAGE CACHE, reclaimable; + KV for 32k
-      #     embed     ~2 GiB     0.6 GB of weights + KV for 8k, estimated
-      #     utility   ~6 GiB     4.3 GB of weights + KV for 16k, estimated
-      #     caches    21 GiB     --cache-ram 12288 + 8192 + 1024, all ceilings
-      #     qdrant    ~0 GiB     an empty store; grows with the HNSW index
-      #               ~172 GiB
-      # Measured 20 Sep 2026 with both Qwens warm, before the swap: AnonPages
-      # 161.9 GiB, MemAvailable 83.8 of 251.8 GiB -- which is why gpt-oss-120b
-      # REPLACED instruct (homelab-e00) rather than joining it: three
-      # 80-GiB-class models do not fit under this ceiling, two do with
-      # ~30 GiB over. The reviewer's weights being page cache is the thing to
-      # watch: at the ceiling they are reclaimed first and re-read from NVMe.
-      # Was 0.70 (~176 GiB) for the two Qwens alone. memoryShare is a
-      # CEILING, not a reservation, so the unused part costs nothing at
-      # runtime -- but it does consume the 0.9 budget, and the extra 0.11 is
-      # the other three tiers' slack: 0.03 from critical, 0.03 from
-      # interactive, 0.05 from batch. On batch: the earlier note here refused
-      # to cut it while background's ceiling was partly unusable; now every
-      # GiB of it is spoken for. batch's 25 GiB peak since boot equals its
-      # ceiling -- page cache filling up to the limit, not evidence of
-      # anonymous need; the agent's builds run make -j2 on two cores.
-      #
-      # Page cache counts against this ceiling too and is what gets reclaimed
-      # first, so the cached copies of the resident GGUFs go -- the cost is
-      # that a reload after an eviction (none in the table today: all three
-      # are one set) reads from NVMe (~30 s) instead of from cache (~20 s).
-      # Past reclaim there is no swap: the ceiling is enforced by an OOM
-      # kill inside the slice, which llama-swap survives (it restarts the
-      # backend), so the ~1 GiB of margin above is thin on purpose rather
-      # than by accident.
-      memoryShare = 0.81;
-      cpuShare = 0.70; # CPUWeight 700, and cores 3-25 + siblings via the fence.
-      # resources.nix defaults this to 10, which niced the inference server
-      # down against everything else on the box. The tenant this tier exists
-      # for is now the machine's primary workload.
-      nice = 0;
-    };
-    batch = {
-      # 12.5 GiB. Was the default 0.10 (~25 GiB), the figure ac-host's
-      # docker-compose.buildkite.yml cites as the number to revisit if a
-      # build OOMs -- revisit it there too if one does. The 0.05 went to
-      # background (see the arithmetic there). CPU is where CI must yield,
-      # hence the small cpuShare below.
-      memoryShare = 0.05;
-      # Sizes batch's OWN fence block (cores 26-27) as well as its weight.
-      # Before the resources.nix fix, batch and background shared one
-      # AllowedCPUs string, so a Buildkite Nix build ran on exactly the CPUs
-      # the LLM was pinned to.
-      cpuShare = 0.05;
-    };
-  };
+  # No tier table (homelab-ygc.13). From 8 Sep to 26 Sep 2026 this file
+  # carried the shares that pointed a five-tenant machine at the model server
+  # -- background at 0.81 of memory and cores 3-25, batch fenced to 26-27,
+  # critical and interactive cut to 0.02 each -- and every number in it was
+  # measured; `git log -p` on this block is that record. With
+  # homelab.enforce.slices off and agent-hub alone here, resources.nix's
+  # defaults are inert and the block would be a table nothing reads.
+  # ---------------------------------------------------------------------------
 
   # ---------------------------------------------------------------------------
   # Identified as the one hard gap by docs/noop-reconciliation.md: nothing in
