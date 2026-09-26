@@ -1,8 +1,15 @@
 # ADR 0010: The Z840 Serves Models And Nothing Else; arcade-box Hosts The Rest
 
-**Status:** Proposed, 19 Sep 2026. No hardware bought, nothing landed. The
-decision is recorded first because the host names and the glossary change
-touch every tree before a single unit moves.
+**Status:** Accepted, 26 Sep 2026 -- half one landed, half two open. The
+operator executed the cutover that day, which is the acceptance
+(`docs/runbook-arcade-box-cutover.md`, "As it ran"; `aa48765`, PR #11):
+arcade-box runs `assetto`, `bot`, `arcade`, `observability` and `ci` at
+`192.168.1.50`, and the Z840 runs `agent-hub` alone at `192.168.1.51`,
+unsliced and unfenced (`homelab-ygc.13`). Half two, the rename to `llm-box`,
+is `homelab-ygc.9`; until it lands the Z840 is still `ac-box` in `hosts/`,
+`secrets/`, ssh and the tracker. Proposed 19 Sep 2026, before any hardware
+was bought, because the host names and the glossary change touch every tree
+before a single unit moves.
 
 ## Context
 
@@ -37,7 +44,8 @@ Options priced and rejected:
   socket, so roughly halves generation speed. Rejected on the measurement.
 - **A second Z840 (~$600) for everything that is not a model, plus a Tiny
   for the lobbies** — three hosts. Correct in shape, and the CI host is
-  deferred rather than rejected: see Consequences for the trigger.
+  deferred rather than rejected: it is ADR 0012's (draft, epic `homelab-bfq`),
+  which owns its hardware, price and trigger; see Consequences.
 - **SSH from a CI agent into the model host** for the steps that write
   local state. Works, but hands CI a credential onto a host and contradicts
   `ac-host/docs/ci-cd.md` "Why no SSH" and ADR 0006. Rejected; the model
@@ -132,12 +140,12 @@ with its own runbook: ssh config, `hosts/`, the tracker, every tree's docs.
   mount) and it takes CI with it, so the Z840 is emptied by a single
   move. Then the Z840 is stripped, renamed and retuned with nothing
   competing for its cores.
-- **ci-box is deferred, not rejected.** A second Z840 (2× E5 v4, 64 GB,
-  ~$600) takes `ci` off arcade-box the first time either trigger fires: the
-  Buildkite queue wait on arcade-box exceeds a few minutes at `--spawn 2`,
-  or a CI-only closure change waits on an empty-lobby window. Its design is
-  the three-host shape above with `queue: ci` moved; nothing in this
-  decision has to be undone for it.
+- **ci-box is deferred, not rejected, and is ADR 0012's (draft, epic
+  `homelab-bfq`) -- its hardware, its price and its trigger live there, not
+  here.** The shape it inherits from this decision: it takes the `queue: ci`
+  gate steps off arcade-box's agent when the queue wait or the switch windows
+  on arcade-box start to hurt, and arcade-box keeps its own agent for the
+  local steps either way. Nothing in this decision has to be undone for it.
 - **Cost:** ~$300 of used hardware, ~15 W. The Z840 stops giving 0.19 of its
   memory and 5 cores to everything else, which is what makes a second 80B
   resident.

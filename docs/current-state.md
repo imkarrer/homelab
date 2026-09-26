@@ -1,22 +1,28 @@
-# Current State: What ac-box Actually Runs
+# Current State: What arcade-box and ac-box Actually Run
 
 The standing answer to "what is deployed, and does it conform?" — maintained,
 not archived. `docs/noop-reconciliation.md` is the *phase 1* survey and is
 frozen as a historical record of that migration step; this file is the one
 that must be true today.
 
-**Last reconciled:** 12 Sep 2026 evening, generation 32. The box runs
-`0f87e07`; HEAD has moved past it by the evening's commits (metrics schema,
-configurationRevision, the deploy staging half, docs), all gated, none
-service-affecting until applied. `hub-status.sh` reports the exact count.
+**Last reconciled:** 26 Sep 2026, 17:45 CDT, both hosts. Each runs `ab21161`
+(`nixos-version --configuration-revision` over ssh on each), which was
+origin/main at the time of reading; `hub-status.sh` reports the exact count
+per host. Every live value below was read that evening from the host the row
+names — `systemctl show`, `docker ps`, `docker inspect`, `ss -tulnp`, `ps`,
+`/etc/homelab/tenants.json`, `ls` of `/var/lib/homelab` — and every declared
+value is from `hosts/<host>/` at this commit.
 **Method:** see [Keeping this current](#keeping-this-current) at the bottom.
 
 > **History of this document, kept because the corrections are the useful
 > part.** First written 9 Sep against generation 29 with a 26-commit drift
 > figure; corrected the same day to **15** (a UTC-vs-`-0500` error, settled by
-> reproducing the box's store path from a scratch worktree). The drift grew to
+> reproducing the Z840's store path from a scratch worktree). The drift grew to
 > 25 over three days of committed, gated, unapplied work, then closed to zero
-> on 12 Sep in two switches. §1 records how.
+> on 12 Sep in two switches (§1, history). Rewritten for two hosts on 26 Sep
+> 2026, the day the cutover (ADR 0010, half one) moved every tenant but
+> `agent-hub` off the Z840. Anything below dated before that day says "the
+> box" and means the Z840 when it ran all six.
 
 Diagrams of the structures this document reports on —
 [`docs/architecture.md`](architecture.md), tracked in git.
@@ -26,112 +32,193 @@ Visual companion to this survey (hosted, outside version control):
 
 ---
 
-## 1. The headline: the closure is on the box
+## 1. The headline: two hosts, both on main
 
-**12 Sep 2026, ~12:00 CDT: generations 30 and 31 were switched, and
-`HUB_STATUS_EXACT=1 bash scripts/hub-status.sh` reports "CLEAN — this tree
-builds exactly what the box runs."** The 25-commit closure gap this document
-was written to expose is closed. The box runs HEAD `c97cbbe`.
+**26 Sep 2026, 15:28–16:00 UTC: the cutover.** `aa48765` (PR #11; ADR 0010
+half one; `docs/runbook-arcade-box-cutover.md`, "As it ran", is the record)
+moved `assetto`, `bot`, `arcade`, `observability` and `ci` from the Z840 to
+arcade-box at `192.168.1.50`, and left `agent-hub` alone on the Z840 at
+`192.168.1.51`. The lobbies were down for those 32 minutes. Six more commits
+landed on both hosts the same day (`docs/architecture.md` Part III, rows
+36–41); as of 17:45 CDT both run `ab21161`.
 
-The two delivery paths still differ in *mechanism*, and that difference is the
-next slice of work (ADR 0006), but they no longer differ in *state*:
-
-| | Tenant tree | System closure |
+| | arcade-box | ac-box (the Z840; `llm-box` after `homelab-ygc.9`) |
 | --- | --- | --- |
-| Owns | containers, scripts, content | units, slices, firewall, ports |
-| Repo | `ac-host` | `homelab` |
-| Registry | `deploy=buildkite` | `deploy=none` |
-| Applied | `340b4fb`, byte-clean | `c97cbbe`, store-path exact |
-| Reaches the box by | `queue-prod` → human `DOWNTIME=1` → rsync | `nixos-rebuild switch --flake`, by an operator or, during the migration, an agent (`AGENTS.md`) |
-| Staging artifact | `pending-deploy.json` | none yet — `modules/deploy` is on the box, inert |
-| Drift detectable by `hub-status.sh` | yes | **yes**, since `1c6827f` |
+| Hardware | Lenovo ThinkCentre M920q Tiny: i7-8700T, 6 cores / 12 threads, 31 GiB usable, 954 GB NVMe (`lscpu`, `/proc/meminfo`, `lsblk`, 26 Sep) | HP Z840: 2 × E5-2680 v4, 28 cores / 56 threads, 251 GiB (`lscpu` 26 Sep; `dmidecode` 19 Sep) |
+| Address | `192.168.1.50/24` on `eno2`, MAC `e8:6a:64:f4:81:94` — a Dream Router reservation; the lobby forwards point here (§4) | `192.168.1.51/24` on `enp8s0`, MAC `c8:d3:ff:b9:28:0b` — a reservation; `eno1` has no carrier and no address (§4) |
+| Tenants | `assetto`, `bot`, `arcade`, `observability`, `ci` — five in `/etc/homelab/tenants.json` | `agent-hub` — one in `/etc/homelab/tenants.json` |
+| Closure reaches it | by itself: its own agent's `queue-closure` stages, `homelab-deploy` (`schedule = "continuous"`, ADR 0006/0008) switches within a minute — `pending-closure.json` 13:47 CDT, `last-applied-closure.json` 13:48, running `ab21161` | by hand: `nixos-rebuild switch --refresh --flake github:imkarrer/homelab/<sha>#ac-box`. `homelab-deploy.timer` is armed and nothing stages on this host; its `pending-closure.json` is the cutover's own record, 10:27 CDT (ADR 0010, "no machinery"; architecture row 41) |
+| Tenant tree (`ac-host`) | `queue-prod` on this agent; the bot's 03:00 DOWNTIME build applies. `last-downtime.json` reads `2026-09-26T08:00:12Z` — the Z840's last run, copied over; tonight's is the first here | none |
+| Environments (ADR 0009) | `arcade`: FloxHub generation 2 of `imkarrer/arcade`, staged by `queue-environment` on this agent, applied by `arcade-environment-pull` (`pinned-environment-arcade`, 08:08 CDT) | `agent-hub`: `agent-hub-environment-poll.timer` reads GitHub every 10 minutes for a green sha (`homelab-ygc.14`); `agent-hub-environment-pull` applies it. Buildkite publishes no commit status for `agent-hub` today, so the poll stages nothing yet (row 35) |
+| Tiers | shares of 31 GiB / 12 threads; `fence = false` on `background` and `batch` (§3) | `homelab.enforce.slices = false` (`homelab-ygc.13`): no slices, no `MemoryMax`, no fence (§3) |
+| Docker | yes — 9 containers | none: `docker.service` inactive, no `docker` in the closure |
+| CI agent | `arcade-box` on `queue=self` (`BUILDKITE_AGENT_NAME` read from the container); builds both hosts' toplevels | none |
+| Prometheus | here; scrapes the Z840 as a peer (`homelab.host.peers.ac-box`: job `node` on 9100, job `agent-hub` on 8100; `homelab-ygc.10`) | a node exporter on `192.168.1.51:9100` (`modules/platform/node-exporter.nix`); no collector |
+| Secrets | sops-nix, `secrets/ac-box.yaml` (the file keeps its name; it carries both hosts' recipients, runbook D4) | imports no secrets module (`flake.nix`, the ac-box list since `aa48765`) |
+| Booted vs current | switched since boot: booted `kgy5zbf1…`, current `ayg73n6b…` — the continuous edge at work, expected | switched since boot: booted `wdpgr3i6…` (`aa48765`, the 15:37 UTC reboot), current `ym3pjykm…` (`ab21161`) |
 
-### How the switch was done
+### History: how the Z840 got here (12 Sep 2026)
 
 Two switches, not one, on this repo's own smallest-blast-radius rule:
-
-- **Generation 30 → `3fef4fe`.** Fence fix and the `tcp/8100` close; neither
-  service-enabling commit. `diff-closures` empty, `dry-activate` a firewall
-  reload only. Bounced nothing.
-- **Generation 31 → HEAD.** After the HAZARD 1 adoption sequence (hand-started
-  compose stack stopped, three volumes verified, ports free). Started
-  `agent-hub-llm` and `ac-host-ci`, moved samba/rsync into `interactive.slice`,
-  stopped `wpa_supplicant`, rebalanced the tiers.
-
-One defect surfaced by doing it: `docker compose … --build` under systemd
-needed `git` on `ac-host-ci`'s `PATH` to fetch its build context. Fixed in
-`c97cbbe`.
-
-`/etc/nixos/configuration.nix` is a `throw` (runbook-decommission item 1).
+generation 30 → `3fef4fe` (the fence fix and the `tcp/8100` close;
+`diff-closures` empty, `dry-activate` a firewall reload only), then
+generation 31 → HEAD after the HAZARD 1 adoption sequence (started
+`agent-hub-llm` and `ac-host-ci`, moved samba/rsync into `interactive.slice`,
+stopped `wpa_supplicant`, rebalanced the tiers). One defect surfaced by doing
+it — `docker compose … --build` under systemd needed `git` on `ac-host-ci`'s
+`PATH` — fixed in `c97cbbe`. Generation 34 (12 Sep 20:50 CDT) armed
+`homelab-deploy.timer`, the Z840's last hand switch until the cutover made
+hand switches its only kind. Every unit named in this paragraph except
+`agent-hub-llm` now runs on arcade-box.
 
 ### What is still owed
 
-- **A reboot.** `/run/booted-system` is still the 7 Sep generation. Now safe:
-  `ac-host-ci` is under systemd and returns on boot, which was the ordering
-  constraint. No kernel change is pending; this is hygiene.
-- **The deploy path** (ADR 0006, delta rows 2 and 21). Until it is on,
-  closure changes still need an operator. The applying half is on the box and
-  inert; the staging half needs a `/var/lib/homelab` bind mount in `ac-host`'s
-  compose file.
+- **The rename** (ADR 0010 half two, `homelab-ygc.9`): the Z840 is `ac-box`
+  in `hosts/`, `secrets/ac-box.yaml`, `~/.ssh/config`, `homelab.host.peers`,
+  the tracker and every tree's docs. Until it lands, "ac-box" in a verdict
+  means the Z840.
+- **MinIO's images** (`homelab-ygc.11`): `ac-host`'s
+  `docker-compose.buildkite.yml` names `minio/minio:latest` and
+  `minio/mc:latest`, which Docker Hub refused on 26 Sep; arcade-box runs
+  copies `docker save | docker load`ed from the Z840. A fresh daemon cannot
+  start CI's cache until a registry and tag are pinned.
+- **agent-hub's script defaults** (`homelab-ygc.7`): `vectors-smoke.sh` and
+  `compare.sh` in the agent-hub tree still name `192.168.1.50`; deferred to
+  that tree's first push. homelab's three scripts moved in `8fc755d`.
+- **Commit statuses** (architecture row 35, an operator step in Buildkite):
+  `agent-hub`, `homelab` and `home-arcade` publish none, so the Z840's poll —
+  the one automatic edge that host has — has nothing to read.
+- **The first night on arcade-box**: the bot's 03:00 DOWNTIME build on this
+  host's agent, the 04:30 `hub-backup` pull from two hosts, and the removal
+  of the four moved directories from `/home/nixos/backup/ac-box/var/lib/`
+  after arcade-box's first snapshot (runbook 4.6, step 5). Not yet observed
+  as of this writing.
 
 ---
 
 ## 2. Classification
 
-"Conforming" means: declared in the tenant contract, present on the box, and
-matching the declaration on ports, slice and state path.
+"Conforming" means: declared in the host's tenant contract
+(`hosts/<host>/tenants.nix`), present on that host, and matching the
+declaration on ports, slice and state path. One table per host; a unit
+appears on exactly one.
 
-### Conforming
+### arcade-box — conforming
+
+Live from arcade-box, 26 Sep 2026 17:45 CDT, closure `ab21161`.
 
 | Service | Tenant | Basis |
 | --- | --- | --- |
-| `ac-host-static.service` + 3 `ac-static-*` containers + sidecars | assetto | Lobbies on 9600–9602 / 8081–8083 / 8181–8183 / 11200–11202; sidecar sockets 18080, 11300–11302 — every one declared. Containers in `critical.slice` via `cgroup_parent`; the unit unsliced by design. State at `/var/lib/ac-host` and in the `ac-host_ac-server` Docker volume -- the AC dedicated server, which steamcmd cannot reinstall anonymously (`homelab-ygc.12`). |
-| `ac-host-nightly.timer`, `ac-host-dev.service` | assetto | Declared; dev inactive by design. |
-| `arcade-freeciv`, `arcade-mindustry` | arcade | `interactive.slice`. 5556/tcp, 4555/udp, 6567, **20151/udp** all declared and open — LAN discovery now works. |
-| `samba-smbd`, `samba-winbindd`, `rsync` | arcade | **Now in `interactive.slice`** — were `system.slice` until gen 31. |
-| observability, 8 units | observability | All in `interactive.slice`; nine declared ports, nine live binds. UniFi address read from `homelab.host`, not hardcoded. |
-| **`agent-hub-llm.service`** | agent-hub | **Running since gen 31**, alone in `background.slice` (weight 700, 163 GiB ceiling, cores 3–25 + siblings). `llama-server` on `192.168.1.50:8100`; the firewall rule now has a listener behind it. |
-| **`ac-host-ci.service`** | ci | **Adopted under systemd at gen 31.** `units = [ "ac-host-ci.service" ]`; agent and MinIO in `batch.slice`, attached to the same `ac-host-ci_*` volumes as before. |
+| `ac-host-static.service` (active, exited) + `ac-static-{blackhawk,road-america,gingerman}` + `ac-host-{auth,details,plugin}-1` | assetto | Lobbies on 9600–9602 tcp+udp, 8081–8083, 8181–8183, 11200–11202/udp; sidecar sockets 18080 and 11300–11302 on loopback — every one declared and every one live in `ss`. The unit is in `system.slice` by design (unsliced: its `ExecStop` is `docker rm -f`); the six containers carry `CgroupParent = critical.slice` (`docker inspect`). State at `/var/lib/ac-host` (copied 26 Sep; the final delta was 7 files) and in the `ac-host_ac-server` Docker volume — the AC dedicated server, which anonymous steamcmd cannot reinstall; missed by the first copy, so the lobbies crash-looped 15:57–16:00 UTC until it was copied; declared `state.backup` since `homelab-ygc.12`. |
+| `ac-host-nightly.timer`, `ac-host-dev.service` | assetto | Declared; the timer armed, dev `inactive (dead)` by design. |
+| `ac-host-bot.service` (active, exited) + `ac-host-bot-1` | bot | Declared; unit in `system.slice`, container `CgroupParent = critical.slice` (still assetto's compose project, declared as shared). It queues the 03:00 DOWNTIME build on this host's agent; the first such night is tonight. |
+| `arcade-freeciv`, `arcade-mindustry` | arcade | `interactive.slice`. 5556/tcp and 4555/udp (freeciv), 6567 tcp+udp and 20151/udp (Mindustry) live and declared. Generation 2 of `imkarrer/arcade`, run path `f6m1q3pd…` — the path the Z840 ran. |
+| `samba-smbd`, `samba-winbindd`, `rsync` | arcade | `interactive.slice`; 139/445/873 bound on `192.168.1.50` — the stations' mount and the two rsync stations followed the address, unchanged. |
+| observability, 8 units: `prometheus`, `grafana`, `alertmanager`, `cadvisor`, `unifi-poller`, `udr-fw-exporter`, `docker-name-exporter`, `prometheus-node-exporter` | observability | All `interactive.slice`. Grafana on `192.168.1.50:3000`; 9090, 9093, 9100, 9102, 9130–9132 on loopback; 9094 (alertmanager cluster) on the wildcard. Since `116c12e` the scrape config also carries the Z840 as a peer with `host=` on every target, and the host alerts are per machine: `HostDiskHigh`, `HostLoadHigh` (arcade-box > 6, ac-box > 56), `HostMemLow`, `NodeExporterDown`, `CadvisorDown`. |
+| `ac-host-ci.service` (active, exited) + `ac-host-ci-agent-1`, `ac-host-ci-minio-1` | ci | `batch.slice` (unit and both containers' `CgroupParent`), beside `nix-daemon`. Agent `arcade-box` on `queue=self`, `--spawn 1`; MinIO on 127.0.0.1:9000/9001 serving the copied `ac-host-ci_minio-data` (3.9 GB, 2,355 objects). |
 
-### Nonconforming
+### ac-box — conforming
 
-| Item | Tenant | Gap |
+Live from the Z840, 26 Sep 2026 17:45 CDT, closure `ab21161`.
+
+| Service | Tenant | Basis |
 | --- | --- | --- |
-| `ac-host-bot-1` | assetto | The Discord bot, still a compose profile inside assetto, in no tenant's `units`. README's "splits out after phase 6" deferral has expired. Delta row 8. |
-| `agent-hub` metrics | agent-hub | `/metrics` served on the LAN address, unscraped — `metricsEndpoint` has no address field. Delta row 12. |
+| `agent-hub-llm.service` | agent-hub | Running in `system.slice` — there is no tier slice on this host (`homelab.enforce.slices = false`, `homelab-ygc.13`; `systemctl list-units --type=slice` shows none). `AllowedCPUs = 0-27` and `NUMAPolicy = interleave` on the unit itself: the 28 physical cores, a placement fact, not a fence; `MemoryMax = infinity`. `llama-swap` listens on `127.0.0.1:8100` over four models; the loaded `llama-server` runs `--threads 28` (`ps`). `restartIfChanged = false`: a switch does not bounce it. |
+| `nginx.service` | agent-hub | Landing page and proxy on `192.168.1.51:8100` (the tenant's `llm` port, scope `lan`); `system.slice`. |
+| `qdrant.service` | agent-hub | `192.168.1.51:6333` (`vectors`, scope `lan`); `system.slice`. State `/var/lib/qdrant`, `backup = true`. |
+| `agent-hub-environment-pull.{path,timer}` | agent-hub | The applying half of ADR 0009's edge, armed; `last-applied-environment-agent-hub.json` 25 Sep 21:20 CDT. |
+| `agent-hub-environment-poll.timer` | agent-hub | The staging half since `ab21161` (`homelab-ygc.14`): `OnUnitActiveSec=10min`, last 17:38, next 17:48 CDT. Two GitHub API calls per tick; stages a sha only when `buildkite/agent-hub` reads `success` on it, which today it never does (row 35). |
+| `prometheus-node-exporter.service` | platform, not a tenant (`modules/platform/node-exporter.nix`, `homelab-ygc.10`) | `192.168.1.51:9100`, opened on `enp8s0` only, scraped by arcade-box. Not in the port registry — the module header says why, and what it costs. |
+| `homelab-deploy.{path,timer}` | platform | Armed (every 10 minutes) with nothing to do: no agent stages here. Accepted (architecture row 41). |
+
+### Nonconforming and accepted
+
+| Item | Host | Gap |
+| --- | --- | --- |
+| The Z840's closure edge | ac-box | No CI agent, so nothing stages a closure on this host; every switch is an operator's, from a sha on origin. **Accepted** (ADR 0010; row 41). |
+| MinIO's images | arcade-box | Running from `docker save \| docker load` copies; the compose file's `image:` lines are not pullable (`homelab-ygc.11`). |
+| Commit statuses | Buildkite | None published for `agent-hub`, `homelab`, `home-arcade`; the Z840's poll depends on them (row 35, operator). |
 
 ### Decommission
 
 | Item | Why |
 | --- | --- |
-| ~~`/etc/nixos/configuration.nix`~~ | **Done** — a `throw` since 12 Sep. Hardware file kept; proven AST-identical to git. |
-| ~~`wpa_supplicant.service`~~ | **Done** — `mkForce false` in `network.nix`, gone at gen 31. |
+| ~~`/etc/nixos/configuration.nix`~~ | **Done** — a `throw` since 12 Sep on the Z840. The hardware file is kept, on both hosts, at `/etc/nixos/hardware-configuration.nix`. |
+| ~~`wpa_supplicant.service`~~ | **Done** — `mkForce false` in `network.nix`, gone at gen 31; the same line keeps arcade-box's `wlo1` idle. |
 | ~~`inquire-platform`~~ | **Removed from the registry 12 Sep** — a personal project, never part of the homelab. |
+| The moved state on the Z840's disk: `/var/lib/ac-host` (12 G), `/var/lib/arcade`, `/srv/arcade`, `/var/lib/grafana`, `/var/lib/prometheus2`, and `/var/lib/docker` (52 G, the daemon's directory left behind when Docker left the closure) | Frozen at the cutover's final delta (runbook 4.4), the rollback ladder's last rung; `ls`/`du` on ac-box, 26 Sep evening. Nothing reads them. Their removal belongs to the rename's runbook (`homelab-ygc.9`), after arcade-box's first backed-up night. |
+| `/var/lib/homelab/{pending,last-applied}-environment-{arcade,ci}.json`, `pinned-environment-arcade` on the Z840 | Records of tenants no longer declared there (18 Sep mtimes). Same runbook. |
 
 ---
 
-## 3. The box at rest
+## 3. Each host at rest
 
-Live from `systemctl show`, 12 Sep 2026, generation 31. These are the
-**rebalanced** shares from `45f67ab`/`0de8c09`.
+Live from `systemctl show <slice> -p CPUWeight -p MemoryMax -p AllowedCPUs`,
+26 Sep 2026 17:45 CDT.
+
+**arcade-box** — shares of 31 GiB and 12 threads
+(`hosts/arcade-box/configuration.nix`), weights only:
 
 | Slice | CPUWeight | MemoryMax | AllowedCPUs | Members |
 | --- | --- | --- | --- | --- |
-| `critical.slice` | 100 | 25.1 GiB | unfenced | 7 docker scopes (3 lobbies, 3 sidecars, the bot) |
-| `interactive.slice` | 50 | 12.5 GiB | unfenced | arcade ×2, samba ×2, rsync, observability ×8 |
-| `background.slice` | **700** | **163.1 GiB** | **`3-25,31-53`** | `agent-hub-llm` |
-| `batch.slice` | 50 | 25.1 GiB | **`26-27,54-55`** | buildkite agent, minio |
-| `system.slice` | 100 | none | — | `ac-host-static`, platform only (sshd, fail2ban, docker, NetworkManager) |
+| `critical.slice` | 500 | 6.2 GiB | none | 7 docker scopes via `cgroup_parent` (3 lobbies, 3 sidecars, the bot) |
+| `interactive.slice` | 200 | 6.2 GiB | none | arcade ×2, samba ×2, rsync, observability ×8 |
+| `background.slice` | 50 | 1.55 GiB | none | nothing — inactive; no tenant of this tier here |
+| `batch.slice` | 300 | 13.95 GiB | none | `ac-host-ci` (agent, MinIO), `nix-daemon` |
+| `system.slice` | 100 | none | — | `ac-host-static`, `ac-host-bot`, `ac-host-env`, platform (sshd, fail2ban, docker, NetworkManager) |
 
-The fence now fences: background and batch hold distinct physical cores, and
-neither touches cores 0–2 or their siblings 28–30, which stay with the unsliced
-racing stack. Background's weight 700 against `system.slice`'s 100 ranks the
-model server above racing under contention — deliberate, per
-`configuration.nix`; the fence is what protects racing, not the weight.
+**ac-box** — no tier slice exists (`homelab.enforce.slices = false`):
+
+| Slice | CPUWeight | MemoryMax | AllowedCPUs | Members |
+| --- | --- | --- | --- | --- |
+| `system.slice` | 100 | none | — | `agent-hub-llm` (the unit's own `AllowedCPUs = 0-27`), `nginx`, `qdrant`, `prometheus-node-exporter`, platform |
+
+**There is no fence anywhere since 26 Sep.** On the Z840 the fence existed
+so a build or the model server could not reach the lobbies' cores; with one
+tenant there is nothing to fence from, and `agent-hub-llm`'s `0-27` is the 28
+physical cores its 28 threads want (the SMT siblings cost memory bandwidth,
+agent-hub's `prefill-tuning.md`), not a boundary. On arcade-box
+`resources.nix` would carve one or two of six cores for every CI build and
+idle them the rest of the day, so `homelab.tiers.{background,batch}.fence =
+false` and `CPUWeight` is the whole story: 500 for the lobby containers
+against 300 for a build, consulted only under contention, with `MemoryMax`
+still the ceiling a runaway job hits.
 
 ---
 
-## 4. Idiomatic Nix: audit
+## 4. The LAN, as the router has it (`homelab-bqo.42`)
+
+Facts read off the Dream Router's UI by the operator on 26 Sep 2026 (runbook
+4.1, "As it ran") and off each host over ssh the same evening. None of it is
+in code: `hosts/<host>/host.nix` declares each address, and only this table
+and the router say the router will hand it out (architecture row 26).
+
+| | |
+| --- | --- |
+| Router | UniFi Dream Router, `192.168.1.1` — the default route of both hosts (`ip route`) and the controller `unifi-poller` and `udr-fw-exporter` speak to (`homelab.host.unifi.address`, both host files) |
+| DHCP | one `/24` pool, `192.168.1.6`–`.254`; both hosts lease (`ipv4.method auto`), pinned by a reservation per MAC |
+| Reservation: arcade-box | MAC `e8:6a:64:f4:81:94` (`eno2`, the M920q's one wired port) → `192.168.1.50`. Set 15:43 UTC 26 Sep, once the Z840's lease had released it; the build-up ran on `.218` |
+| Reservation: the Z840 | MAC `c8:d3:ff:b9:28:0b` (`enp8s0`) → `192.168.1.51`. Set 15:20 UTC 26 Sep; the lowest free address beside `.50` |
+| Forwards | nine rules, `ac-prod-s{0,1,2}-{game,http,details}`, for the three lobby slots (9600–9602 tcp+udp, 8081–8083, 8181–8183) → `192.168.1.50`, by number, hand-set. `unifi_pf.py` is off (`/var/lib/ac-host/.env` has no `UNIFI_*` keys). Untouched by the cutover, which is why `.50` moved with the lobbies (runbook D2) |
+| The Z840's two ports | `enp8s0` `c8:d3:ff:b9:28:0b` is live and reserved. `eno1` `c8:d3:ff:b9:28:0a` is administratively up with no carrier (NetworkManager "unavailable"), declared `mgmt` with `address = null` — the scope stays in the contract, nothing is plugged in, nothing is scoped to it (ADR 0007, row 11) |
+| arcade-box's other port | `wlo1`, Wi-Fi, no carrier; `wireless.enable = mkForce false` |
+
+**What breaks if the Z840's cable goes into `eno1`** — which is what happened
+on 13 Sep 2026, the incident behind `homelab-bqo.42`: `eno1`'s MAC has no
+reservation, so if NetworkManager brings it up it leases an address from the
+pool that nothing knows — not `~/.ssh/config`, not arcade-box's peer entry,
+not the operator's script defaults — and `.51` goes away with `enp8s0`'s
+link. nginx, qdrant and the node exporter bind `192.168.1.51` and fail to
+start without it (the cutover's own switch exited status 4 for exactly that
+reason while the lease had not yet moved), and the firewall opens 8100, 6333
+and 9100 on `enp8s0` only. Cabling both ports on one LAN gives the Z840 two
+leases and two default routes and opens nothing on the second; it isolates
+nothing, which is why ADR 0007 plugs nothing in. The one right cable is
+`enp8s0`, and the check is `ip -br addr show enp8s0` reading `.51`.
+
+---
+
+## 5. Idiomatic Nix: audit
 
 Assessed against the migration this repo is carrying out. Short version: the
 module layer is unusually disciplined — `mkIf`/`mkMerge` are used correctly
@@ -178,7 +265,10 @@ still say the file *is* gitignored. Anyone who "restores" that documented
 behaviour gets a silently unbootable closure with no error. This is the same
 failure shape the repo has caught twice before: *a comment describing an
 intention the code does not implement.* A `throw` would be safer than a silent
-substitution. **In progress — see §5.**
+substitution. **Fixed** — each `hosts/<host>/configuration.nix` throws on a
+missing hardware file, and README's convention now says to fetch the file from
+the host it describes (`/etc/nixos/hardware-configuration.nix`), which is how
+arcade-box's was fetched on 26 Sep 2026.
 
 **F2 — `outputs` destructures without `...`.**
 `outputs = { self, nixpkgs, ac-host, home-arcade, agent-hub }:` breaks
@@ -191,14 +281,17 @@ is misleading, which is the usual reason to prefer the idiom.
 `nixos-rebuild list-generations` reports `Configuration Revision: Unknown` for
 every generation. Setting it (`self.rev or self.dirtyRev`) is the standard
 idiom and would make the running closure self-identifying — which is precisely
-what §1's blind spot needs. **In progress — see §5.**
+what §1's blind spot needs. **Done** — `0a58999` (architecture row 16); each
+host reports its own sha, which is how §1's "both run `ab21161`" was read.
 
 **F4 — `nixosModules` under-exports.**
 The flake offers `tenantContract` and `platform`, but `modules/observability`
 and `modules/ci` are consumed only as inline paths in the `ac-box` module list.
 `modules/observability/default.nix` was lifted out of a tenant repo *precisely*
-so it could be shared; not exporting it leaves that half-done. Low urgency —
-there is one host today — but it is the stated direction.
+so it could be shared; not exporting it leaves that half-done. **Done** —
+`0a58999` (row 15), and since 26 Sep 2026 there are two hosts: `flake.nix`
+composes each from one shared platform list plus the host's own tenants,
+which is what the export was for.
 
 **F5 — `checks.ac-box` is the full system toplevel.**
 `nix flake check` therefore *builds* the system, not merely evaluates it. The
@@ -206,6 +299,15 @@ pipeline comment argues this is affordable because the self-hosted agent reuses
 a warm store and the MinIO substituter. That is true today and worth
 re-examining if CI ever moves off ac-box, because it would then be a
 from-source system build on every push.
+
+**Per host since 26 Sep 2026:** `checks.ac-box` and `checks.arcade-box` are
+both full toplevels, and both build on arcade-box's agent — CI did move off
+the Z840, and the Z840's system is now built on a 6-core Tiny from a store
+that agent's `/nix` volume re-warmed from MinIO and cache.nixos.org. The
+first arcade-box build was almost all substitution because both hosts pin
+the nixpkgs revision the Lenovo's installer already had; whether two
+toplevels per push stay affordable there is ADR 0012's (draft,
+`homelab-bfq`) question.
 
 **F6 — the UniFi router address was hardcoded in an L2 module. Fixed.**
 `modules/observability/default.nix` reads `config.homelab.host.networks.lan
@@ -223,7 +325,8 @@ schema addition (a gateway or `unifi.address` field on `homelab.host`), which
 makes it a contract change rather than a drive-by edit. Landed in `6e18170`
 as `homelab.host.unifi.address` — deliberately not `networks.lan.gateway`,
 since the consumers speak the UniFi controller API and do not care what the
-default route is; on ac-box those are one Dream Router wearing both hats, and a
+default route is; on both hosts those are one Dream Router wearing both hats
+(arcade-box's `host.nix` states the field again as its own host fact), and a
 `gateway` field would record the coincidence and go quietly wrong the day the
 controller moves. Proven a no-op: the toplevel drvPath is byte-identical with
 and without the change.
@@ -315,8 +418,11 @@ warns nothing, and returns the unmodified drvPath, so a renamed input would
 have turned the new gate back into a green no-op proving the pinned copy.
 Input names are now checked against `nix flake metadata` first.
 
-**Coverage caveat.** A composed eval proves what is *reachable* from ac-box's
-config, not the whole module. `agent-hub` is imported but
+**Coverage caveat.** A composed eval proves what is *reachable* from a host's
+config, not the whole module — and since 26 Sep 2026 that is per host:
+arcade's body is reached through `nixosConfigurations.arcade-box`,
+agent-hub's through `.ac-box`, and `hub-gates.sh` evaluates every host the
+flake declares. `agent-hub` is imported but
 `services.agent-hub.enable` defaults false, so its gate proves its option
 declarations compose and little of its config body. Strictly better than zero,
 and not the same as full coverage — which matters, because ADR 0006 makes these
@@ -334,7 +440,7 @@ compose file is the fix, and it is applied. This is handled correctly.
 
 ---
 
-## 5. Open work
+## 6. Open work
 
 Tracked in **one** place: `bd ready`. `docs/architecture.md` Part III is the
 narrative of the delta, one row per gap, and every open row carries its bead
@@ -350,7 +456,7 @@ is gone.
 
 This document is only worth having if it is refreshed rather than trusted.
 Refresh it whenever the answer to "what is deployed?" could have changed — after
-any `nixos-rebuild switch` on the box, after landing anything that changes the
+any switch on either host, after landing anything that changes the
 closure, and before planning work that assumes a service is running.
 
 **Step 1 — the three-way state.** One call, ~2s:
@@ -369,20 +475,27 @@ because they compare the *box* against the *declarations* rather than git
 against git:
 
 ```bash
-ssh ac-box 'nixos-rebuild list-generations | head -3; readlink -f /run/current-system; stat -c "%y" /run/current-system'
-ssh ac-box 'systemctl --failed; systemctl list-units --type=service --state=running --no-legend'
-ssh ac-box 'systemctl list-units --type=slice --no-legend; for s in critical interactive background batch; do systemctl show $s.slice -p CPUWeight -p MemoryMax -p AllowedCPUs -p ActiveState; done'
-ssh ac-box 'docker ps -a --format "{{.Names}}\t{{.Status}}\t{{.Label \"com.docker.compose.project\"}}"'
-ssh ac-box 'ss -tulnp'
-ssh ac-box 'iptables -S nixos-fw'
-ssh ac-box 'cat /etc/homelab/tenants.json'
+for h in arcade-box ac-box; do
+  ssh $h 'hostname; nixos-version --configuration-revision; readlink -f /run/booted-system /run/current-system'
+  ssh $h 'systemctl --failed; systemctl list-units --type=service --state=active --no-legend'
+  ssh $h 'systemctl list-units --type=slice --no-legend; for s in critical interactive background batch; do systemctl show $s.slice -p CPUWeight -p MemoryMax -p AllowedCPUs -p ActiveState; done'
+  ssh $h 'ss -tulnp'
+  ssh $h 'iptables -S nixos-fw'
+  ssh $h 'cat /etc/homelab/tenants.json; ls -la /var/lib/homelab'
+done
+ssh arcade-box 'docker ps -a --format "{{.Names}}\t{{.Status}}\t{{.Label \"com.docker.compose.project\"}}"; for c in $(docker ps -q); do docker inspect -f "{{.Name}} {{.HostConfig.CgroupParent}}" $c; done'
+ssh ac-box 'systemctl show agent-hub-llm -p Slice -p AllowedCPUs -p MemoryMax; systemctl list-timers agent-hub-environment-poll.timer homelab-deploy.timer'
 ```
+
+`--state=active`, not `running`: `ac-host-static`, `ac-host-bot`,
+`ac-host-env` and `ac-host-ci` are oneshots that show `active (exited)`, and
+a `running` filter hides all four.
 
 **Step 3 — diff, in this order.** The order matters; each step assumes the one
 before it passed.
 
 1. `ss -tulnp` against the `ports`/`portRanges` blocks in
-   `hosts/ac-box/tenants.nix`. **Every live listener must be declared, and
+   `hosts/<host>/tenants.nix`. **Every live listener must be declared, and
    every declared port must be live or explained.** Four separate gaps have
    been found this way and none of them by reading a config file — the
    11200 range, the 18080/18081 sidecars, freeciv's real 4555 announce port,
@@ -396,11 +509,11 @@ before it passed.
 4. `/etc/homelab/tenants.json` against `tenants.nix`. A tenant missing from
    the JSON was disabled when the closure was built; a tenant present with no
    running units is a declaration with nothing behind it.
-5. The closure drift itself: homelab's HEAD against what built
-   `/run/current-system`.
+5. The closure drift itself, per host: homelab's HEAD against each host's
+   `/run/current-system`. `hub-status.sh` prints one BOX section per host.
 
 **Step 4 — update this file.** Move the date at the top, correct the tables,
-and add a row to §5 rather than deleting one — an item that turned out to be a
+and add a row to §6 rather than deleting one — an item that turned out to be a
 human decision is more useful recorded as such than silently dropped.
 
 ### Open questions this round raised but did not settle
@@ -412,19 +525,19 @@ human decision is more useful recorded as such than silently dropped.
   running — bead `homelab-bqo.14`, still open, should be closed with that.
   Nothing wanted is missing. The runbook criterion now names the configured
   set rather than a number.
-- **`ci.units` is still `[]`**, in `tenants.nix` and in the live
-  `/etc/homelab/tenants.json`. So even after the CI adoption switch,
-  `ac-host-ci.service` is claimed by no tenant and lands in no slice —
-  `batch.slice` will still be empty of the unit it exists for.
-  `modules/ci/default.nix`'s header names this follow-up; it has not been made.
-- **`modules/ci/default.nix`'s header is stale.** It says the module is "NOT
-  imported by flake.nix or by hosts/ac-box/configuration.nix". Both import it
-  now, and `configuration.nix` sets `homelab.ci.enable = true`.
-- **`/var/lib/ac-host/src/hosts/ac-box/hardware-configuration.nix` is mode
-  0666**, and `README.md` points operators at that path to fetch the hardware
-  config.
+- ~~**`ci.units` is still `[]`**~~ **Settled 12 Sep** — `214cfdd` (row 7);
+  `ac-host-ci.service` is in `batch.slice` on arcade-box today, unit and
+  containers alike.
+- ~~**`modules/ci/default.nix`'s header is stale.**~~ **Settled** — the
+  header no longer says the module is unimported.
+- ~~**`/var/lib/ac-host/src/hosts/ac-box/hardware-configuration.nix` is mode
+  0666**, and `README.md` points operators at that path~~ **Settled 26 Sep
+  2026** — README points at `<host>:/etc/nixos/hardware-configuration.nix`;
+  the `src` copy is the tenant tree's and travelled to arcade-box with it.
 
-**Standing rules while doing any of this.** ac-box is read-only: inspect over
-ssh, change it by landing in git and letting the pipeline deploy. A hand-edit
-on the box is a debugging step, never a resting state — land it the same
-session. Leave `bd` writes to the coordinator.
+**Standing rules while doing any of this.** Both hosts are read-only: inspect
+over ssh; change arcade-box by landing in git and letting its deploy unit
+switch it, and the Z840 by landing in git and switching it from the pushed
+sha (ADR 0010). A hand-edit on either host is a debugging step, never a
+resting state — land it the same session. Leave `bd` writes to the
+coordinator.

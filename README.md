@@ -1,12 +1,16 @@
 # homelab
 
-Platform layer for `ac-box` (HP Z840). Owns the host and the contract; tenants
-are flox environments, or the one flake input that is not yet (`ac-host`).
+Platform layer for two hosts (ADR 0010, cut over 26 Sep 2026): `arcade-box`,
+a Lenovo M920q Tiny that runs the Assetto Corsa lobbies, the AC Discord bot,
+the kid arcade hub, the Prometheus/Grafana stack and the Buildkite agent, at
+`192.168.1.50`; and `ac-box`, the HP Z840 that runs the CPU-only model server
+and nothing else, at `192.168.1.51` (`llm-box` once `homelab-ygc.9` renames
+it). Owns both hosts and the one contract; tenants are flox environments, or
+the one flake input that is not yet (`ac-host`).
 
-Six workloads share this machine — Assetto Corsa race servers, the AC Discord
-bot, the kid arcade hub, a CPU-only LLM server, the Prometheus/Grafana stack,
-and a self-hosted Buildkite runner. Until this repo existed, the host
-configuration lived inside the oldest of them.
+Six workloads, one contract, two machines. Until this repo existed, the host
+configuration lived inside the oldest of them; until 26 Sep 2026 all six
+shared the Z840, fenced apart by cgroups.
 
 Diagrams — layers, the two delivery paths, where work actually runs, and what
 gates a change: [`docs/architecture.md`](docs/architecture.md). Tracked in git
@@ -15,10 +19,11 @@ so they can be corrected in the same diff as the code that invalidates them.
 What is deployed right now, and every service classified:
 [`docs/current-state.md`](docs/current-state.md).
 
-Where the box's state is copied to, and how to get it back:
+Where each host's state is copied to, and how to get it back:
 [`docs/runbook-restore.md`](docs/runbook-restore.md). `scripts/hub-backup.sh`
-pulls every directory a tenant declares with `state.backup = true` onto the
-operator's machine nightly; it runs there, not on ac-box, and the far side is
+pulls every directory a tenant declares with `state.backup = true` from the
+host that declares it into `/home/nixos/backup/<host>/` on the operator's
+machine nightly; it runs there, not on either host, and the far side is
 read-only.
 
 Design rationale and the full migration plan (hosted, outside version control):
@@ -31,7 +36,7 @@ Design rationale and the full migration plan (hosted, outside version control):
 | L0 | `modules/platform/` | hardware, NICs, identity, Docker daemon, Nix, sshd, boot |
 | L1 | `modules/tenant/` | the contract: schema, port registry, tiers, metrics, drain |
 | L2 | `modules/observability/`, `modules/ci/` | shared services that *consume* the contract |
-| L3 | environments | `arcade`, `agent-hub` as flox environments (a unit stub each in `hosts/ac-box/`, ADR 0009); `assetto` as the `ac-host` flake input — declare, never reach |
+| L3 | environments | `arcade`, `agent-hub` as flox environments (a unit stub each, in the host that runs it: `hosts/arcade-box/` for arcade, `hosts/ac-box/` for agent-hub; ADR 0009); `assetto` as the `ac-host` flake input — declare, never reach |
 
 Dependency direction is one-way: L0 knows nothing about tenants, L1 knows only
 the schema, L2 reads declarations, L3 declares without knowing its neighbours.
@@ -57,9 +62,11 @@ names. The contract assigns units to slices; it does not rename them.
 
 **Port scopes** are `local` / `lan` / `forwarded` / `mgmt`. `forwarded` exists
 because AC is internet-facing on purpose: `unifi_pf.py` opens UniFi Dream
-Router forwards per lobby slot at the box's LAN address. Forwarded traffic
-still arrives on `enp8s0`, so interface-scoping is correct — but it must be
-declared, and it requires a `justification`.
+Router forwards per lobby slot at the lobby host's LAN address — arcade-box,
+`192.168.1.50`, since 26 Sep 2026. Forwarded traffic still arrives on that
+host's LAN interface (`eno2`; the Z840's `enp8s0` before the cutover), so
+interface-scoping is correct — but it must be declared, and it requires a
+`justification`.
 
 **Tiers are shares of declared capacity**, never absolute gigabytes or CPU
 indices, or the config stops being portable. Use `CPUWeight` so idle capacity
@@ -77,12 +84,12 @@ own nixpkgs into the closure. Since 18 Sep 2026 (`homelab-158.11`) `ac-host`
 is the only tenant input: `agent-hub` and `home-arcade` are flox environments
 whose packages come from their manifest locks, not from this pin — which is
 the ADR 0009 answer to "one pin for everyone", and why `llama-server` on the
-box is the fork the tenant's lock names rather than 26.05's `9190`. One input
+Z840 is the fork the tenant's lock names rather than 26.05's `9190`. One input
 does not follow, and it is the only one: `flox`, a platform package rather than
 a tenant, whose flake builds exactly one package from its own nixpkgs and
 nothing of which enters the module composition. Following would change that
 package so it exists in no cache and compile flox's Rust and its bundled nix on
-the box at every pin move; `flake.nix`'s input comment carries the measurement.
+each host at every pin move; `flake.nix`'s input comment carries the measurement.
 
 **`hardware-configuration.nix` and `ssh-keys.local.nix` are tracked.** A flake
 copies only git-tracked files into the store, so a build from
@@ -91,9 +98,10 @@ convention inherited from rsync-deployed `ac-host` — made gate 1 build a syste
 with no authorized keys and the hardware stub that says of itself it will not
 boot a real machine, and it did so without an error. `.gitignore`'s NOTE and
 commit `daac96f` carry the full account; do not re-add either path to it. Fetch
-them read-only from `ac-box:/var/lib/ac-host/src/hosts/ac-box/` and never invent
-one. `hosts/ac-box/configuration.nix` now *throws* on a missing hardware file
-rather than substituting the `.example` stub.
+them read-only from the host they describe, `<host>:/etc/nixos/hardware-configuration.nix`
+(both hosts keep one there; arcade-box's was fetched that way on 26 Sep 2026),
+and never invent one. Each `hosts/<host>/configuration.nix` *throws* on a
+missing hardware file rather than substituting the `.example` stub.
 
 **Everything is public except one file.** `whitelist.json` holds third-party
 `steam_id` + `discord_id` pairs and stays box state, never git. Credentials go
@@ -103,6 +111,6 @@ which is why the two files above are tracked in a public repo.
 ## Working agreements for automated changes
 
 `AGENTS.md` is the operating contract: roles (supervisor / worker), the
-gate, the read-only rule for ac-box and its one migration exception, which
+gate, the read-only rule for both hosts and its one migration exception, which
 tenants may be bounced, and the tracker policy. It is binding for agents and
 a fair summary for humans.

@@ -1,19 +1,34 @@
 # Source trees homelab coordinates. Fields: name|path|remote|deploy|agent-push
-#   deploy      how the tree reaches ac-box:
-#                 buildkite    its own pipeline stages it and something on the box
-#                              applies it (ac-host: queue-prod + the 03:00 build;
-#                              homelab: queue-closure + homelab-deploy)
+#   deploy      how the tree reaches a host. Two hosts since 26 Sep 2026 (ADR
+#               0010): arcade-box has the only CI agent, so every pipeline-staged
+#               edge lands there; the Z840 (ac-box) has none. Which host each
+#               tree reaches is in the comment above its row.
+#                 buildkite    its own pipeline stages it and something on the
+#                              host applies it (ac-host: queue-prod + the 03:00
+#                              build, on arcade-box; homelab: queue-closure +
+#                              homelab-deploy, on arcade-box -- the Z840's
+#                              closure is switched by hand from a pushed sha)
 #                 environment  as a flox environment (ADR 0009): its pipeline
 #                              stages a sha (agent-hub) or a FloxHub generation
 #                              (home-arcade) and <tenant>-environment-pull on
-#                              the box applies it; nothing of the tree is in
-#                              homelab's closure, and bump-lock is not involved
+#                              the host that runs the tenant applies it. On a
+#                              host with no agent the tenant's own poll timer
+#                              does the staging from GitHub's commit status
+#                              (ADR 0010 amendment, homelab-ygc.14). Nothing of
+#                              the tree is in homelab's closure, and bump-lock
+#                              is not involved
 #                 none         nothing carries it
 #   agent-push  may an agent push this remote unattended, on green gates? ("yes" or "ask")
 ac-host|/home/nixos/src/ac-host|git@github.com:imkarrer/ac-host|buildkite|yes
 # homelab: deploy=buildkite as of ADR 0006; since ADR 0008 (15 Sep) the
 # pipeline stages a rev and modules/deploy switches to it within a minute,
 # deferring only while drivers are racing and during the 03:00 blackout.
+# Since the cutover (26 Sep 2026, ADR 0010) that edge reaches ARCADE-BOX:
+# its agent gates the push and stages the rev, its homelab-deploy switches
+# (ab21161: staged 13:47 CDT, switched 13:48). The Z840 has no agent, so a
+# push here switches arcade-box only; the Z840 takes the same sha by hand,
+# `nixos-rebuild switch --flake github:imkarrer/homelab/<sha>#ac-box`
+# (docs/architecture.md Part III row 41, the accepted gap).
 # DECISION on
 # agent-push: "yes" means an agent pushing green IS switching the server.
 # Decided "ask" at fd12f93 until the timer had been watched firing (row 21);
@@ -26,16 +41,26 @@ ac-host|/home/nixos/src/ac-host|git@github.com:imkarrer/ac-host|buildkite|yes
 # hub-bump-lock.sh, triggered by ac-host's pipeline on green) are a different
 # actor and are gated by HOMELAB_PUSH_TOKEN existing on the agent -- see
 # docs/architecture.md Part III row 24. Both mean the same thing once the
-# deploy unit is live: a push to homelab main is a system switch at 03:30.
+# deploy unit is live: a push to homelab main is a system switch -- at 03:30
+# when this was written, within a minute since ADR 0008, of arcade-box since
+# the cutover.
 homelab|/home/nixos/src/homelab|git@github.com:imkarrer/homelab|buildkite|yes
 # agent-hub, home-arcade: deploy=environment since 18 Sep 2026 (homelab-158.11).
 # Was `none` -- true only in the sense that no pipeline carried the tree to the
-# box directly; it reached the box through homelab's closure when flake.lock
-# moved (row 24). Now the tree's own green build is what reaches the box, one
-# hop, and hub-status prints the staged/applied pair per tenant.
+# Z840 directly; it reached it through homelab's closure when flake.lock
+# moved (row 24). Now the tree's own green build is what reaches its host, one
+# hop, and hub-status prints the staged/applied pair per tenant. Which host:
+#   agent-hub   -> the Z840 (ac-box). No agent there since the cutover, so
+#                  agent-hub-environment-poll on that host reads GitHub for a
+#                  green sha (homelab-ygc.14) and agent-hub-environment-pull
+#                  applies it. Buildkite publishes no commit status for this
+#                  pipeline as of 26 Sep 2026, so the poll stages nothing until
+#                  it does (architecture row 35).
+#   home-arcade -> arcade-box. queue-environment on arcade-box's agent stages
+#                  the FloxHub generation; arcade-environment-pull applies it.
 agent-hub|/home/nixos/src/agent-hub|git@github.com:imkarrer/agent-hub|environment|yes
 home-arcade|/home/nixos/src/home-arcade|git@github.com:imkarrer/home-arcade|environment|yes
-# bead-loop: deploy=none for ac-box -- the loop runs on the workstation and deploys
-# itself by a pull (bead-loop systemd/bead-loop-deploy.timer); its pipeline only tests
-# and automerges. Object: hub/pipelines/bead-loop.json (20 Sep 2026).
+# bead-loop: deploy=none for either host -- the loop runs on the workstation and
+# deploys itself by a pull (bead-loop systemd/bead-loop-deploy.timer); its pipeline
+# only tests and automerges. Object: hub/pipelines/bead-loop.json (20 Sep 2026).
 bead-loop|/home/nixos/src/bead-loop|git@github.com:imkarrer/bead-loop|none|yes

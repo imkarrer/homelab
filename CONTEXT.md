@@ -12,16 +12,27 @@ since ADR 0010 a verdict, runbook or skill says which one.
 _Avoid_: the box, the server, the host, prod
 
 **llm-box**:
-The HP Z840 (formerly `ac-box`), which runs `agent-hub` and nothing else:
-all of its cores and memory, unfenced. The rename is part of the split
-(ADR 0010); until it lands, `ac-box` in an older doc means this machine.
+The HP Z840, which since the cutover of 26 Sep 2026 runs `agent-hub` and
+nothing else: all 28 physical cores and all 251 GiB, unsliced and unfenced
+(`homelab.enforce.slices = false`). At `192.168.1.51`. Its closure has no
+deploy edge — an operator switches it by hand from a sha on origin (ADR
+0010) — and its environment arrives by its own poll of GitHub. The rename
+from `ac-box` is `homelab-ygc.9`; until it lands this machine is `ac-box`.
 _Avoid_: ac-box (after the rename), the Z840
 
+**ac-box**:
+The Z840's name in `hosts/`, `secrets/`, ssh config and the tracker until
+`homelab-ygc.9` renames it `llm-box`. In anything dated 26 Sep 2026 or later
+it means the model host alone; in anything earlier it means the one machine
+that ran all six tenants, and that doc's "the box" is this machine.
+
 **arcade-box**:
-The small always-on host (a Lenovo M920q Tiny) that runs every tenant but
-`agent-hub`: `assetto`, `bot`, `arcade`, `observability` and `ci` — what
-people notice when it breaks, plus the pipelines. The router's forwards
-and the stations' SMB mount point here.
+The small always-on host (a Lenovo M920q Tiny) that since 26 Sep 2026 runs
+every tenant but `agent-hub`: `assetto`, `bot`, `arcade`, `observability`
+and `ci` — what people notice when it breaks, plus the pipelines. At
+`192.168.1.50`, the address the router's forwards, the stations' SMB mount
+and Grafana's URL have always named. The only host with a CI agent, and the
+only host whose closure reaches it by itself (continuous deploy, ADR 0008).
 
 **ci-box**:
 A deferred host (ADR 0010) that would take `ci` off arcade-box if its
@@ -73,8 +84,8 @@ One of the four git repositories the hub coordinates: `homelab`, `ac-host`,
 _Avoid_: repo (ambiguous with the hub), project, codebase
 
 **Registry**:
-The hub's list of trees and, per tree, how it reaches the box and whether an
-agent may push it unattended.
+The hub's list of trees and, per tree, which box it reaches and how, and
+whether an agent may push it unattended.
 
 **Registry checkout**:
 The one working copy of a tree where merges and pushes happen. Every other
@@ -85,19 +96,21 @@ A separate working copy of a tree, on its own branch, given to one worker for
 one bead. Nothing in it reaches the registry checkout until the supervisor
 merges it.
 
-## How a change reaches the box
+## How a change reaches a box
 
 **Closure** (or **system closure**):
-The complete built operating system for the box — every package, unit and
-config — produced from a specific `homelab` commit. Changing the box's
-platform means switching it to a new closure.
+The complete built operating system for one box — every package, unit and
+config — produced from a specific `homelab` commit. One commit builds one
+closure per host (`nixosConfigurations.ac-box`, `.arcade-box`), so "both
+hosts on `ab21161`" means each runs its own. Changing a box's platform means
+switching it to a new closure.
 _Avoid_: build, image, generation (a generation is a closure's slot in the
 box's history, not the closure itself)
 
 **Tenant tree**:
-The racing tenant's scripts, compose files and content as they sit on the box,
-synced from `ac-host`. It is deployed separately from the closure and on its
-own schedule.
+The racing tenant's scripts, compose files and content as they sit on
+arcade-box, synced from `ac-host`. It is deployed separately from the closure
+and on its own schedule.
 _Avoid_: the ac-host deploy, the rsync
 
 **Gate**:
@@ -110,31 +123,34 @@ A gate that passed / a gate that failed. A red gate blocks every deploy in
 that tree, not only the change that broke it.
 
 **Landing**:
-Carrying a change into the box through git: gate, commit, push, and confirm
-the pipeline staged it. The opposite of a hand-edit on the box.
+Carrying a change into a box through git: gate, commit, push, and confirm
+the pipeline staged it. The opposite of a hand-edit on a box.
 _Avoid_: shipping, releasing, deploying (deploy is one step of landing)
 
 **Staged** (or **queued**):
-A specific commit that CI has proven green and recorded on the box as the
-next thing to apply. Staged is not applied; the box is still running the old
-one.
+A specific commit that CI has proven green and recorded on the host that will
+apply it, as the next thing to apply — by CI's own local step on arcade-box,
+by the tenant's poll of GitHub on the Z840. Staged is not applied; that host
+is still running the old one.
 _Avoid_: pending (the file names say pending; the state is staged)
 
 **Applied**:
-A staged tenant tree that the box has taken. The tenant tree is applied by
-the DOWNTIME build.
+A staged tenant tree or environment that its box has taken. The tenant tree
+is applied by the DOWNTIME build; an environment by `<tenant>-environment-pull`.
 
 **Switched**:
-A closure the box has activated as its running system. Switched is not
+A closure a box has activated as its running system. Switched is not
 booted: the kernel and initrd are still those of the closure booted into.
 
 **Booted**:
-The closure the box last started from. Equal to switched only after a reboot.
+The closure a box last started from. Equal to switched only after a reboot.
 
 **Window** (or **maintenance window**):
-The nightly period, 03:00–04:00 box-local, in which disruptive changes are
-allowed to touch the racing tenant: the tenant tree is applied, the lobbies
-recycled, the closure switched.
+The nightly period, 03:00–04:00 host-local (America/Chicago on both), in
+which disruptive changes are allowed to touch the racing tenant on
+arcade-box: the tenant tree is applied, the lobbies recycled, the closure
+switched if it was deferred. The Z840 has no window: nothing on it races,
+and its switches are an operator's, taken with the model server idle.
 _Avoid_: downtime (that is the build), maintenance, the nightly
 
 **DOWNTIME build**:
@@ -144,8 +160,10 @@ tenant tree stays staged however green it is.
 _Avoid_: the ops pipeline, the nightly build, the deploy job
 
 **Deploy timer**:
-The box's own scheduled step that switches to a staged closure at 03:30,
-deferring to the next window if anyone is racing.
+arcade-box's own step that switches to a staged closure within a minute of
+its being staged (continuous, ADR 0008), deferring while anyone is racing and
+during the 03:00 blackout. Armed on the Z840 too, where nothing stages, so it
+never has anything to do there.
 
 **Busy check**:
 The question "is anyone racing right now?", asked before anything disruptive.
@@ -162,7 +180,7 @@ _Avoid_: restart, cycle
 
 **Bump-lock**:
 The act of moving one tree's pin in `homelab` so that a change in a tree the
-closure still takes as an input reaches the box. A push to such a tree
+closure still takes as an input reaches a box. A push to such a tree
 reaches nothing until its pin is bumped. Since 18 Sep 2026 that tree is
 `ac-host` alone; `agent-hub` and `home-arcade` are not inputs. An environment
 is not bumped; it has generations (or a staged sha).
@@ -170,13 +188,13 @@ is not bumped; it has generations (or a staged sha).
 **Environment**:
 A tenant's contents — the packages and processes it runs — declared in the
 tenant's own tree as a flox environment, and the same whether a developer,
-CI or the box runs it. The contract still says where on the box it lives;
+CI or a box runs it. The contract still says where on its box it lives;
 the environment says what it is.
 _Avoid_: the manifest (that is the file), the flox env
 
 **Generation**:
 One published version of an environment. For a tenant that is an
-environment, a generation is what CI stages, what the box applies, and what
+environment, a generation is what CI stages, what its box applies, and what
 a rollback returns to — the tenant's analogue of a closure rev.
 _Avoid_: version, release
 
@@ -187,9 +205,11 @@ the environment. It says nothing about what the environment contains.
 _Avoid_: the module, the wrapper
 
 **Migration exception**:
-The one sanctioned way to change the box by hand: an agent applies a commit
+The one sanctioned way to change a box by hand: an agent applies a commit
 that is already on origin, by its full sha, and stops at a runbook's abort
-criteria. Everything else on the box is read-only.
+criteria. Everything else on either box is read-only. On the Z840 the same
+command is not an exception but the closure's only edge (ADR 0010); the
+sha-on-origin and abort-criteria rules apply unchanged.
 
 ## Racing
 
@@ -209,8 +229,8 @@ A helper container that serves a lobby from outside it — details, auth, the
 plugin. Sidecars are not lobbies and may be rebuilt without dropping a driver.
 
 **Whitelist**:
-The list of players allowed into the lobbies. The one file on the box that is
-never in git.
+The list of players allowed into the lobbies. The one file on arcade-box that
+is never in git.
 
 ## Work
 
@@ -233,11 +253,12 @@ proven, and what is open. The tracker is written from the handoff, never by
 the worker.
 
 **Verdict**:
-One line of the hub's status report naming one way the box, origin and the
-WSL trees disagree. Each verdict is a distinct failure, not a degree of one.
+One line of the hub's status report naming one way a box, origin and the
+WSL trees disagree. Each verdict names its host; each is a distinct failure,
+not a degree of one.
 
 **Delta row**:
-One numbered gap between the box as it is and the box as designed, in
+One numbered gap between the hosts as they are and as designed, in
 `docs/architecture.md` Part III, carrying the bead that closes it.
 _Avoid_: todo, gap (in prose), item
 
