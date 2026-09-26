@@ -49,7 +49,7 @@ And the side of ac-box that matters here, read the same day:
 | `/srv/arcade`, `/var/lib/arcade` | 460 M, 21 M |
 | `/var/lib/prometheus2`, `/var/lib/grafana` | 107 M, 91 M |
 | CI volumes | `ac-host-ci_minio-data` 3.7 G (the flox binary cache -- keep), `ac-host-ci_buildkite-nix` 27 G (the agent's store -- re-warms, do not copy), `ac-host-ci_buildkite-builds` 1.7 G (checkouts -- skip) |
-| Racing project volumes (**missed until the cutover**) | `ac-host_ac-server` 30 MB -- the Assetto Corsa dedicated server itself, installed once by steamcmd into the volume and **not installable anonymously**; `ac-host_steam` (steamcmd's client data, empty). Copy both, or the lobbies crash-loop on a fresh host |
+| Racing project volumes (**missed until the cutover**) | `ac-host_ac-server` 30 MB -- the Assetto Corsa dedicated server itself, installed once by steamcmd into the volume and **not installable anonymously**; `ac-host_steam` (steamcmd's client data, empty). Copy both, or the lobbies crash-loop on a fresh host (`ac-host_ac-server` declared for backup since `homelab-ygc.12`; `ac-host_steam` deliberately not, being empty and regrown) |
 | Images built on the box, not pulled | `ac-host-env:latest` 4.24 G, `ac-host-server:latest` 187 M, `ac-host-buildkite-agent:flox` 6.39 G |
 | `UNIFI_*` keys in `/var/lib/ac-host/.env` | none: `unifi_pf.py` is off, so the nine `ac-prod-s{0,1,2}-{game,http,details}` forwards on the Dream Router are hand-set and point at `.50` by number |
 

@@ -48,9 +48,12 @@ On 16 Sep 2026 that is `/var/lib/ac-host` (assetto), `/var/lib/arcade`,
 2026 the list is built per host from that host's configuration -- a
 directory is pulled from the host whose `hosts/<host>/configuration.nix`
 enables the tenant, so the same declaration moves with the tenant at the
-cutover and no script changes. A tenant is
-added to the backup by setting `state.backup = true` in
-`hosts/ac-box/tenants.nix` and nothing else.
+cutover and no script changes. Since 26 Sep 2026 (`homelab-ygc.12`) assetto
+also declares `/var/lib/docker/volumes/ac-host_ac-server/_data`, the racing
+project's `ac-server` Docker volume -- see the next section for why a volume
+is state here. A tenant is added to the backup by setting `state.backup =
+true` in `hosts/<host>/tenants.nix` for the host that enables it, and
+nothing else.
 
 ### What is NOT in it — read this before assuming a file is recoverable
 
@@ -78,13 +81,21 @@ added to the backup by setting `state.backup = true` in
   secrets.nix` from the sops file in git; a copy of it is four dangling links.
   Restore it by switching, not from here.
 - Anything outside the declared state directories: `/etc`, the Docker images,
-  the Nix store. The box is rebuildable from git; its state is not. **One
-  exception, found at the cutover (26 Sep 2026):** the racing project's named
-  volume `ac-host_ac-server` holds the Assetto Corsa dedicated server, which
-  steamcmd installed once and cannot reinstall anonymously -- a fresh host
-  crash-loops its lobbies without it. Until `homelab-ygc.12` declares it,
-  copy `/var/lib/docker/volumes/ac-host_ac-server/_data` by hand from the
-  old host before `ac-host-static` first starts.
+  the Nix store. The box is rebuildable from git; its state is not. **Docker
+  volumes are not rebuildable by definition -- only the ones a tenant
+  declares are here.** Declared since 26 Sep 2026 (`homelab-ygc.12`):
+  `ac-host_ac-server`, mounted at `/opt/ac` in every lobby container. It
+  holds the Assetto Corsa dedicated server (Steam app 302550), which
+  `steamcmd` installed once from a Steam login that owns the game and cannot
+  reinstall anonymously (`ac-host/image/entrypoint.sh`: "No subscription");
+  a fresh host crash-loops its lobbies (exit 8) without it, which is how it
+  was found at the cutover. On the host it is
+  `/var/lib/docker/volumes/ac-host_ac-server/_data`, 31 MB, 189 files,
+  `1000:999 0755` (uid 1000 is the image's `ac` user; the numbers, not the
+  names, are what matter). Its sibling `ac-host_steam` (steamcmd's client
+  data, `/home/ac/Steam`) is NOT backed up: empty, and regrown by steamcmd.
+  Section 4c has the put-back; it must happen **before `ac-host-static`
+  starts**.
 
 ### What is in it only as a live copy
 
@@ -163,6 +174,7 @@ Always restore to a scratch target and compare before putting anything back.
 | Tenant | Dir | Stopping it |
 |---|---|---|
 | `assetto` | `/var/lib/ac-host` | **Never outside a window.** `quiet.drainable = false`; `ac-host-static`'s `ExecStop` is `docker rm -f` on live race servers. Drain with `acctl.py` first. |
+| `assetto` | `/var/lib/docker/volumes/ac-host_ac-server/_data` | Same rules as the row above: **never outside a window**, drain first. The three lobby containers hold it open at `/opt/ac`, and `systemctl stop ac-host-static` (`acctl.py down-static`) removes them; the sidecars stay up. A Docker volume, so §4c's put-back differs in two steps. |
 | `arcade` | `/var/lib/arcade` | Freely (standing authority, 9 Sep 2026). An environment tenant once its stub is on (`homelab-158.5`): after the copy, §4d re-pulls `env/` rather than starting the units by hand. |
 | `agent-hub` | `/var/lib/agent-hub` | Freely. An environment tenant: after the copy, §4d re-clones `env/` rather than starting the unit by hand. |
 | `observability` | `/var/lib/grafana` | Freely — `systemctl stop grafana`. The dir is `0700 grafana:grafana` (uid 196); the staged copy carries that. |
@@ -188,6 +200,15 @@ and are not supposed to.
 table in `hosts/ac-box/tenants.nix` implies, or if `du` is wildly smaller than
 the box's current directory. A restore that silently puts back less than there
 was is worse than no restore.
+
+For the `ac-server` volume the staged path is
+`/home/nixos/backup/arcade-box/var/lib/docker/volumes/ac-host_ac-server/_data`
+(mirror) or the same path under `--target` (restic). Check it the same way,
+and additionally that `_data/acServer` exists and is executable: that one
+file is the reason the volume is backed up. Expected, from
+`hosts/arcade-box/tenants.nix`: `1000:999 0755`, 189 files, ~31 MB. **Abort**
+if `acServer` is missing -- a volume without it is exactly the empty volume
+that crash-looped the lobbies.
 
 ### 4c. Put it on the box
 
@@ -217,6 +238,49 @@ code bug.
 
 Leave `/var/lib/<tenant>.broken-<date>` in place until the tenant has been
 watched working, then remove it by hand. Nothing removes it for you.
+
+**The `ac-server` volume** (assetto; window and drain first, as for
+`/var/lib/ac-host`). The path is Docker's, not the tenant's, so two steps
+differ: the volume must exist before anything is copied into it, and the
+rollback copy goes inside the volume's own directory, where Docker does not
+look (`docker volume ls` enumerates `/var/lib/docker/volumes/*`, so a
+sibling there would show up as a phantom volume). `acctl.py` mounts the
+volume by name with `docker run -v ac-host_ac-server:/opt/ac`, never via
+compose, so a plain `docker volume create` is the right shape -- the volumes
+on arcade-box carry no compose labels for that reason.
+
+```bash
+# 1. stop the lobbies (down-static removes ac-static-*; the sidecars stay)
+ssh arcade-box 'systemctl stop ac-host-static'
+
+# 2. make sure the volume exists -- idempotent, and on a fresh host this is
+#    what creates the mountpoint BEFORE ac-host-static can start into it
+ssh arcade-box 'docker volume create ac-host_ac-server'
+
+# 3. move the live contents aside -- never delete; it is the rollback
+ssh arcade-box 'cd /var/lib/docker/volumes/ac-host_ac-server && mv _data _data.broken-$(date +%F) && mkdir _data'
+
+# 4. push the restored tree, preserving numeric ownership
+sudo rsync -a --numeric-ids \
+  /tmp/restore/home/nixos/backup/arcade-box/var/lib/docker/volumes/ac-host_ac-server/_data/ \
+  root@192.168.1.50:/var/lib/docker/volumes/ac-host_ac-server/_data/
+
+# 5. verify before starting anything
+ssh arcade-box 'd=/var/lib/docker/volumes/ac-host_ac-server/_data; stat -c "%u:%g %a" $d; test -x $d/acServer && echo acServer ok; find $d -type f | wc -l'
+
+# 6. start, then watch the three lobbies stay up rather than crash-loop
+ssh arcade-box 'systemctl start ac-host-static; sleep 30; docker ps --format "{{.Names}} {{.Status}}" | grep ^ac-static'
+```
+
+**Abort at step 5** unless `stat` prints `1000:999 755`, `acServer ok`
+appears, and the count is 189 (or whatever the moved-aside `_data.broken-*`
+holds, if it was not empty). If the top directory came back as root or the
+mode is wrong, `chown 1000:999` / `chmod 755` it and re-check before step 6
+-- the lobby runs as uid 1000 and must be able to write `logs/` and
+`results/` under it. A crash-loop at step 6 with `No subscription` in
+`docker logs ac-static-blackhawk` means the volume is empty again: go back
+to step 3. `ac-host_steam` needs nothing: `docker run` creates it empty and
+that is its correct state.
 
 ### 4d. Restoring an environment tenant (ADR 0009)
 
