@@ -1,21 +1,28 @@
-# sshd and fail2ban, carried over verbatim from ac-box's configuration.nix.
+# sshd and fail2ban, for every homelab host.
 #
-# PasswordAuthentication and KbdInteractiveAuthentication are both still true,
-# and PermitRootLogin is "prohibit-password" (root can only log in with a
-# key). This is exactly what ac-box runs today — the original comment
-# ("leave password on until you confirm key-only logins, then set false") is
-# preserved below rather than acted on, because tightening it is a behaviour
-# change this extraction is not the place for.
+# KEY-ONLY since 26 Sep 2026 (homelab-ygc.3, the operator's decision the day
+# arcade-box got its key). Until then PasswordAuthentication and
+# KbdInteractiveAuthentication were both true, carried over verbatim from
+# ac-box's pre-flake configuration.nix with its own note -- "leave password
+# on until you confirm a couple of key-only logins, then set these to false"
+# -- and the confirmation is three weeks old: every switch, the nightly
+# backup (scripts/hub-backup.sh) and hub-status.sh have reached ac-box as
+# root with ~/.ssh/id_ed25519_ac-host since 7 Sep. Setting them false is the
+# behaviour change that note deferred, taken deliberately.
+#
+# What that means for a person: any device without one of the keys in
+# hosts/<name>/ssh-keys.local.nix cannot ssh to either host; the physical
+# console is the way back in. PermitRootLogin stays "prohibit-password":
+# root with a key, never with a password. sshd is reloaded by the switch;
+# open sessions survive it.
 { ... }:
 
 {
   services.openssh = {
     enable = true;
     settings = {
-      # Keys work for root and nixosuser. Leave password on until you confirm
-      # a couple of key-only logins, then set these to false.
-      PasswordAuthentication = true;
-      KbdInteractiveAuthentication = true;
+      PasswordAuthentication = false;
+      KbdInteractiveAuthentication = false;
       PermitRootLogin = "prohibit-password";
     };
   };
