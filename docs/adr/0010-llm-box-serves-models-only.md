@@ -44,8 +44,8 @@ Options priced and rejected:
   socket, so roughly halves generation speed. Rejected on the measurement.
 - **A second Z840 (~$600) for everything that is not a model, plus a Tiny
   for the lobbies** — three hosts. Correct in shape, and the CI host is
-  deferred rather than rejected: it is ADR 0012's (draft, epic `homelab-bfq`),
-  which owns its hardware, price and trigger; see Consequences.
+  deferred rather than rejected: its trigger is in Consequences, and the
+  epic `homelab-bfq` carries it (an ADR 0012 is drafted there).
 - **SSH from a CI agent into the model host** for the steps that write
   local state. Works, but hands CI a credential onto a host and contradicts
   `ac-host/docs/ci-cd.md` "Why no SSH" and ADR 0006. Rejected; the model
@@ -140,12 +140,14 @@ with its own runbook: ssh config, `hosts/`, the tracker, every tree's docs.
   mount) and it takes CI with it, so the Z840 is emptied by a single
   move. Then the Z840 is stripped, renamed and retuned with nothing
   competing for its cores.
-- **ci-box is deferred, not rejected, and is ADR 0012's (draft, epic
-  `homelab-bfq`) -- its hardware, its price and its trigger live there, not
-  here.** The shape it inherits from this decision: it takes the `queue: ci`
-  gate steps off arcade-box's agent when the queue wait or the switch windows
-  on arcade-box start to hurt, and arcade-box keeps its own agent for the
-  local steps either way. Nothing in this decision has to be undone for it.
+- **ci-box is deferred, not rejected.** A second Z840 (2× E5 v4, 64 GB,
+  ~$600) takes `ci` off arcade-box the first time either trigger fires: the
+  Buildkite queue wait on arcade-box exceeds a few minutes at `--spawn 2`,
+  or a CI-only closure change waits on an empty-lobby window. Its design is
+  the three-host shape above with `queue: ci` moved; nothing in this
+  decision has to be undone for it. The epic `homelab-bfq` carries the
+  work (an ADR 0012 is drafted there, not yet in this tree); when it lands
+  it owns the hardware and the price, and this bullet becomes a pointer.
 - **Cost:** ~$300 of used hardware, ~15 W. The Z840 stops giving 0.19 of its
   memory and 5 cores to everything else, which is what makes a second 80B
   resident.

@@ -111,6 +111,7 @@ which is why the two files above are tracked in a public repo.
 ## Working agreements for automated changes
 
 `AGENTS.md` is the operating contract: roles (supervisor / worker), the
-gate, the read-only rule for both hosts and its one migration exception, which
-tenants may be bounced, and the tracker policy. It is binding for agents and
+gate, the read-only rule (its section is still headed "ac-box is read-only";
+it is applied to both hosts, and `homelab-ygc.9` rewords it) and its one
+migration exception, which tenants may be bounced, and the tracker policy. It is binding for agents and
 a fair summary for humans.

@@ -84,7 +84,7 @@ hand switches its only kind. Every unit named in this paragraph except
   start CI's cache until a registry and tag are pinned.
 - **agent-hub's script defaults** (`homelab-ygc.7`): `vectors-smoke.sh` and
   `compare.sh` in the agent-hub tree still name `192.168.1.50`; deferred to
-  that tree's first push. homelab's three scripts moved in `8fc755d`.
+  that tree's first push. homelab's three scripts moved in `44a8954`.
 - **Commit statuses** (architecture row 35, an operator step in Buildkite):
   `agent-hub`, `homelab` and `home-arcade` publish none, so the Z840's poll —
   the one automatic edge that host has — has nothing to read.
@@ -115,7 +115,7 @@ Live from arcade-box, 26 Sep 2026 17:45 CDT, closure `ab21161`.
 | `arcade-freeciv`, `arcade-mindustry` | arcade | `interactive.slice`. 5556/tcp and 4555/udp (freeciv), 6567 tcp+udp and 20151/udp (Mindustry) live and declared. Generation 2 of `imkarrer/arcade`, run path `f6m1q3pd…` — the path the Z840 ran. |
 | `samba-smbd`, `samba-winbindd`, `rsync` | arcade | `interactive.slice`; 139/445/873 bound on `192.168.1.50` — the stations' mount and the two rsync stations followed the address, unchanged. |
 | observability, 8 units: `prometheus`, `grafana`, `alertmanager`, `cadvisor`, `unifi-poller`, `udr-fw-exporter`, `docker-name-exporter`, `prometheus-node-exporter` | observability | All `interactive.slice`. Grafana on `192.168.1.50:3000`; 9090, 9093, 9100, 9102, 9130–9132 on loopback; 9094 (alertmanager cluster) on the wildcard. Since `116c12e` the scrape config also carries the Z840 as a peer with `host=` on every target, and the host alerts are per machine: `HostDiskHigh`, `HostLoadHigh` (arcade-box > 6, ac-box > 56), `HostMemLow`, `NodeExporterDown`, `CadvisorDown`. |
-| `ac-host-ci.service` (active, exited) + `ac-host-ci-agent-1`, `ac-host-ci-minio-1` | ci | `batch.slice` (unit and both containers' `CgroupParent`), beside `nix-daemon`. Agent `arcade-box` on `queue=self`, `--spawn 1`; MinIO on 127.0.0.1:9000/9001 serving the copied `ac-host-ci_minio-data` (3.9 GB, 2,355 objects). |
+| `ac-host-ci.service` (active, exited) + `ac-host-ci-agent-1`, `ac-host-ci-minio-1` | ci | `batch.slice` (unit and both containers' `CgroupParent`), beside `nix-daemon`. Agent `arcade-box` on `queue=self`, `--spawn 1`; MinIO on 127.0.0.1:9000/9001 serving the copied `ac-host-ci_minio-data` (3.9 GB, 5,913 files; the cache bucket inside it 2,355 objects, 3.6 GiB). |
 
 ### ac-box — conforming
 
@@ -306,8 +306,9 @@ the Z840, and the Z840's system is now built on a 6-core Tiny from a store
 that agent's `/nix` volume re-warmed from MinIO and cache.nixos.org. The
 first arcade-box build was almost all substitution because both hosts pin
 the nixpkgs revision the Lenovo's installer already had; whether two
-toplevels per push stay affordable there is ADR 0012's (draft,
-`homelab-bfq`) question.
+toplevels per push stay affordable there is the ci-box epic's question
+(`homelab-bfq`; ADR 0010's Consequences carry the trigger, and an ADR 0012
+is drafted there).
 
 **F6 — the UniFi router address was hardcoded in an L2 module. Fixed.**
 `modules/observability/default.nix` reads `config.homelab.host.networks.lan
@@ -535,7 +536,8 @@ human decision is more useful recorded as such than silently dropped.
   2026** — README points at `<host>:/etc/nixos/hardware-configuration.nix`;
   the `src` copy is the tenant tree's and travelled to arcade-box with it.
 
-**Standing rules while doing any of this.** Both hosts are read-only: inspect
+**Standing rules while doing any of this.** Both hosts are read-only (AGENTS.md
+still heads the rule "ac-box is read-only"; `homelab-ygc.9` rewords it): inspect
 over ssh; change arcade-box by landing in git and letting its deploy unit
 switch it, and the Z840 by landing in git and switching it from the pushed
 sha (ADR 0010). A hand-edit on either host is a debugging step, never a

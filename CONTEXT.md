@@ -18,7 +18,9 @@ nothing else: all 28 physical cores and all 251 GiB, unsliced and unfenced
 deploy edge — an operator switches it by hand from a sha on origin (ADR
 0010) — and its environment arrives by its own poll of GitHub. The rename
 from `ac-box` is `homelab-ygc.9`; until it lands this machine is `ac-box`.
-_Avoid_: ac-box (after the rename), the Z840
+_Avoid_: ac-box (after the rename). "The Z840" is the hardware, fine as a
+name for the machine across the rename; it is what the docs dated 26 Sep 2026
+use.
 
 **ac-box**:
 The Z840's name in `hosts/`, `secrets/`, ssh config and the tracker until
