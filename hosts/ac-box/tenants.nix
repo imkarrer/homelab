@@ -5,12 +5,12 @@
 # The Z840 is llm-box in everything but name, and the rename (homelab-ygc.9)
 # is where this file moves to hosts/llm-box/.
 #
-# Takes `config` for agent-hub's metrics.address, which must be a REFERENCE
-# to homelab.host.networks.lan.address, never a literal -- the same way
-# configuration.nix feeds services.agent-hub.lanAddress. A literal passes
-# today and fails evaluation the day the box's address moves, which the
-# cutover is.
-{ config, lib, ... }:
+# Took `config` for agent-hub's metrics.address until homelab-ygc.10 moved
+# the scrape to arcade-box's peers entry; the header keeps the module's
+# shape so the day a tenant here needs a host fact again it is a REFERENCE
+# to homelab.host, never a literal -- a literal passes today and fails
+# evaluation the day the box's address moves, which the cutover was.
+{ lib, ... }:
 
 {
   homelab.tenants = {
@@ -101,29 +101,16 @@
         backup = true;
       };
 
-      # Scraped on the LAN address, not loopback -- the first endpoint on this
-      # box that is. llama-server runs `--host 192.168.1.50 --metrics`
-      # (configuration.nix) because being reachable from other machines is
-      # the whole point of the service, and it does NOT also listen on
-      # loopback: `curl 127.0.0.1:8100/metrics` on the box is connection
-      # refused while the LAN address serves eleven `llamacpp:*` series
-      # (verified 12 Sep 2026, generation 32). Until metricsEndpoint gained
-      # `address` today this was `metrics = null` with a comment saying why;
-      # that comment was right that it needed a schema change, and the schema
-      # changed.
-      #
-      # address is a REFERENCE to the host fact, never the literal. metrics.nix
-      # asserts it is loopback or an address homelab.host actually declares,
-      # so a literal would pass today and fail the day the address moves --
-      # which is the assertion doing its job, but late and by surprise.
-      #
-      # job defaults to the tenant name, "agent-hub". No dashboard is keyed on
-      # it yet, so there is nothing to preserve and no reason to spell it
-      # differently from the tenant.
-      metrics = {
-        port = 8100;
-        address = config.homelab.host.networks.lan.address;
-      };
+      # No local scrape: this host runs no Prometheus since the cutover. The
+      # model server's /metrics (llamacpp:* and llamaswap_* through nginx on
+      # the LAN port) is scraped by arcade-box as a PEER endpoint --
+      # hosts/arcade-box/host.nix, peers.<this host>.metrics, job "agent-hub"
+      # (homelab-ygc.10) -- which is the one place the port and address are
+      # spelled for that purpose. From 12 to 26 Sep 2026 this was
+      # `metrics = { port = 8100; address = <lan>; }` and the box's own
+      # Prometheus scraped it; with services.prometheus off, that declaration
+      # rendered nothing and was a third spelling of 8100.
+      metrics = null;
     };
 
   };

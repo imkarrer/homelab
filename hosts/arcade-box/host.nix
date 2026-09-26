@@ -53,8 +53,15 @@ in
     # this entry is the only place that machine is watched from. Each job
     # keeps the name the Z840's own Prometheus scraped it under, on purpose:
     # see the option's description in modules/platform/host-options.nix.
-    peers.ac-box = {
+    peers.${acBox.name} = {
       address = acBox.networks.lan.address;
+      # HostLoadHigh's line for the Z840: its whole thread count, not half.
+      # Its one tenant spins 28 generation threads on 28 physical cores by
+      # design (homelab-ygc.13), so node_load5 lives at 28-30 through every
+      # long model session -- half the threads is its operating point, not
+      # an alert. Above 56 something besides the model server is running
+      # the machine flat out.
+      loadHigh = acBox.capacity.cpuThreads;
       metrics = [
         # The platform's node exporter on the Z840 (modules/platform/
         # node-exporter.nix, enabled in hosts/ac-box/configuration.nix).

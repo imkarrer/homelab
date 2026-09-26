@@ -159,117 +159,59 @@ let
   # What this host scrapes on OTHER homelab hosts: homelab.host.peers, an L0
   # fact (modules/platform/host-options.nix), flattened to one entry per
   # endpoint with the peer's name and address on it. Empty on a host that
-  # names no peer, in which case everything from here to peerAssertions is
-  # [] and the scrape config is the local list alone.
+  # names no peer, in which case the scrape config is the local list alone
+  # and peerAssertions is []. The merge and its refusals are ./peers.nix, a
+  # pure function, so tests/eval-peers.nix can prove the refusals.
   peers = config.homelab.host.peers;
-  peerEntries = lib.concatLists (
-    lib.mapAttrsToList (
-      peer: p:
-      map (
-        m:
-        m
-        // {
-          inherit peer;
-          inherit (p) address;
-        }
-      ) p.metrics
-    ) peers
-  );
-  peerTarget = e: {
-    targets = [ "${e.address}:${toString e.port}" ];
-    labels.host = e.peer;
-  };
-
-  # The rule, in two halves. A peer endpoint whose job is one this host
-  # scrapes locally (node, today) becomes a second target of THAT job: same
-  # job_name, same interval, same curation, one more instance -- which is
-  # what lets a dashboard keyed on job="node" show both machines without
-  # knowing there are two. Any other peer job is a scrape config of its own,
-  # from the entries' interval/path/keep (agent-hub, today), with every
-  # peer that declares that job as a target of it.
-  localJobNames = map (c: c.job_name) localScrapeConfigs;
-  localByJob = lib.listToAttrs (map (c: lib.nameValuePair c.job_name c) localScrapeConfigs);
-  isLocalJob = e: lib.elem e.job localJobNames;
-  mergedEntries = lib.filter isLocalJob peerEntries;
-  peerOnlyByJob = lib.groupBy (e: e.job) (lib.filter (e: !isLocalJob e) peerEntries);
-
-  # Curation is per job in Prometheus, not per target, so a merged entry's
-  # interval/path/keep cannot be honoured separately from the local job's.
-  # They are asserted equal instead (peerAssertions), so hosts/<name>/host.nix
-  # tells the whole truth about what is scraped from the peer and cannot
-  # drift from what actually is. These read the local job's values back.
-  intervalOf = c: c.scrape_interval or scrapeInterval;
-  pathOf = c: c.metrics_path or "/metrics";
-  keepOf =
-    c:
-    let
-      ks = lib.filter (
-        r: (r.action or "") == "keep" && (r.source_labels or [ ]) == [ "__name__" ]
-      ) (c.metric_relabel_configs or [ ]);
-    in
-    if ks == [ ] then null else (lib.head ks).regex;
-
-  scrapeConfigsWithPeers = map (
-    c:
-    c
-    // {
-      static_configs =
-        c.static_configs ++ map peerTarget (lib.filter (e: e.job == c.job_name) mergedEntries);
-    }
-  ) localScrapeConfigs;
-
-  peerScrapeConfigs = lib.mapAttrsToList (
-    job: es:
-    let
-      e = lib.head es;
-    in
-    {
-      job_name = job;
-      scrape_interval = e.interval;
-      static_configs = map peerTarget es;
-    }
-    // lib.optionalAttrs (e.path != "/metrics") { metrics_path = e.path; }
-    // lib.optionalAttrs (e.keep != null) {
-      metric_relabel_configs = [
-        {
-          source_labels = [ "__name__" ];
-          regex = e.keep;
-          action = "keep";
-        }
-      ];
-    }
-  ) peerOnlyByJob;
-
-  # The addresses this host has, for the first assertion: the inverse of
-  # metrics.nix's rule. A tenant endpoint must be HERE; a peer must not be.
   hostAddresses = lib.filter (a: a != null) (lib.mapAttrsToList (_: n: n.address) host.networks);
+  peerSet = import ./peers.nix {
+    inherit
+      lib
+      peers
+      localScrapeConfigs
+      hostAddresses
+      scrapeInterval
+      ;
+  };
+  peerAssertions = peerSet.assertions;
 
-  peerAssertions =
-    lib.mapAttrsToList (name: p: {
-      assertion = p.address != "127.0.0.1" && !(lib.elem p.address hostAddresses);
-      message = "homelab.host.peers.${name}.address = \"${p.address}\" is this host (loopback or one of homelab.host.networks.*.address). A peer is another machine; this host's own exporters are the local jobs in modules/observability/default.nix.";
-    }) peers
-    ++ map (
-      e:
-      let
-        c = localByJob.${e.job};
-        show = k: if k == null then "null" else k;
-      in
-      {
-        assertion = e.interval == intervalOf c && e.path == pathOf c && e.keep == keepOf c;
-        message = "homelab.host.peers.${e.peer}.metrics: job \"${e.job}\" is one this host scrapes locally, so the peer's target joins that job and takes its interval (${intervalOf c}), path (${pathOf c}) and keep regex (${show (keepOf c)}); the entry says interval ${e.interval}, path ${e.path}, keep ${show e.keep}. Curation is per job, not per target: make them equal, or give the peer's endpoint a job of its own.";
-      }
-    ) mergedEntries
-    ++ lib.mapAttrsToList (
-      job: es:
-      let
-        e = lib.head es;
-      in
-      {
-        assertion = lib.all (x: x.interval == e.interval && x.path == e.path && x.keep == e.keep) es;
-        message = "homelab.host.peers: job \"${job}\" is declared by more than one peer with differing interval/path/keep; one job has one curation.";
-      }
-    ) peerOnlyByJob;
+  # One HostLoadHigh per machine, each with its own line, selected by the
+  # host= label every target carries. This host: half its threads, the
+  # "sustained, not peak" line the rule has always had (6 on the Tiny). A
+  # peer: its loadHigh from homelab.host.peers, because the same formula is
+  # wrong for the Z840 -- its one tenant runs 28 generation threads by design
+  # (homelab-ygc.13), so node_load5 sits at 28-30 through every long model
+  # session, exactly the old line; the review of homelab-ygc.10 caught it.
+  # A literal per machine here would be a second spelling of a host fact.
+  # Rendered at the rules string's own indentation: `- alert:` at six.
+  loadLines = [
+    {
+      name = host.name;
+      line = host.capacity.cpuThreads / 2;
+    }
+  ]
+  ++ lib.mapAttrsToList (name: p: {
+    inherit name;
+    line = p.loadHigh;
+  }) peerSet.nodePeers;
+  # Explicit indentation per line, not an indented '' string: Nix strips a
+  # ''-string's own common indentation, which put the first rendering of
+  # this at column 0 of the rules file.
+  loadRules = lib.concatMapStrings (
+    { name, line }:
+    let
+      l = toString line;
+    in
+    lib.concatMapStrings (s: "      ${s}\n") [
+      "- alert: HostLoadHigh"
+      "  expr: node_load5{host=\"${name}\"} > ${l}"
+      "  for: 10m"
+      "  labels:"
+      "    severity: warning"
+      "  annotations:"
+      "    summary: \"{{ $labels.host }} ({{ $labels.instance }}) 5m load is {{ $value | printf \\\"%.1f\\\" }}, over its line of ${l}\""
+    ]
+  ) loadLines;
 
   # The UniFi controller the two exporters below poll -- read from the host for
   # the same reason grafanaAddr is, three lines up. Until 9 Sep 2026 this module
@@ -470,7 +412,7 @@ in
         ];
       }
     ];
-    scrapeConfigs = scrapeConfigsWithPeers ++ peerScrapeConfigs;
+    scrapeConfigs = peerSet.scrapeConfigs;
     rules = [
       ''
         groups:
@@ -493,18 +435,9 @@ in
                 annotations:
                   summary: "{{ $labels.host }} ({{ $labels.instance }}) root disk is {{ $value | printf \"%.0f\" }}% full"
 
-              # Half the instance's own threads, from the exporter itself: one
-              # node_cpu_seconds_total{mode="idle"} series per logical CPU, so
-              # no thread count is a literal anywhere -- 28 on the Z840, 6 on
-              # the Tiny, the same "sustained, not peak" line each has had.
-              - alert: HostLoadHigh
-                expr: node_load5 > on(instance) group_left() (count by (instance) (node_cpu_seconds_total{mode="idle"}) / 2)
-                for: 10m
-                labels:
-                  severity: warning
-                annotations:
-                  summary: "{{ $labels.host }} ({{ $labels.instance }}) 5m load is {{ $value | printf \"%.1f\" }}, over half its threads"
-
+              # One rule per machine (loadRules above): this host at half its
+              # threads, each peer at the loadHigh its peers entry carries.
+        ${loadRules}
               - alert: HostMemLow
                 expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
                 for: 10m

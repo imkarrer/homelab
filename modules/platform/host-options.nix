@@ -109,6 +109,21 @@ let
         default = [ ];
         description = "The endpoints this host's Prometheus scrapes on the peer.";
       };
+
+      loadHigh = mkOption {
+        type = types.nullOr types.ints.positive;
+        default = null;
+        description = ''
+          node_load5 above which HostLoadHigh fires for this peer (for 10
+          minutes). Required when `metrics` declares the node job; refused
+          otherwise absent (modules/observability/peers.nix). The collector
+          cannot see the peer's capacity, and one formula is not every
+          machine's line: the collector host alerts at half its own threads,
+          while the Z840 runs 28 generation threads by design, so its load
+          sits at 28-30 whenever a model is working. Read it off the peer's
+          own hosts/<name>/host.nix capacity, never typed.
+        '';
+      };
     };
   };
 

@@ -573,10 +573,11 @@ login that owns the game (`homelab-ygc.12`).
   `hosts/llm-box`, hostname, `secrets/` file name, ssh config, the
   tracker, every tree's docs, and the hand-pull procedure for
   `agent-hub`'s environment now that no agent stages it there.
-- **Cross-host scrape**: llm-box's node exporter and `llama-server`'s
-  `/metrics` into arcade-box's Prometheus (ADR 0010, "scraped over the
-  LAN"). `metricsEndpoint.address` only admits loopback or this host's own
-  addresses; a peer-host fact is a schema addition.
+- **Cross-host scrape** -- landed 26 Sep 2026 (`homelab-ygc.10`, PR #16):
+  llm-box's node exporter and `llama-server`'s `/metrics` into arcade-box's
+  Prometheus (ADR 0010, "scraped over the LAN"). The peer-host fact is
+  `homelab.host.peers` in `hosts/arcade-box/host.nix`; the exporter is
+  `modules/platform/node-exporter.nix`; the host alerts fire per machine.
 - ADR 0010's status and hardware row; `docs/current-state.md` and
   `docs/architecture.md` Part III for two hosts; `README.md`'s first line.
 - `homelab-bqo.42` gets its answer: both reservations, both MACs, which
