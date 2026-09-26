@@ -69,6 +69,27 @@ NUMA node (85 GB fits in a socket's 128 GB, with its 14 cores and 4 local
 channels) is a `llama-server` flag decided at tuning time, not a platform
 concern.
 
+**Amendment, 26 Sep 2026 (`homelab-ygc.14`): the environment edge stays,
+fed by a poll.** "No machinery" above was written about the *closure*: the
+Z840 is still switched by hand. But `agent-hub`'s *environment* (ADR 0009)
+had an edge before the cutover -- Buildkite on the same box staged a green
+sha, `agent-hub-environment-pull` applied it -- and moving CI to arcade-box
+cut it: a green agent-hub build staged a record on a host with no agent-hub
+stub, and the Z840's tree fell behind main with nothing to say so. The
+staging half is now the host's own timer, `agent-hub-environment-poll`
+(`homelab.tenants.<t>.environment.poll`, `modules/tenant/environment-poll.nix`):
+two unauthenticated GitHub API calls every ten minutes read main's HEAD and
+its commit status for the tenant's own `buildkite/<slug>` context, and a
+green sha not already staged or applied is written in exactly
+`queue-environment`'s record with `source = "github-poll"`. The applying half
+is unchanged. What this costs: a tenant's green-ness is now read off GitHub's
+commit status, so a pipeline whose statuses do not reach GitHub is a tenant
+that never deploys on such a host -- and on the day this landed, Buildkite
+published none for `agent-hub`, `homelab` or `home-arcade`, only for the two
+pipelines connected through its GitHub App (`docs/architecture.md`, row 35).
+The table's "no `environment-pull`" was never true of the built system and
+is read as "no CI agent".
+
 **Why arcade-box keeps CI beside the lobbies.** The Tiny's budget is ~24 GB
 and ~6 cores after the standing load; the heaviest realistic trio of jobs
 (homelab `flake check`, inquire unit, one inquire smoke stack) is ~18 GB and

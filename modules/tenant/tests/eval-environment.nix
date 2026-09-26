@@ -932,9 +932,13 @@ in
           assertion =
             lib.hasInfix "https://api.github.com" text
             && lib.hasInfix "commits/$sha/status" text
+            && lib.hasInfix "\ncontext=buildkite/agent-hub\n" text
+            && lib.hasInfix "select(.context == $ctx)" text
+            && !(lib.hasInfix ".state // empty" text)
+            && !(lib.hasInfix "statuses[0]" text)
             && lib.hasInfix "[ \"$state\" != success ]" text
             && lib.hasInfix "[ \"$sha\" = \"$staged\" ] || [ \"$sha\" = \"$appliedSha\" ]" text;
-          message = "the poll must ask the combined status, stage only on success, and skip a sha already staged or applied";
+          message = "the poll must ask the combined status, read only the tenant's own buildkite/<slug> context (never the combined state or the first status), stage only on its success, and skip a sha already staged or applied";
         }
         {
           assertion = lib.hasInfix "mv -f \"$tmp\" \"$pending\"" text && lib.hasInfix "\"$pending.tmp.$$\"" text;

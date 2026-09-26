@@ -30,9 +30,11 @@
 # Two unauthenticated GET requests to api.github.com: the tree's main HEAD
 # (/repos/<owner>/<repo>/commits/main -> .sha), and -- only if that sha is
 # neither staged nor applied here already -- that commit's COMBINED STATUS
-# (/commits/<sha>/status -> .state). "success" is what the tenant's
-# Buildkite pipeline publishes once every step is green (hub/pipelines/
-# <tree>.json, publish_commit_status); anything else is "not green yet":
+# (/commits/<sha>/status), read for the ONE context the tenant's own
+# Buildkite pipeline publishes, `buildkite/<slug>` (hub/pipelines/
+# <tree>.json: slug, publish_commit_status) -- never the combined `.state`,
+# which any app or token with statuses:write could turn green. That
+# context's "success" means every step was green; anything else is "not green yet":
 # one log line, exit 0, ask again next tick. A green sha is written to
 # pending-environment-<tenant>.json in EXACTLY the tree-kind record
 # scripts/hub-queue-environment.sh writes -- {tenant, sha, tree, queued_at,
@@ -149,6 +151,11 @@ let
       env = t.environment;
       registryRemote = remoteFor env.tree;
       ownerRepo = ownerRepoOf registryRemote;
+      # The tenant's pipeline slug, from the object hub-pipeline.sh
+      # converges (hub/pipelines/<tree>.json), for the status context
+      # `buildkite/<slug>`. Read, not spelled: a tree that polls must have
+      # a pipeline, and a missing file fails evaluation naming the path.
+      pipelineSlug = (builtins.fromJSON (builtins.readFile (../../hub/pipelines + "/${env.tree}.json"))).slug;
       stateDir = toString cfg.stateDir;
       # The same two expressions environment-pull.nix bakes, so the file
       # this writes is the file that pull reads and its path unit watches.
@@ -170,6 +177,13 @@ let
           # `tree`, and what the pull unit compares against.
           tree=${lib.escapeShellArg registryRemote}
           ownerRepo=${lib.escapeShellArg ownerRepo}
+          # The one status context that vouches for a sha: the tenant's own
+          # Buildkite pipeline (hub/pipelines/<tree>.json, slug). Combined
+          # `state` is the AND over every context anyone posts, so reading it
+          # would let any app or token with statuses:write green a sha; the
+          # review of homelab-ygc.14 reproduced that. ADR 0009's edge trusts
+          # Buildkite alone, and so does this one.
+          context=${lib.escapeShellArg "buildkite/${pipelineSlug}"}
           branch=main
           defaultStateDir=${lib.escapeShellArg stateDir}
           # Quoted by hand, not escapeShellArg: a bare name-with-hyphens.json
@@ -237,17 +251,25 @@ let
           fi
 
           status=$(ask "commits/$sha/status") || retry "could not read the combined status of $sha from $api (curl exit $?)"
-          state=$(jq -r '.state // empty' <<<"$status" 2>/dev/null) || state=""
           count=$(jq -r '.total_count // 0' <<<"$status" 2>/dev/null) || count=0
+          # Only $context's own state and link, never the combined `.state`
+          # (see the note at `context=` above). The combined endpoint already
+          # keeps one status per context, the newest.
+          vouch=$(jq -r --arg ctx "$context" \
+            '[.statuses[]? | select(.context == $ctx)] | first // empty | "\(.state) \(.target_url // "")"' \
+            <<<"$status" 2>/dev/null) || vouch=""
+          state=''${vouch%% *}
+          build=''${vouch#* }
           if [ "$state" != success ]; then
             if [ "$count" = 0 ]; then
               log "$branch HEAD $sha has no commit status at all (total_count 0): its build has not started, or Buildkite is not publishing statuses for $ownerRepo (hub/pipelines says it should; check the pipeline's GitHub connection). Not green; not staging."
+            elif [ -z "$state" ]; then
+              log "$branch HEAD $sha has $count status(es) and none from $context; only the tenant's own pipeline vouches for a sha. Not staging."
             else
-              log "$branch HEAD $sha is '$state' with $count status(es); not green yet, not staging."
+              log "$branch HEAD $sha is '$state' at $context; not green yet, not staging."
             fi
             exit 0
           fi
-          build=$(jq -r '.statuses[0].target_url // ""' <<<"$status" 2>/dev/null) || build=""
 
           # The record, in hub-queue-environment.sh's tree-kind shape and
           # key order, `source` naming this edge. jq builds it so nothing
