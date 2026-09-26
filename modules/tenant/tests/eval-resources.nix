@@ -216,6 +216,58 @@ in
     extraModules = [ ./fixtures/resources-float-budget.nix ];
   };
 
+  # homelab.tiers.<tier>.fence = false (homelab-ygc.3, 26 Sep 2026): the
+  # per-host opt-out ADR 0010 asks for on arcade-box ("tier -> slice without
+  # the cpuset fence"). Same ac-box facts and defaults as `good`, slices on,
+  # both fenced tiers opted out: their slices must carry NO AllowedCPUs at
+  # all -- not an empty string, not the range -- while MemoryMax, CPUWeight
+  # and IOWeight stay exactly what `good` gets, because the flag removes one
+  # line from a slice and nothing else. critical is unaffected either way.
+  fenceOff = mkCase {
+    extraModules = [
+      {
+        homelab.enforce.slices = true;
+        homelab.tiers.background.fence = false;
+        homelab.tiers.batch.fence = false;
+      }
+    ];
+    checks = cfg: [
+      {
+        assertion = !(cfg.systemd.slices.background.sliceConfig ? AllowedCPUs);
+        message = "fence = false: background.slice must carry no AllowedCPUs, got \"${cfg.systemd.slices.background.sliceConfig.AllowedCPUs or "<unset>"}\"";
+      }
+      {
+        assertion = !(cfg.systemd.slices.batch.sliceConfig ? AllowedCPUs);
+        message = "fence = false: batch.slice must carry no AllowedCPUs, got \"${cfg.systemd.slices.batch.sliceConfig.AllowedCPUs or "<unset>"}\"";
+      }
+      {
+        assertion = cfg.systemd.slices.batch.sliceConfig.MemoryMax == "25702M";
+        message = "fence = false must leave MemoryMax alone (batch: 0.10 * 251 GiB = 25702M), got ${cfg.systemd.slices.batch.sliceConfig.MemoryMax or "<unset>"}";
+      }
+      {
+        assertion = cfg.systemd.slices.batch.sliceConfig.CPUWeight == 50;
+        message = "fence = false must leave CPUWeight alone (batch: 0.05 -> 50), got ${toString (cfg.systemd.slices.batch.sliceConfig.CPUWeight or "<unset>")}";
+      }
+    ];
+  };
+
+  # The default: `fence` unset means fenced, so `good`'s AllowedCPUs checks
+  # above are also the proof that adding the option changed nothing for a
+  # host that does not set it. This case pins that reading explicitly.
+  fenceDefaultOn = mkCase {
+    extraModules = [ { homelab.enforce.slices = true; } ];
+    checks = cfg: [
+      {
+        assertion = cfg.homelab.tiers.batch.fence && cfg.homelab.tiers.background.fence;
+        message = "homelab.tiers.<tier>.fence must default to true";
+      }
+      {
+        assertion = cfg.systemd.slices.batch.sliceConfig ? AllowedCPUs;
+        message = "with fence at its default, batch.slice must still be fenced";
+      }
+    ];
+  };
+
   # Case name -> whether `<case>.checked` must evaluate cleanly (false for
   # brokenBudget, which exists to prove the 0.9 memoryShare budget assertion
   # fires). Read by modules/tenant/tests/check.nix, which is what makes
@@ -225,5 +277,7 @@ in
     allFalseNoSlicesEmitted = true;
     floatBudget = true;
     brokenBudget = false;
+    fenceOff = true;
+    fenceDefaultOn = true;
   };
 }

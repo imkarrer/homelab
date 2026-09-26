@@ -255,7 +255,7 @@ in
     stateDir = "/var/lib/ac-host-dev";
   };
 
-  # arcade's host side (hosts/ac-box/tenants/arcade.nix): the user, the
+  # arcade's host side (hosts/arcade-box/tenants/arcade.nix): the user, the
   # directories, the SMB and rsync exports. lanAddress has no default there
   # on purpose -- it was once duplicated into two tenant modules and
   # drifted -- so the host fact is passed in from homelab.host here. The
@@ -520,7 +520,7 @@ in
   # firewall holes are the tenant's port claims there.
   #
   # The values are the module's own argv minus the store path, read from
-  # the same options (services.arcade-hub.*, hosts/ac-box/tenants/arcade.nix)
+  # the same options (services.arcade-hub.*, hosts/arcade-box/tenants/arcade.nix)
   # the exports read, so the two cannot drift:
   #
   #   freeciv    freeciv-server --bind <lan> --port <freeciv.port>

@@ -108,7 +108,7 @@ Keep those lists short, explicit and hand-checked; never derive or glob them.
 ## Hub
 
 ```bash
-bash scripts/hub-status.sh        # three-way state: box vs origin vs WSL trees, ~2s
+bash scripts/hub-status.sh        # three-way state: each box vs origin vs WSL trees, ~5s
 ```
 
 Run it before acting and after landing. It answers what the box runs, what

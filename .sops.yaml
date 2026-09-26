@@ -8,11 +8,16 @@
 # Edit a secret (identity derived in-memory, never on disk):
 #   SOPS_AGE_KEY="$(ssh-to-age -private-key -i ~/.ssh/id_ed25519_ac-host)" sops secrets/ac-box.yaml
 keys:
-  - &ac-box    age135yqc5evu2tjffzgr8ryrn7n65qeuccu26jp5scpf8hp36eyrgest8agyl
-  - &operator  age1ygy44hwqkmnf8s742a9vf9k9fxwc7gh9jl2hyfmwwlk45n4laqqqrmyk8w
+  - &ac-box      age135yqc5evu2tjffzgr8ryrn7n65qeuccu26jp5scpf8hp36eyrgest8agyl
+  # arcade-box: the Lenovo M920q, ssh-to-age of its host ed25519 key (keyscanned
+  # from WSL and from ac-box on 26 Sep 2026, identical; homelab-ygc.3). One
+  # file, two hosts, until the Z840 is stripped and needs none of it.
+  - &arcade-box  age15lpvpdcg6k7jt82wk4fwmu7a3gtgkf2mwk6cxfst5r2xura8u9xsuz33rr
+  - &operator    age1ygy44hwqkmnf8s742a9vf9k9fxwc7gh9jl2hyfmwwlk45n4laqqqrmyk8w
 creation_rules:
   - path_regex: secrets/.*\.yaml$
     key_groups:
       - age:
           - *ac-box
+          - *arcade-box
           - *operator

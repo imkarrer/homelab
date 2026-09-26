@@ -375,7 +375,7 @@
     # reader either way). No `path`, no copy unit: the third shape, in the
     # header. What each key does is ac-host's business
     # (compose/docker-compose.buildkite.yml, compose/minio-init.sh); the two
-    # that matter for the agent's identity are BUILDKITE_AGENT_NAME=ac-box
+    # that matter for the agent's identity are BUILDKITE_AGENT_NAME=<homelab.host.name>
     # and BUILDKITE_AGENT_TAGS containing queue=self, which every pipeline
     # hub-pipeline.sh creates targets.
     #
@@ -463,7 +463,7 @@
       content = ''
         # Rendered by sops-nix from homelab's modules/platform/secrets.nix; not hand-edited.
         BUILDKITE_AGENT_TOKEN=${config.sops.placeholder.buildkite-agent-token}
-        BUILDKITE_AGENT_NAME=ac-box
+        BUILDKITE_AGENT_NAME=${config.homelab.host.name}
         BUILDKITE_AGENT_TAGS=queue=self
 
         MINIO_ROOT_USER=ac-minio
@@ -509,7 +509,7 @@
   # old env until the reboot that followed. Later switches whose render
   # differs do bounce it; if no reboot is coming, `systemctl restart
   # ac-host-env` does the same by hand.
-  systemd.services.ac-host-env = {
+  systemd.services.ac-host-env = lib.mkIf config.services.ac-host.enable {
     description = "Install the sops-rendered /var/lib/ac-host/.env as a regular file";
     wantedBy = [ "multi-user.target" ];
     # cmp is diffutils, not coreutils; neither is on a unit's PATH by default.
@@ -566,7 +566,7 @@
   # The sidecars (auth, plugin, details) are compose-owned and rebuilt by
   # ci_downtime.py from the file as it is at 03:00 -- after the previous
   # night's 03:30 switch, so they see the current render.
-  systemd.services.ac-host-bot = {
+  systemd.services.ac-host-bot = lib.mkIf config.services.ac-host.enable {
     after = [ "ac-host-env.service" ];
     partOf = [ "ac-host-env.service" ];
   };

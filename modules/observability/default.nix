@@ -44,6 +44,23 @@ let
   grafanaAddr = config.homelab.host.networks.lan.address;
   grafanaPort = 3000;
 
+  # The host's name and size, for the alert rules below. Until 26 Sep 2026
+  # (homelab-ygc.3, the second host) the rules carried "ac-box" as the group
+  # name, as four alert-name prefixes and in three summaries, and
+  # `node_load5 > 28` with "(56 threads)" beside it -- ac-box's thread count
+  # halved, as a literal an L2 module is not allowed to hold. Every one of
+  # those now comes from homelab.host, and for ac-box renders to the very
+  # same bytes, so the rules file (and the toplevel drvPath) did not change
+  # for it; on a 12-thread host the load line reads 6 and says so.
+  host = config.homelab.host;
+  # "ac-box" -> "AcBox", "arcade-box" -> "ArcadeBox": Alertmanager groups by
+  # alertname and the Discord receiver shows it, so the prefix is the host.
+  hostTitle = lib.concatMapStrings (
+    w: lib.toUpper (lib.substring 0 1 w) + lib.substring 1 (-1) w
+  ) (lib.splitString "-" host.name);
+  # Half the threads: the same "sustained, not peak" line ac-box has had.
+  loadHighThreshold = host.capacity.cpuThreads / 2;
+
   # The UniFi controller the two exporters below poll -- read from the host for
   # the same reason grafanaAddr is, three lines up. Until 9 Sep 2026 this module
   # did both at once: it derived the Grafana bind correctly and then hardcoded
@@ -323,33 +340,33 @@ in
     rules = [
       ''
         groups:
-          - name: ac-box
+          - name: ${host.name}
             rules:
-              - alert: AcBoxDiskHigh
+              - alert: ${hostTitle}DiskHigh
                 expr: 100 * (1 - node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="tmpfs"}) > 80
                 for: 10m
                 labels:
                   severity: warning
                 annotations:
-                  summary: "ac-box root disk is {{ $value | printf \"%.0f\" }}% full"
+                  summary: "${host.name} root disk is {{ $value | printf \"%.0f\" }}% full"
 
-              - alert: AcBoxLoadHigh
-                expr: node_load5 > 28
+              - alert: ${hostTitle}LoadHigh
+                expr: node_load5 > ${toString loadHighThreshold}
                 for: 10m
                 labels:
                   severity: warning
                 annotations:
-                  summary: "ac-box 5m load is {{ $value | printf \"%.1f\" }} (56 threads)"
+                  summary: "${host.name} 5m load is {{ $value | printf \"%.1f\" }} (${toString host.capacity.cpuThreads} threads)"
 
-              - alert: AcBoxMemLow
+              - alert: ${hostTitle}MemLow
                 expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.10
                 for: 10m
                 labels:
                   severity: warning
                 annotations:
-                  summary: "ac-box has under 10% RAM available"
+                  summary: "${host.name} has under 10% RAM available"
 
-              - alert: AcBoxExporterDown
+              - alert: ${hostTitle}ExporterDown
                 expr: up{job=~"node|cadvisor"} == 0
                 for: 5m
                 labels:

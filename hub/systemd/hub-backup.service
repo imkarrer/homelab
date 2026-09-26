@@ -14,7 +14,7 @@
 # these files are installed through /etc/nixos/configuration.nix rather than
 # copied in.
 [Unit]
-Description=Back ac-box's declared state up into the local restic repo (homelab row 22)
+Description=Back each homelab host's declared state up into the local restic repo (homelab row 22)
 Documentation=file:///home/nixos/src/homelab/docs/runbook-restore.md
 Wants=network-online.target
 After=network-online.target
