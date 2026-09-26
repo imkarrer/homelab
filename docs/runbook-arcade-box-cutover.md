@@ -302,11 +302,38 @@ ssh root@192.168.1.218 'loginctl terminate-user arcade 2>/dev/null; userdel -r a
 From the switch on, `root` and `nixosuser` carry the key exactly as on
 ac-box, password ssh is off (D7) and `wheel` sudoes without a password.
 
+The command that worked, 26 Sep 2026 (`22c30a3`, CI build 144 green on the
+branch first), as a transient unit so an sshd restart mid-switch cannot
+take the switch with it, and with two things the installer's system lacks
+supplied on the way in:
+
 ```bash
-# the sha is on origin and green (hub-status's CI section says so)
-ssh arcade-box 'nixos-rebuild switch --refresh \
-  --flake github:imkarrer/homelab/<full sha>#arcade-box'
+ssh arcade-box 'cat > /root/first-switch.sh' <<'EOF'
+#!/run/current-system/sw/bin/bash
+set -euo pipefail
+# no experimental features in the installer's nix.conf; accept-flake-config
+# so root takes flake.nix's cache.flox.dev rather than compiling flox
+export NIX_CONFIG=$'experimental-features = nix-command flakes\naccept-flake-config = true'
+export PATH=/run/current-system/sw/bin:/run/wrappers/bin:$PATH
+# no `git` on the installer's system, and nix's fetcher shells out to it for
+# flox's git+https input (httpmock): the first attempt died there
+exec nix shell github:NixOS/nixpkgs/c5c4a43b0e8056328ec4529f735cabdb8f1942bb#git -c \
+  nixos-rebuild switch --refresh --flake github:imkarrer/homelab/<full sha>#arcade-box
+EOF
+ssh arcade-box 'chmod +x /root/first-switch.sh; systemd-run --unit=arcade-box-first-switch \
+  --setenv=HOME=/root --setenv=PATH=/run/current-system/sw/bin:/run/wrappers/bin \
+  /run/current-system/sw/bin/bash /root/first-switch.sh'
+# then: systemctl is-active arcade-box-first-switch; journalctl -u arcade-box-first-switch
 ```
+
+Three things the run taught. A `#!/usr/bin/env bash` shebang fails under
+`systemd-run` (its PATH has no `env`); the interpreter is spelled
+absolutely. The unit ends **failed with status 4** even on success:
+`switch-to-configuration` returns 4 when any unit failed to start, and
+the two arcade stubs are meant to. And the kernel hostname stays `nixos`
+until a reboot (`hostnamectl --static` already says `arcade-box`); the
+reboot before the cutover settles it. 12:59 to 13:02 wall clock, almost
+all of it substitution.
 
 Proof: `nixos-version --configuration-revision` is the sha; `systemctl
 --failed` is empty; `arcade-freeciv`/`arcade-mindustry` are **failed with
