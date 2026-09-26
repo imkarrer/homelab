@@ -157,7 +157,12 @@ in
       state = toString hub.stateDir;
     in
     {
-      enable = false;
+      # ON since 26 Sep 2026 13:08 CDT: with this false, the pull unit pulled
+      # generation 2 of imkarrer/arcade into /var/lib/arcade/env, warmed and
+      # pinned it (run path f6m1q3pd...-environment-run, the one ac-box runs)
+      # per the order above; this line is its own push (homelab-ygc.5). Back
+      # to false is the rollback: the placeholder ExecStart at the next switch.
+      enable = true;
       source = {
         kind = "floxhub";
         env = "imkarrer/arcade";
