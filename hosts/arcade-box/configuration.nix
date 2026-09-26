@@ -56,7 +56,8 @@ in
   # ---------------------------------------------------------------------------
   # ci: the Buildkite agent and MinIO, the same compose unit ac-box runs.
   #
-  # BUILD-UP: off, tenant and unit both. Every pipeline says `queue: self`,
+  # ON since the cutover (runbook 4.2). During the build-up both were off,
+  # tenant and unit: every pipeline says `queue: self`,
   # so a second agent here would take jobs that stage state on THIS host
   # (queue-closure, queue-prod, the image step's docker load) while ac-box
   # is still the one that should receive them. The tenant is disabled with
@@ -65,8 +66,7 @@ in
   # phase 3 builds the agent image and starts MinIO by hand without this;
   # 4.2 flips both to true and the queue moves whole.
   # ---------------------------------------------------------------------------
-  homelab.ci.enable = false;
-  homelab.tenants.ci.enable = false;
+  homelab.ci.enable = true;
   systemd.services.ac-host-ci = lib.mkIf config.homelab.ci.enable {
     wantedBy = [ "multi-user.target" ];
   };
@@ -105,7 +105,8 @@ in
   # assetto and bot: the lobbies, the sidecars, the Discord bot, the 03:00
   # recycle.
   #
-  # BUILD-UP: off, module and tenants alike, because they are live on ac-box:
+  # ON since the cutover (runbook 4.2). During the build-up they were off,
+  # module and tenants alike, because they were live on ac-box:
   # a second bot would post to Discord twice and queue DOWNTIME twice, and
   # three more lobbies would be three more forwards' worth of confusion.
   # With the tenants disabled the contract opens no lobby port on eno2 and
@@ -117,7 +118,7 @@ in
   # nobody else's. Read from the host fact, never repeated.
   # ---------------------------------------------------------------------------
   services.ac-host = {
-    enable = false;
+    enable = true;
     repoDir = "/var/lib/ac-host/src";
     stateDir = "/var/lib/ac-host";
     authOpen = false;
@@ -125,11 +126,9 @@ in
     lanInterface = lan.interface;
   };
   services.ac-host-dev = {
-    enable = false;
+    enable = true;
     stateDir = "/var/lib/ac-host-dev";
   };
-  homelab.tenants.assetto.enable = false;
-  homelab.tenants.bot.enable = false;
 
   # ---------------------------------------------------------------------------
   # arcade: the host side (hosts/arcade-box/tenants/arcade.nix -- the user,

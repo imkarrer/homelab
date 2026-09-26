@@ -105,66 +105,6 @@ in
   };
 
   # ---------------------------------------------------------------------------
-  # CI stack (Buildkite agent + MinIO), adopted under systemd (beads
-  # homelab-bqo.12). Was hand-started via `docker compose up -d --build`, per
-  # the compose file's own header -- no lifecycle management, no start-on-boot,
-  # no supervised restart. Not a resource-fencing fix (that's already handled
-  # by the compose file's own cgroup_parent, see homelab-bqo.27): this is
-  # purely about the stack surviving a reboot without a human remembering to
-  # run docker compose by hand.
-  #
-  # THIS FLAG MUST NOT REACH THE BOX BEFORE THE HAND-STARTED STACK IS STOPPED.
-  # docker-compose up -d --build against the same project name as an
-  # already-running stack is a port/network collision, not a clean takeover --
-  # see modules/ci/default.nix's own HAZARD 1. The runbook sequences this:
-  # commit and push this line, but do not switch until the box-side stop +
-  # volume/port verification (module header, steps 1-4) is done.
-  homelab.ci.enable = true;
-
-  # modules/ci/default.nix deliberately leaves wantedBy unset -- "a decision
-  # for whoever wires this module in" -- because the whole point of this bead
-  # is starting on boot instead of a human remembering docker compose up -d.
-  systemd.services.ac-host-ci.wantedBy = [ "multi-user.target" ];
-
-  # The ci tenant as a flox environment (ADR 0009 step 3, modules/ci/default
-  # .nix's NATIVE header): the agent, minio and its init as stubs from
-  # homelab's own .flox/ checked out at /var/lib/ci/env, in place of the
-  # compose unit. OFF: the line above is the whole of what runs, and the
-  # closure is byte-identical with or without this block (homelab-158.6).
-  # Flipping it is the cutover, docs/runbook-ci-native-cutover.md -- one
-  # push, after the box-side steps, never before -- because the switch that
-  # carries `true` stops the compose stack. jobEnvironment is set here
-  # regardless, since it reaches nothing while native is off: the paths
-  # ac-host's pipeline reads on the box, spelled from the tenant's own
-  # options rather than repeated (compose/docker-compose.buildkite.yml had
-  # them as literals), plus the two non-secret pages defaults that file
-  # carried; the secret and identity values are the ci-env render's.
-  # ON 18 Sep 2026 (runbook step 1: pre-flight done, MinIO data copied to
-  # /var/lib/ci/minio, queue drained), OFF 19 Sep 2026 by ADR 0011: a CI job
-  # is not a deployment to the box, so it runs in a container, and the
-  # container the agent ran in was also the job's sandbox -- /bin/bash, UTC,
-  # a checkout that goes with it, processes that die with a cancelled job.
-  # inquire-platform's memory-transport smoke fails on the native agent
-  # only (inquire inq-29g). The switch that carries false stops the three
-  # stubs and starts the compose unit again (runbook section 6). Back to
-  # true only once jobs have a sandbox of their own.
-  homelab.ci.native.enable = false;
-  homelab.ci.native.jobEnvironment =
-    let
-      ac = config.services.ac-host;
-      state = toString ac.stateDir;
-    in
-    {
-      AC_STATE = state;
-      AC_CONTENT = "${state}/content";
-      AC_SRC = toString ac.repoDir;
-      AC_BUILD = "${state}/build";
-      AC_SERVE_CONTENT = "${state}/content";
-      AC_PAGES_CHECKOUT = "";
-      GITHUB_STATUS_BRANCH = "main";
-    };
-
-  # ---------------------------------------------------------------------------
   # The closure deploys itself (ADR 0006). This is the flag that makes ac-box
   # self-switching: homelab's Buildkite pipeline stages a green revision into
   # /var/lib/homelab/pending-closure.json (scripts/hub-queue-closure.sh), and
@@ -239,34 +179,6 @@ in
   homelab.deploy.schedule = "continuous";
 
   # ---------------------------------------------------------------------------
-  # Tenants, reproducing ac-box's live configuration exactly.
-  # ---------------------------------------------------------------------------
-
-  services.ac-host = {
-    enable = true;
-    repoDir = "/var/lib/ac-host/src";
-    stateDir = "/var/lib/ac-host";
-    authOpen = false;
-    requiredRole = "ac-practice";
-  };
-
-  services.ac-host-dev = {
-    enable = true;
-    stateDir = "/var/lib/ac-host-dev";
-  };
-
-  # arcade's host side (hosts/arcade-box/tenants/arcade.nix): the user, the
-  # directories, the SMB and rsync exports. lanAddress has no default there
-  # on purpose -- it was once duplicated into two tenant modules and
-  # drifted -- so the host fact is passed in from homelab.host here. The
-  # two game servers are the stubs further down, not options here.
-  services.arcade-hub = {
-    enable = true;
-    lanAddress = config.homelab.host.networks.lan.address;
-    rsync.enable = true;
-  };
-
-  # ---------------------------------------------------------------------------
   # agent-hub: the local coding-agent model server (tenant declared in
   # tenants.nix; host side in hosts/ac-box/tenants/agent-hub.nix, which
   # since homelab-158.11 is where the option set below is declared -- the
@@ -278,7 +190,7 @@ in
   # egress allowlist as a host firewall fact.
   #
   # lanAddress comes from homelab.host rather than a default, same as
-  # services.arcade-hub above: host facts are read from the host, never
+  # every host file does: host facts are read from the host, never
   # inherited from a tenant's guess.
   #
   # What is NOT here any more, and where it went (homelab-158.11): the
@@ -498,100 +410,6 @@ in
           AGENT_HUB_BACKEND_PORT = toString llm.llm.backendPort;
           AGENT_HUB_SWAP_CONFIG = "${toString env.dir}/llama-swap.yaml";
         };
-      };
-    };
-
-  # ---------------------------------------------------------------------------
-  # ADR 0009 step 2: arcade's two game servers, run from home-arcade's flox
-  # environment -- and the FloxHub dogfood: nothing the servers need at run
-  # time comes from the tree (both read only /var/lib/arcade), so the deploy
-  # unit is a GENERATION of imkarrer/arcade (source.kind = floxhub), pushed by
-  # home-arcade's CI on green (its scripts/ci_push.sh) and staged here the way
-  # agent-hub's sha is. modules/tenant/environment-pull.nix's "KIND = FLOXHUB"
-  # header is the mechanism; docs/flox-findings.md 3 the record.
-  #
-  # Since homelab-158.11 these two stubs are the whole units: what
-  # home-arcade's modules/arcade-hub.nix used to supply -- the descriptions,
-  # User=/Group=arcade (the schema's default), WorkingDirectory= under the
-  # state dir (Mindustry writes config/ under its cwd), Restart=on-failure/
-  # RestartSec=5, After=/Wants= network-online.target, WantedBy=
-  # multi-user.target (all defaults) -- is spelled here or defaulted by
-  # schema.nix. interactive.slice is tenants.nix's via resources.nix; the
-  # firewall holes are the tenant's port claims there.
-  #
-  # The values are the module's own argv minus the store path, read from
-  # the same options (services.arcade-hub.*, hosts/arcade-box/tenants/arcade.nix)
-  # the exports read, so the two cannot drift:
-  #
-  #   freeciv    freeciv-server --bind <lan> --port <freeciv.port>
-  #                --saves <state>/freeciv --log <state>/freeciv/server.log
-  #   mindustry  mindustry-server, JAVA_TOOL_OPTIONS=-Xms256M -Xmx1G (the
-  #              module's java flags), and the three console lines the
-  #              module's wrapper once piped into java carried as the unit's
-  #              stdin: Mindustry takes startup commands on stdin, one per
-  #              line, and joins argv into one command. The nixpkgs
-  #              mindustry-server wrapper execs java, so the unit's main PID
-  #              is java and stdin reaches it through `flox activate --`
-  #              (home-arcade's CI gate feeds it `version` the same way).
-  #
-  # NO ARCADE_* variables, on purpose: the manifest has no [hook] (a
-  # `${X:?}` hook fails CI's activation and the pull's warm, both of which
-  # know no LAN address -- home-arcade's manifest header), so every host
-  # fact is argv or stdin here and nothing in the tenant tree can default
-  # one. The `[services]` blocks in the manifest are the developer's shell
-  # (docs/flox-findings.md 2), not what runs here.
-  homelab.tenants.arcade.environment =
-    let
-      hub = config.services.arcade-hub;
-      state = toString hub.stateDir;
-    in
-    {
-      # ON since 18 Sep 2026 12:27 CDT: generation 1 of imkarrer/arcade was
-      # pulled, warmed and pinned at /var/lib/arcade/env with this false
-      # (hub-status: staged g1 / applied g1). The switch carrying this line
-      # restarted both game units into `flox activate -d ... -g 1`. Back to
-      # false is the rollback: the placeholder ExecStart at the next switch
-      # and the checkout stays.
-      enable = true;
-      source = {
-        kind = "floxhub";
-        env = "imkarrer/arcade";
-      };
-      # Provenance only for this kind (schema.nix): the tree whose CI pushes
-      # the generation, so hub-status can hold its origin HEAD against the
-      # staged record's rev.
-      tree = "home-arcade";
-      # dir: derived to /var/lib/arcade/env (no state.dirs on the tenant;
-      # homelab.host.paths.state/<tenant>/env). Inside the tenant's 0700
-      # home, owned by arcade, as the pull unit creates it.
-      units."arcade-freeciv.service" = {
-        description = "Arcade Freeciv dedicated server (LAN only)";
-        workingDirectory = "${state}/freeciv";
-        command = [
-          "freeciv-server"
-          "--bind"
-          hub.lanAddress
-          "--port"
-          (toString hub.freeciv.port)
-          "--saves"
-          "${state}/freeciv"
-          "--log"
-          "${state}/freeciv/server.log"
-        ];
-      };
-      units."arcade-mindustry.service" = {
-        description = "Arcade Mindustry dedicated server (LAN only)";
-        workingDirectory = "${state}/mindustry";
-        command = [ "mindustry-server" ];
-        environment.JAVA_TOOL_OPTIONS = "-Xms256M -Xmx1G";
-        # The module's three printf lines, verbatim, from the same options;
-        # systemd appends each StandardInputText= line to the buffer with a
-        # newline, which is what the module's `printf '%s\n'` produced.
-        stdin = [
-          "config name Arcade"
-          "config port ${toString hub.mindustry.port}"
-          "host ${hub.mindustry.map} ${hub.mindustry.mode}"
-        ];
       };
     };
 
