@@ -72,7 +72,7 @@
 set -uo pipefail
 ORG=isaac-karrer
 API="https://api.buildkite.com/v2"
-HUB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HUB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 REG="${HUB_REGISTRY:-$HUB/hub/repos.psv}"
 export NIX_CONFIG="experimental-features = nix-command flakes"
 # shellcheck source=scripts/lib/buildkite-cluster.sh

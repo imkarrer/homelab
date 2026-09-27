@@ -2,7 +2,7 @@
 # Regenerate hub/trees/* -- navigable links into the sibling source trees.
 # Machine-local (gitignored): hub/repos.psv is the portable truth.
 set -uo pipefail
-HUB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HUB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 REG="${HUB_REGISTRY:-$HUB/hub/repos.psv}"
 mkdir -p "$HUB/hub/trees"
 while IFS='|' read -r name path remote deploy push; do

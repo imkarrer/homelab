@@ -29,7 +29,7 @@ set -euo pipefail
 # returned 1 inside an arithmetic expansion was silently counted as 0 chunks.
 shopt -s inherit_errexit
 
-HUB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HUB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 REG="${HUB_REGISTRY:-$HUB/hub/repos.psv}"
 LLM="${LLM:-192.168.1.51:8100}"
 QDRANT="${QDRANT:-192.168.1.51:6333}"

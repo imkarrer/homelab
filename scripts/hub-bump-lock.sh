@@ -45,7 +45,7 @@ set -euo pipefail
 export NIX_CONFIG="experimental-features = nix-command flakes
 accept-flake-config = true"
 
-HUB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HUB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 cd "$HUB"
 
 INPUT="${HOMELAB_BUMP_INPUT:-}"

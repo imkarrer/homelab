@@ -4,7 +4,7 @@
 # Exit 0 = reconciled, 1 = something needs attention.
 set -uo pipefail
 
-HUB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HUB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 REG="${HUB_REGISTRY:-$HUB/hub/repos.psv}"
 PROBLEMS=()
 # A verdict recorded inside a host's sections names the host: BOX is set by the

@@ -14,7 +14,7 @@
 # Branch is wt/<name>, cut from the tree's current main. Gate a worktree with
 #   hub-gates.sh <repo> <path>
 set -uo pipefail
-HUB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HUB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 REG="${HUB_REGISTRY:-$HUB/hub/repos.psv}"
 ROOT="${HUB_WORKTREES:-$(dirname "$HUB")/.worktrees}"
 

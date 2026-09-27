@@ -25,7 +25,7 @@ KEY="${1:-}"
 [ -n "$KEY" ] || { echo "usage: $0 <key>   (value on stdin)"; exit 2; }
 case "$KEY" in *[!a-z0-9-]*) echo "key must be [a-z0-9-]: $KEY"; exit 2 ;; esac
 
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
+ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 cd "$ROOT"   # sops finds .sops.yaml (the creation rules) from the cwd upward
 FILE="${HOMELAB_SOPS_FILE:-$ROOT/secrets/ac-box.yaml}"
 IDENTITY="${HOMELAB_SOPS_SSH_KEY:-$HOME/.ssh/id_ed25519_ac-host}"

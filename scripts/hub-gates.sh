@@ -9,7 +9,7 @@
 set -uo pipefail
 export NIX_CONFIG="experimental-features = nix-command flakes"
 
-HUB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HUB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 REG="${HUB_REGISTRY:-$HUB/hub/repos.psv}"
 REPO="${1:-ac-host}"
 PATHX=$(awk -F'|' -v r="$REPO" '$1==r{print $2}' "$REG")

@@ -24,7 +24,7 @@ MODE="${1:-downtime}"
 BOX="${HOMELAB_BOX:-arcade-box}"
 
 # shellcheck source=scripts/lib/buildkite-token.sh
-. "$(cd "$(dirname "$0")" && pwd)/lib/buildkite-token.sh"
+. "$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)/lib/buildkite-token.sh"
 TOKEN=$(buildkite_token) || exit 2
 
 case "$MODE" in

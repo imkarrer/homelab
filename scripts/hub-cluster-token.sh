@@ -14,7 +14,7 @@
 #
 # Usage: hub-cluster-token.sh [description]     default: "ac-box <date>"
 set -euo pipefail
-ROOT=$(cd "$(dirname "$0")/.." && pwd)
+ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 # shellcheck source=scripts/lib/buildkite-token.sh
 . "$ROOT/scripts/lib/buildkite-token.sh"
 # shellcheck source=scripts/lib/buildkite-cluster.sh

@@ -195,7 +195,7 @@
 #       2 misuse/preconditions.
 set -uo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 BACKUP_ROOT="${HUB_BACKUP_ROOT:-/home/nixos/backup}"
 # The staging tree is $BACKUP_ROOT/<host>, mirroring that host's absolute
 # paths (header: "TWO HOSTS"); stage_of names it in one place.

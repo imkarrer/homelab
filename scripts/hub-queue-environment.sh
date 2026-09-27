@@ -48,7 +48,7 @@
 # it, the way it does the tree kind's sha.
 set -euo pipefail
 
-HUB="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+HUB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 REG="${HUB_REGISTRY:-$HUB/hub/repos.psv}"
 STATE="${HOMELAB_DEPLOY_STATE:-/var/lib/homelab}"
 
