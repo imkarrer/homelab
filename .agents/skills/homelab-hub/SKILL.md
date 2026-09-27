@@ -102,9 +102,17 @@ Each line names a distinct failure, and they are not interchangeable:
   Green here means only that no commit is newer than the last switch, which
   is consistent with current, not proof of it — `HUB_STATUS_EXACT=1` proves
   it by comparing store paths, for ~7s more per host.
-- **switched since boot** — the closure was activated but not rebooted into, so
-  `systemctl` reflects the new config while the kernel and initrd are still the
-  old one. A kernel or boot-parameter change looks applied and is not.
+- **switched since boot with a different kernel / initrd / kernel-params** —
+  the switched closure's kernel, initrd or kernel command line is not the one
+  the box booted, so `systemctl` and the closure lines show that change as
+  applied while the booted one is still running; a reboot is owed. The two
+  closures merely differing is *not* this: on a host the continuous edge
+  switches they differ most of the time, and the closure section prints the
+  booted one as a state line (`same kernel, initrd and kernel-params - no
+  reboot owed`). The verdict names which of the three differ, and the lines
+  under `booted` show each pair, booted `->` switched. Compared per part —
+  kernel and initrd by the store path each link resolves to, kernel-params by
+  content — because two paths for the same version are still two builds.
 
 ## The standing rules
 

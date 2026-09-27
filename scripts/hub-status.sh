@@ -316,6 +316,18 @@ box_section() {
     p=/nix/var/nix/profiles/system
     echo "SYS=$(readlink -f /run/current-system)"
     echo "SYSBOOTED=$(readlink -f /run/booted-system)"
+    # What only a boot applies, read the way the closure section compares it:
+    # kernel and initrd by the store path each closure link resolves to,
+    # kernel-params by content (top-level.nix writes it with echo -n: one
+    # line). Two closures differing says nothing about a reboot; these do.
+    # (No apostrophe in this comment: it sits inside the single-quoted
+    # remote command, and one would end that string.)
+    echo "SYSKERNEL=$(readlink -f /run/current-system/kernel)"
+    echo "BOOTEDKERNEL=$(readlink -f /run/booted-system/kernel)"
+    echo "SYSINITRD=$(readlink -f /run/current-system/initrd)"
+    echo "BOOTEDINITRD=$(readlink -f /run/booted-system/initrd)"
+    echo "SYSPARAMS=$(cat /run/current-system/kernel-params 2>/dev/null)"
+    echo "BOOTEDPARAMS=$(cat /run/booted-system/kernel-params 2>/dev/null)"
     echo "SYSGEN=$(readlink $p 2>/dev/null | grep -oE "[0-9]+" | tail -1)"
     # lstat, not stat -L: the mtime we want is when the "system" symlink was last
     # re-pointed (i.e. the last switch), not when its store target was created.
@@ -538,11 +550,34 @@ closure_section() {
     echo "running    : ${SYS##*/} (generation ${SYSGEN:-?}, switched ${when:-unknown})"
     BOOTED=$(get SYSBOOTED)
     if [ -n "$BOOTED" ] && [ "$BOOTED" != "$SYS" ]; then
-      echo "booted     : ${BOOTED##*/}"
-      # Not closure drift, but the same class of lie: `systemctl status` reflects
-      # the switched closure while the kernel, initrd and modules are still the
-      # booted one, so a kernel or boot-parameter change looks applied and is not.
-      note "box switched since boot - kernel/initrd are still generation-at-boot, a reboot is owed"
+      # Switched is not booted (CONTEXT.md), and on a box the continuous edge
+      # switches (ADR 0008) the two closures differ most of the time: a state
+      # line, not a verdict. What owes a reboot is a difference in what only a
+      # boot applies -- the kernel, the initrd, the kernel command line --
+      # because `systemctl` and every closure line above show such a change
+      # as applied when it is not. Each is compared as what it is: kernel and
+      # initrd by the store path the closure's link resolves to, kernel-params
+      # by content. Until 27 Sep 2026 this compared the closures whole and
+      # owed a reboot after every switch (homelab-bqo.63).
+      stale=""; detail=""
+      for part in kernel initrd kernel-params; do
+        case "$part" in
+          kernel)        b=$(get BOOTEDKERNEL); c=$(get SYSKERNEL) ;;
+          initrd)        b=$(get BOOTEDINITRD); c=$(get SYSINITRD) ;;
+          kernel-params) b=$(get BOOTEDPARAMS); c=$(get SYSPARAMS) ;;
+        esac
+        [ "$b" = "$c" ] && continue
+        stale="${stale:+$stale, }$part"
+        # Shown once, under the booted line, so the verdict can stay one line.
+        detail="$detail
+             $part: ${b#/nix/store/} -> ${c#/nix/store/}"
+      done
+      if [ -z "$stale" ]; then
+        echo "booted     : ${BOOTED##*/} (same kernel, initrd and kernel-params - no reboot owed)"
+      else
+        echo "booted     : ${BOOTED##*/} (booted -> switched differ in $stale)$detail"
+        note "switched since boot with a different $stale - the box still runs the booted closure's, so the change looks applied and is not; a reboot is owed"
+      fi
     fi
     echo "config rev : ${SYSREV:-(unstamped - system.configurationRevision is not set)}"
     CLPENDING=$(get CLPENDING); CLAPPLIED=$(get CLAPPLIED); CLTIMER=$(get CLTIMER); CLPATH=$(get CLPATH)
