@@ -25,8 +25,8 @@ set -uo pipefail
 # readlink -f, not $BASH_SOURCE alone: this script is meant to be reached
 # through a symlink on PATH (~/.local/bin/hub-evals), and dirname of the LINK
 # resolves the hub to ~/.local -- so the registry is not found and every repo
-# name is "unknown". Every other hub-*.sh carries the unresolved idiom and
-# breaks the same way if linked (bead homelab-dfc).
+# name is "unknown". Since bead homelab-dfc every hub-*.sh that derives a
+# path from its own location resolves it this way; a new script copies it.
 HUB="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)"
 REG="${HUB_REGISTRY:-$HUB/hub/repos.psv}"
 VENV="${CALIPER_VENV:-$HOME/.local/share/caliper-venv}"
