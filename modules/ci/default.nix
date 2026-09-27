@@ -57,7 +57,8 @@
 # 127.0.0.1:9000->9000 and 127.0.0.1:9001->9001 only (matches
 # hosts/ac-box/tenants.nix's ci.ports, both scope = "local"), single named
 # volume `minio-data` at /data, MINIO_ROOT_USER/MINIO_ROOT_PASSWORD supplied
-# the same way.
+# the same way. Its image was `minio/minio:latest` then; since 27 Sep 2026
+# it is one this module builds (IMAGES below).
 #
 # --------------------------------------------------------------------------
 # HAZARD 1 -- ADOPTION IS A BEHAVIOUR CHANGE, NOT A NO-OP
@@ -115,6 +116,16 @@
 # this task itself operates under (never write to ac-box; every
 # nixos-rebuild is a human action from a real terminal).
 #
+# The images are under the same rule (IMAGES below). A switch that changes
+# ExecStartPre -- a nixpkgs bump that moves minio, an edit to the image
+# recipe -- restarts nothing (restartIfChanged = false), so the new
+# tarballs sit in the store until the next deliberate `systemctl restart
+# ac-host-ci` from an ssh session, with `docker ps` showing no job
+# container and the Buildkite agent idle. That restart loads them and
+# compose recreates minio and minio-init onto the new image IDs; the agent
+# container is not recreated for a dependency's change. The swap is
+# HAZARD 2-safe by construction: nothing in the closure can perform it.
+#
 # --------------------------------------------------------------------------
 # VOLUMES THAT MUST SURVIVE ADOPTION
 # --------------------------------------------------------------------------
@@ -140,6 +151,89 @@
 # sequence above depends on this: as long as the project name stays
 # `ac-host-ci` and nobody passes `-v`, the systemd-managed stack picks up
 # exactly where the hand-run one left off -- warm cache, warm Nix store.
+#
+# --------------------------------------------------------------------------
+# IMAGES -- WHERE MINIO COMES FROM (homelab-ygc.11, 27 Sep 2026)
+# --------------------------------------------------------------------------
+# The compose file named `minio/minio:latest` and `minio/mc:latest`, and on
+# 26 Sep 2026 those names stopped resolving anywhere: Docker Hub answers
+# "pull access denied" and 404s the repositories themselves, quay.io's
+# copies are private, and upstream's README says the community edition is
+# distributed as source only. arcade-box kept running because both images
+# had been `docker save | docker load`ed from the Z840 (minio
+# RELEASE.2025-09-07T16-13-09Z, id 14cea493d9a3; mc 2025-09-06, id
+# a7fe349ef4bd; a tarball of both is at /home/nixos/backup/images/ on the
+# operator's machine) and compose's default pull policy is satisfied by a
+# local image. A fresh daemon could not start the cache, and a `docker
+# image prune -a` with the stack down would have removed the only copies.
+#
+# So this module builds the two images itself, from the nixpkgs this flake
+# already pins (README: nixpkgs is owned here), with pkgs.dockerTools:
+#
+#   homelab/minio:nixpkgs         pkgs.minio (2025-10-15T17-29-55Z on the
+#                                 current pin) + cacert. Entrypoint is the
+#                                 minio binary and there is no Cmd: the
+#                                 compose file supplies `server /data
+#                                 --console-address ":9001"` as it always
+#                                 did. root, like the image it replaces,
+#                                 because ac-host-ci_minio-data is
+#                                 root:root 755 (read from the box).
+#   homelab/minio-client:nixpkgs  pkgs.minio-client (2025-08-13T08-35-41Z)
+#                                 + busybox + cacert. The compose entrypoint
+#                                 is `/bin/sh /minio-init.sh`, so /bin/sh
+#                                 must exist and `mc` must be on PATH;
+#                                 HOME=/root is writable for ~/.mc/config.json.
+#
+# and loads them into the daemon in ExecStartPre, before the `docker-compose
+# up` in ExecStart: one `docker load -i <store path>` per image, with the
+# CLI of config.virtualisation.docker.package. Nothing is pulled from a
+# registry any more. The load is idempotent -- a tarball whose layers the
+# daemon already has is a few seconds and a "Loaded image" line -- and the
+# compose file in the ac-host tree names the two tags verbatim.
+# homelab.ci.images (read-only) exposes both so they can be built and
+# probed without a box.
+#
+# The tag is `nixpkgs`, constant, on purpose. The reference in the compose
+# file never changes; the BYTES change when flake.lock moves, and compose
+# 5.4.0 (the version on the box) recreates a service whose image ID differs
+# from the one recorded on its container -- `minio` and `minio-init`, and
+# only those two: a dependency's recreate does not cascade to the agent
+# (probed 26 Sep 2026 with a three-service stack of the same depends_on
+# shape; `--always-recreate-deps` is the opt-in nobody passes). So a
+# nixpkgs bump that moves minio is a cache restart at the next deliberate
+# `systemctl restart ac-host-ci`, never an agent restart (HAZARD 2).
+#
+# The version goes forward, not sideways: the box runs RELEASE.2025-09-07,
+# the pin builds 2025-10-15, the last release upstream tagged. Both are the
+# single-drive xl backend that `minio server /data` has used since FS mode
+# was removed in 2022, and a newer server reads an older data directory in
+# place. Proven for this pair on WSL, 27 Sep 2026: a bucket, its
+# anonymous-download policy and an object written through the saved
+# 2025-09-07 image were read back by the image built here, on the same
+# volume, and minio-init.sh re-ran clean on top. Downgrading is not
+# promised by upstream and is not needed; the saved tarball is the way back
+# only if the new server refuses the volume, which it did not.
+#
+# pkgs.minio is marked insecure in nixpkgs (meta.knownVulnerabilities:
+# CVE-2026-40344, -41145, -33322, -33419, -34204, -39414, and "abandoned by
+# upstream ... migrate to Garage, SeaweedFS, or Ceph"). The image clears
+# that list on its OWN copy of the package with overrideAttrs -- meta is
+# not a derivation input, so the drvPath and outPath are the pin's own,
+# byte for byte -- rather than setting nixpkgs.config
+# .permittedInsecurePackages, which would permit minio anywhere in the
+# closure and is a platform decision (docs/current-state.md already calls
+# modules/platform/nix.nix's allowUnfree too global). What that
+# acknowledges: the same abandoned codebase the box has run since
+# September, one release newer, on loopback only -- 127.0.0.1:9000/9001
+# and the compose bridge, so the two unauthenticated-write CVEs need a
+# process already on the box or a job already in the agent -- serving an
+# anonymous-download bucket of signed store paths. It does not make the
+# software maintained. Leaving MinIO is a migration of a 3.6 GiB binary
+# cache and every pipeline's S3_CACHE_* to another S3 server: a bead of
+# its own, not this one. Hydra does not build an insecure-marked package,
+# so cache.nixos.org has no minio binary: the box compiles it once per pin
+# move, in homelab-deploy's niced `nix build` (a Go build of a few minutes;
+# the vendored modules and mc itself substitute).
 #
 # --------------------------------------------------------------------------
 # CREDENTIALS
@@ -358,6 +452,77 @@ let
   pluginNixConf = "${stateDir}/plugin-nix.conf";
 
   bucketUrl = "http://${native.minio.address}/${cfg.cacheBucket}";
+
+  # IMAGES (header). One nixpkgs, and the insecure acknowledgement on this
+  # copy alone: meta is not a derivation input, so the drvPath is
+  # pkgs.minio's own (checked 27 Sep 2026: m73m4lnj... on both sides).
+  minio = pkgs.minio.overrideAttrs (old: {
+    meta = old.meta // {
+      knownVulnerabilities = [ ];
+    };
+  });
+
+  ociLabels = title: pkg: {
+    "org.opencontainers.image.title" = title;
+    "org.opencontainers.image.version" = pkg.version;
+    "org.opencontainers.image.source" = "nixpkgs";
+  };
+
+  # Each image's root is the symlink-join of its `contents` (so /bin/minio,
+  # /bin/sh, /bin/mc and /etc/ssl/certs/ca-bundle.crt exist at the root),
+  # plus what extraCommands makes: /data is the volume's mount point, /tmp
+  # is what Go's os.TempDir and the official image both assume, /root is
+  # HOME. No shell in the server image; nothing there needs one.
+  images = {
+    minio = pkgs.dockerTools.buildLayeredImage {
+      name = "homelab/minio";
+      tag = "nixpkgs";
+      contents = [
+        minio
+        pkgs.cacert
+      ];
+      extraCommands = ''
+        mkdir -p data tmp root
+        chmod 1777 tmp
+        chmod 700 root
+      '';
+      config = {
+        Entrypoint = [ "${minio}/bin/minio" ];
+        Env = [
+          "PATH=/bin"
+          "HOME=/root"
+          "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
+        ];
+        Labels = ociLabels "MinIO server, from nixpkgs (homelab modules/ci)" minio;
+      };
+    };
+    minioClient = pkgs.dockerTools.buildLayeredImage {
+      name = "homelab/minio-client";
+      tag = "nixpkgs";
+      contents = [
+        pkgs.minio-client
+        pkgs.busybox
+        pkgs.cacert
+      ];
+      extraCommands = ''
+        mkdir -p tmp root
+        chmod 1777 tmp
+        chmod 700 root
+      '';
+      config = {
+        Env = [
+          "PATH=/bin"
+          "HOME=/root"
+          "SSL_CERT_FILE=/etc/ssl/certs/ca-bundle.crt"
+        ];
+        Labels = ociLabels "MinIO client (mc), from nixpkgs (homelab modules/ci)" pkgs.minio-client;
+      };
+    };
+  };
+
+  # The daemon's own CLI, not pkgs.docker by name: a host that changes
+  # virtualisation.docker.package loads with the client it runs.
+  dockerCli = "${config.virtualisation.docker.package}/bin/docker";
   publicKeys = [
     "flox-binary-cache-1:pSpP6x540XtBh+IMvmW8XrRHJDtIi+b31uvvIA0PyR0="
     "flox-binary-cache-2:ESa71iIsMeX6Wu7EBiXXZlJraWI0HF4xdOF/ivG4UTo="
@@ -440,6 +605,26 @@ in
         substituter this module adds in either shape, and S3_CACHE_BUCKET
         on the native agent. Fixed by the compose env and every pipeline's
         `S3_CACHE_BUCKET`; one spelling here.
+      '';
+    };
+
+    images = mkOption {
+      type = types.attrsOf types.package;
+      readOnly = true;
+      default = images;
+      defaultText = lib.literalMD "the two dockerTools images, `minio` and `minioClient`";
+      description = ''
+        Read-only: the container images the compose unit `docker load`s in
+        ExecStartPre, before `docker-compose up` (IMAGES in this file's
+        header). `minio` is homelab/minio:nixpkgs, `minioClient` is
+        homelab/minio-client:nixpkgs; each is a gzipped tarball. Exposed so
+        they can be built and probed without a box --
+
+          nix build .#nixosConfigurations.arcade-box.config.homelab.ci.images.minio
+          docker load -i result
+
+        -- and so tests/eval.nix can assert ExecStartPre names exactly
+        these two. homelab.deploy.scriptPackage's shape.
       '';
     };
 
@@ -556,6 +741,15 @@ in
 
           # The path, never the contents -- see CREDENTIALS above.
           EnvironmentFile = cfg.envFile;
+
+          # IMAGES (header): the two tarballs this module builds, loaded
+          # before compose reads the file that names their tags. A list --
+          # systemd runs each in order and fails the start if one fails,
+          # which is what it should do with no daemon to load into.
+          ExecStartPre = map (img: "${dockerCli} load -i ${img}") [
+            images.minio
+            images.minioClient
+          ];
 
           ExecStart = "${pkgs.docker-compose}/bin/docker-compose -f ${cfg.composeFile} --env-file ${cfg.envFile} -p ${cfg.projectName} up -d --build";
 

@@ -42,6 +42,7 @@ let
   stubNix = tenantTests + "/stub-nix.nix";
   stubEtc = tenantTests + "/stub-etc.nix";
   stubNetwork = ./stub-network.nix;
+  stubDocker = ./stub-docker.nix;
   hostOptions = ../../platform/host-options.nix;
   hostFacts = ../../../hosts/ac-box/host.nix;
   floxModule = ../../platform/flox.nix;
@@ -72,6 +73,7 @@ let
           stubNix
           stubEtc
           stubNetwork
+          stubDocker
           hostOptions
           hostFacts
           floxModule
@@ -134,8 +136,11 @@ in
       {
         # resources.nix puts Slice=/Nice= on every unit the tenant fixture
         # names, so the key exists; the module itself must add nothing to it.
-        assertion = !(cfg.systemd.services.ac-host-ci.serviceConfig ? ExecStart) && !(cfg.systemd.services.ac-host-ci.serviceConfig ? EnvironmentFile);
-        message = "homelab.ci.enable = false (default): the module must contribute nothing to systemd.services.ac-host-ci -- no ExecStart, no EnvironmentFile";
+        assertion =
+          !(cfg.systemd.services.ac-host-ci.serviceConfig ? ExecStart)
+          && !(cfg.systemd.services.ac-host-ci.serviceConfig ? ExecStartPre)
+          && !(cfg.systemd.services.ac-host-ci.serviceConfig ? EnvironmentFile);
+        message = "homelab.ci.enable = false (default): the module must contribute nothing to systemd.services.ac-host-ci -- no ExecStart, no ExecStartPre (the image loads), no EnvironmentFile";
       }
     ];
   };
@@ -411,6 +416,62 @@ in
     ];
   };
 
+  # The images (homelab-ygc.11, IMAGES in the module's header): with the
+  # compose shape on, ExecStartPre is exactly two `docker load -i` lines
+  # naming the module's own two tarballs -- homelab/minio:nixpkgs then
+  # homelab/minio-client:nixpkgs, with the daemon's CLI -- and ExecStart is
+  # the same `docker-compose ... up -d --build` it was before them. Read
+  # through the read-only homelab.ci.images, the way the deploy harness
+  # reads scriptPackage; the tarballs are never built here (no store path
+  # keeps its context into a message), only their names and paths compared.
+  composeLoadsImages = mkCase {
+    extraModules = [ { homelab.ci.enable = true; } ];
+    checks =
+      cfg: summary:
+      let
+        images = cfg.homelab.ci.images;
+        pre = map (s: noCtx (toString s)) (
+          lib.toList (cfg.systemd.services.ac-host-ci.serviceConfig.ExecStartPre or [ ])
+        );
+        docker = noCtx "${cfg.virtualisation.docker.package}/bin/docker";
+        want = map (img: "${docker} load -i ${noCtx (toString img)}") [
+          images.minio
+          images.minioClient
+        ];
+      in
+      [
+        {
+          assertion = images.minio.imageName == "homelab/minio" && images.minio.imageTag == "nixpkgs";
+          message = "homelab.ci.images.minio must be homelab/minio:nixpkgs (the name the ac-host compose file carries verbatim); got ${images.minio.imageName}:${images.minio.imageTag}";
+        }
+        {
+          assertion =
+            images.minioClient.imageName == "homelab/minio-client" && images.minioClient.imageTag == "nixpkgs";
+          message = "homelab.ci.images.minioClient must be homelab/minio-client:nixpkgs; got ${images.minioClient.imageName}:${images.minioClient.imageTag}";
+        }
+        {
+          assertion = lib.all (img: lib.hasSuffix ".tar.gz" (noCtx (toString img))) [
+            images.minio
+            images.minioClient
+          ];
+          message = "each image must be a gzipped tarball, the shape `docker load -i` reads";
+        }
+        {
+          assertion = pre == want;
+          message = "ExecStartPre must be exactly two `docker load -i` lines, minio then minio-client, each with the daemon's own CLI and the image's store path; got ${builtins.toJSON pre}";
+        }
+        {
+          assertion =
+            summary.ExecStart == "${noCtx (toString pkgs.docker-compose)}/bin/docker-compose -f docker-compose.buildkite.yml --env-file /var/lib/ac-host/src/compose/.env.buildkite -p ac-host-ci up -d --build";
+          message = "ExecStart must be unchanged by the image loads: the compose `up -d --build` with the module's defaults; got ${noCtx summary.ExecStart}";
+        }
+        {
+          assertion = !(lib.any (s: lib.hasInfix "docker-compose" s) pre);
+          message = "the loads happen before compose, not through it: no ExecStartPre line may invoke docker-compose";
+        }
+      ];
+  };
+
   # Case name -> whether `<case>.checked` must evaluate cleanly. Read by
   # modules/ci/scripts/run-eval-tests.sh and by modules/tenant/tests/
   # check.nix (the flake `checks`). Until 12 Sep 2026 this harness had no
@@ -425,5 +486,6 @@ in
     nativeOffIsCompose = true;
     nativeOn = true;
     nativeWithoutTenant = false;
+    composeLoadsImages = true;
   };
 }
