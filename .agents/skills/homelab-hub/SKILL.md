@@ -109,7 +109,7 @@ Each line names a distinct failure, and they are not interchangeable:
   closures merely differing is *not* this: on a host the continuous edge
   switches they differ most of the time, and the closure section prints the
   booted one as a state line (`same kernel, initrd, kernel-modules and kernel-params - no
-  reboot owed`). The verdict names which of the three differ, and the lines
+  reboot owed`). The verdict names which of the four differ, and the lines
   under `booted` show each pair, booted `->` switched. Compared per part —
   kernel and initrd by the store path each link resolves to, kernel-params by
   content — because two paths for the same version are still two builds.
