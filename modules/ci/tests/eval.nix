@@ -57,6 +57,10 @@ let
   # reasoning: the ExecStart prefix asserted below is unmistakably the
   # harness's).
   floxStub = pkgs.runCommand "flox-stub" { } "mkdir -p $out/bin; touch $out/bin/flox";
+  # A stub daemon CLI for composeLoadsImages: with the real pkgs.docker the
+  # case could not tell "read virtualisation.docker.package" from "hard-coded
+  # pkgs.docker", since stub-docker.nix defaults to the same package.
+  dockerStub = pkgs.runCommand "docker-stub" { } "mkdir -p $out/bin; touch $out/bin/docker";
 
   noCtx = builtins.unsafeDiscardStringContext;
 
@@ -425,7 +429,10 @@ in
   # reads scriptPackage; the tarballs are never built here (no store path
   # keeps its context into a message), only their names and paths compared.
   composeLoadsImages = mkCase {
-    extraModules = [ { homelab.ci.enable = true; } ];
+    extraModules = [
+      { homelab.ci.enable = true; }
+      { virtualisation.docker.package = dockerStub; }
+    ];
     checks =
       cfg: summary:
       let
@@ -434,7 +441,11 @@ in
           lib.toList (cfg.systemd.services.ac-host-ci.serviceConfig.ExecStartPre or [ ])
         );
         docker = noCtx "${cfg.virtualisation.docker.package}/bin/docker";
-        want = map (img: "${docker} load -i ${noCtx (toString img)}") [
+        # The case sets the option to dockerStub above; reading it back from
+        # cfg would let a literal pkgs.docker in the module pass, so compare
+        # against the stub the case injected.
+        dockerWanted = noCtx "${dockerStub}/bin/docker";
+        want = map (img: "${dockerWanted} load -i ${noCtx (toString img)}") [
           images.minio
           images.minioClient
         ];
@@ -455,6 +466,10 @@ in
             images.minioClient
           ];
           message = "each image must be a gzipped tarball, the shape `docker load -i` reads";
+        }
+        {
+          assertion = docker == dockerWanted;
+          message = "the module must read virtualisation.docker.package: the case set it to the stub, and cfg says ${docker}";
         }
         {
           assertion = pre == want;

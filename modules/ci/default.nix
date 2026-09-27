@@ -714,6 +714,20 @@ in
     # duplicating it -- see docker.nix's own header on why the daemon has
     # exactly one owner.
     (mkIf (cfg.enable && !native.enable) {
+      # IMAGES (header): the acknowledgement above erases pkgs.minio's
+      # knownVulnerabilities from the copy that enters the closure, so
+      # without this line nothing at eval time says they exist -- a pin
+      # bump that adds a seventh CVE would vanish into the header. One
+      # warning per eval names them all, from the pin itself, never a
+      # retyped list (review of homelab-ygc.11, 27 Sep 2026).
+      warnings = [
+        ("modules/ci (homelab-ygc.11): the CI cache image homelab/minio:nixpkgs is pkgs.minio "
+          + pkgs.minio.version
+          + ", which nixpkgs marks insecure; acknowledged for this image alone (loopback 127.0.0.1:9000/9001 plus the compose network on this host), not closure-wide. nixpkgs says: "
+          + lib.concatStringsSep " | " pkgs.minio.meta.knownVulnerabilities
+          + " -- leaving MinIO is its own bead.")
+      ];
+
       systemd.services.ac-host-ci = {
         description = "Self-hosted Buildkite agent + MinIO Nix binary cache (ac-host-ci compose project)";
 
