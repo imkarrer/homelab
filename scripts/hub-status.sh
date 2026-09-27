@@ -326,6 +326,8 @@ box_section() {
     echo "BOOTEDKERNEL=$(readlink -f /run/booted-system/kernel)"
     echo "SYSINITRD=$(readlink -f /run/current-system/initrd)"
     echo "BOOTEDINITRD=$(readlink -f /run/booted-system/initrd)"
+    echo "SYSMODULES=$(readlink -f /run/current-system/kernel-modules)"
+    echo "BOOTEDMODULES=$(readlink -f /run/booted-system/kernel-modules)"
     echo "SYSPARAMS=$(cat /run/current-system/kernel-params 2>/dev/null)"
     echo "BOOTEDPARAMS=$(cat /run/booted-system/kernel-params 2>/dev/null)"
     echo "SYSGEN=$(readlink $p 2>/dev/null | grep -oE "[0-9]+" | tail -1)"
@@ -553,17 +555,19 @@ closure_section() {
       # Switched is not booted (CONTEXT.md), and on a box the continuous edge
       # switches (ADR 0008) the two closures differ most of the time: a state
       # line, not a verdict. What owes a reboot is a difference in what only a
-      # boot applies -- the kernel, the initrd, the kernel command line --
+      # boot applies -- the kernel, the initrd, the module tree modprobe reads
+      # from /run/booted-system, the kernel command line --
       # because `systemctl` and every closure line above show such a change
       # as applied when it is not. Each is compared as what it is: kernel and
       # initrd by the store path the closure's link resolves to, kernel-params
       # by content. Until 27 Sep 2026 this compared the closures whole and
       # owed a reboot after every switch (homelab-bqo.63).
       stale=""; detail=""
-      for part in kernel initrd kernel-params; do
+      for part in kernel initrd kernel-modules kernel-params; do
         case "$part" in
           kernel)        b=$(get BOOTEDKERNEL); c=$(get SYSKERNEL) ;;
           initrd)        b=$(get BOOTEDINITRD); c=$(get SYSINITRD) ;;
+          kernel-modules) b=$(get BOOTEDMODULES); c=$(get SYSMODULES) ;;
           kernel-params) b=$(get BOOTEDPARAMS); c=$(get SYSPARAMS) ;;
         esac
         [ "$b" = "$c" ] && continue
@@ -573,7 +577,7 @@ closure_section() {
              $part: ${b#/nix/store/} -> ${c#/nix/store/}"
       done
       if [ -z "$stale" ]; then
-        echo "booted     : ${BOOTED##*/} (same kernel, initrd and kernel-params - no reboot owed)"
+        echo "booted     : ${BOOTED##*/} (same kernel, initrd, kernel-modules and kernel-params - no reboot owed)"
       else
         echo "booted     : ${BOOTED##*/} (booted -> switched differ in $stale)$detail"
         note "switched since boot with a different $stale - the box still runs the booted closure's, so the change looks applied and is not; a reboot is owed"
