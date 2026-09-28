@@ -235,10 +235,11 @@ in
       # and aliases are the table's. The reasoning behind each choice --
       # Qwen3-Coder-Next 80B-A3B over the 480B (the 480B does not fit at a
       # quantization that preserves code quality; CPU rate tracks ACTIVE
-      # parameters, 3B vs 35B), the prompt-cache sizes (--cache-ram 12288
-      # for coder: ~2.5 GiB per 32k conversation, agents alternate, five
-      # fit; 8192 for reviewer), the embedding model at the unit's 23
-      # threads not 4 (prefill is compute-bound: 6.7 s per 938-token chunk
+      # parameters, 3B vs 35B), the prompt-cache sizes (none for coder
+      # since agent-hub 4f4e83b, 25 Sep 2026 -- that build's rollback leaks
+      # another conversation into a reply; 8192 for reviewer, 1024 for
+      # utility), the embedding model at the unit's threads (28 since
+      # homelab-ygc.13), not 4 (prefill is compute-bound: 6.7 s per 938-token chunk
       # at 4 threads, 16 Sep 2026), and the flags every llama backend gets
       # (-rtr: repack at load, disables mmap so the model is anonymous
       # memory under this unit's NUMAPolicy below, ~6 % prefill; --flash-attn on; --jinja: tool calls, without it every

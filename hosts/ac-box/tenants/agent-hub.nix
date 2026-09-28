@@ -161,7 +161,10 @@ in
       };
 
       contextSize = lib.mkOption {
-        type = lib.types.int;
+        # Positive: a factor of AGENT_HUB_CTX_TOTAL, and llama.cpp reads
+        # --ctx-size 0 as the model's trained context (262144 for the
+        # coder), the size configuration.nix argues against.
+        type = lib.types.ints.positive;
         default = 8192;
         description = ''
           KV cache context length for the chat models, PER SLOT: what one
