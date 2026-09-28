@@ -18,7 +18,7 @@ marked as a box action and carries its own abort criteria.
 |---|---|
 | Runs on | the operator's WSL machine, **not** either host. A backup that lives on the machine it is backing up is not one. |
 | Schedule | `hub-backup.timer`, 04:30 **America/Chicago** (09:30 UTC), `Persistent=true` |
-| Staging mirror | `/home/nixos/backup/<host>/<that host's absolute path>` — last night's tree, readable directly. `arcade-box/` since 26 Sep 2026 (`homelab-ygc.4`), which is where every tenant but `agent-hub` is; `llm-box/` since the rename (<rename-date>). Each host is its own restic host and forget group. `ac-box/` is the Z840's tree from 14 Sep to the rename, frozen and removed by hand after the first `llm-box` snapshot (`docs/runbook-llm-box-rename.md` 7.6); its history, and every tenant's before 26 Sep, stays in restic under host `ac-box` |
+| Staging mirror | `/home/nixos/backup/<host>/<that host's absolute path>` — last night's tree, readable directly. `arcade-box/` since 26 Sep 2026 (`homelab-ygc.4`), which is where every tenant but `agent-hub` is; `llm-box/` since the rename (28 Sep 2026). Each host is its own restic host and forget group. `ac-box/` is the Z840's tree from 14 Sep to the rename, frozen and removed by hand after the first `llm-box` snapshot (`docs/runbook-llm-box-rename.md` 7.6); its history, and every tenant's before 26 Sep, stays in restic under host `ac-box` |
 | restic repo | `/home/nixos/backup/restic`, `root:root 0700` (the timer runs as root), so restic runs under `sudo` (section 2) |
 | Repo password | `restic-repo-password` in `secrets/ac-box.yaml` (sops; two recipients, the box's host key and the operator's) |
 | Retention | 7 daily, 4 weekly, 6 monthly |

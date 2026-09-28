@@ -17,13 +17,13 @@ nothing else: all 28 physical cores and all 251 GiB, unsliced and unfenced
 (`homelab.enforce.slices = false`). At `192.168.1.51`. Its closure has no
 deploy edge — an operator switches it by hand from a sha on origin (ADR
 0010) — and its environment arrives by its own poll of GitHub. Renamed from
-`ac-box` on <rename-date> (`homelab-ygc.9`, `docs/runbook-llm-box-rename.md`).
+`ac-box` on 28 Sep 2026 (`homelab-ygc.9`, `docs/runbook-llm-box-rename.md`).
 _Avoid_: ac-box. "The Z840" is the hardware, fine as a name for the machine
 across the rename; it is what the docs dated 26 Sep 2026 use.
 
 **ac-box**:
 Not a host name any more. The Z840's name — in `hosts/`, the flake, its
-hostname, the ssh alias and the tracker — until <rename-date>, when
+hostname, the ssh alias and the tracker — until 28 Sep 2026, when
 `homelab-ygc.9` renamed it `llm-box`. It is how history reads: in anything
 dated before 26 Sep 2026 it means the one machine that ran all six tenants,
 and that doc's "the box" is this machine; from 26 Sep to the rename it means

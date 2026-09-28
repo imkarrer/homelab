@@ -75,7 +75,7 @@ hand switches its only kind. Every unit named in this paragraph except
 
 - **The rest of the rename** (ADR 0010 half two, `homelab-ygc.9`,
   `docs/runbook-llm-box-rename.md`). The Z840 became `llm-box` on
-  <rename-date> — `hosts/`, the flake, its hostname, `homelab.host.peers` and
+  28 Sep 2026 — `hosts/`, the flake, its hostname, `homelab.host.peers` and
   the ssh alias. Still owed under the same bead: `secrets/ac-box.yaml`'s
   rename (section 5), the strip of the moved state from the Z840's disk
   (section 6), the other trees' docs (7.10) and the tracker (7.11). In
