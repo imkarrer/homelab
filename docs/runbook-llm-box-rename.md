@@ -1,13 +1,18 @@
 # Runbook: the Z840 becomes llm-box -- the rename, the secrets file and the strip (ADR 0010, half two)
 
-**Status: drafted 28 Sep 2026, nothing executed.** Every fact below was read
-on 28 Sep 2026 between 08:27 and 09:16 CDT, read-only: over `ssh ac-box` (the
-Z840, `192.168.1.51`) and `ssh arcade-box` (`192.168.1.50`), from the WSL
-trees at the shas section 3 names, and from the operator's files. Nothing on
-either host or in the operator's files was changed to produce it. The closure
-measurements in sections 4 and 5 come from a scratch copy of homelab
-`1a3a7ff` with the rename applied, evaluated with `nix eval` and compared
-with `nix-diff`; nothing was built for a host or switched.
+**Status: drafted 28 Sep 2026; 7.2 done on the branch `wt/homelab-ygc.9`,
+nothing else executed.** Every fact below was read on 28 Sep 2026 between
+08:27 and 09:16 CDT, read-only: over `ssh ac-box` (the Z840, `192.168.1.51`)
+and `ssh arcade-box` (`192.168.1.50`), from the WSL trees at the shas section
+3 names, and from the operator's files. What moved after that -- ygc.15 and
+ygc.17 landed and reached the Z840, ygc.19 landed in ac-host -- was re-read
+between 09:46 and 10:06 CDT, and those rows and steps say *refreshed*.
+Nothing on either host or in the operator's files was changed to produce it.
+The closure measurements in sections 4 and 5 come from a scratch copy of
+homelab `1a3a7ff` with the rename applied, evaluated with `nix eval` and
+compared with `nix-diff`; 7.2's proofs re-ran them against `main`
+(`472b608`) and the branch (section 10). Nothing was built for a host or
+switched.
 
 This is the second half of ADR 0010. The first half
 (`docs/runbook-arcade-box-cutover.md`) left the Z840 running `agent-hub`
@@ -25,8 +30,9 @@ arcade-box except two Prometheus labels and one alert selector.
 The bead title's "agent-hub's hand pull" is no longer a step:
 `agent-hub-environment-poll` (`homelab-ygc.14`) staged `b16781d` on 27 Sep
 and `agent-hub-environment-pull` applied it (01:19:58 UTC,
-`/var/lib/homelab/last-applied-environment-agent-hub.json`). 7.8 keeps only
-the fallback, for a day the poll cannot see GitHub.
+`/var/lib/homelab/last-applied-environment-agent-hub.json`), and did the same
+for `9a55c11` on 28 Sep (14:18:38 UTC). 7.8 keeps only the fallback, for a
+day the poll cannot see GitHub.
 
 ---
 
@@ -35,15 +41,15 @@ the fallback, for a day the poll cannot see GitHub.
 | | |
 | --- | --- |
 | Name | `hostnamectl`: static `ac-box`; `/proc/sys/kernel/hostname` `ac-box` |
-| Running | homelab `1a3a7ff`, generation 127, switched 28 Sep 04:46 CDT |
-| Booted | generation 120 (`aa48765`, the cutover's reboot of 26 Sep); `hub-status`: same kernel, initrd, modules and params, no reboot owed |
+| Running | *refreshed:* homelab `47f5616` (ygc.15 and ygc.17), generation 128, switched by hand 28 Sep 09:04 CDT (generation 127, `1a3a7ff`, 04:46 before it). `main` is `472b608`, one commit ahead: an ac-host lock bump, outside this closure -- the stamp-stripped toplevel drvPaths of `47f5616` and `472b608` are identical (`36m0m21k…`, measured) |
+| Booted | generation 120 (`aa48765`, the cutover's reboot of 26 Sep); same kernel, initrd, modules and params as generation 128 (re-checked, *refreshed*), no reboot owed |
 | Units | `agent-hub-llm`, `nginx`, `qdrant`, `prometheus-node-exporter` and the base set; `systemctl --failed` empty. Timers: `agent-hub-environment-{poll,pull}` every 10 min, `homelab-deploy` every 10 min with nothing new staged, `nix-gc` weekly (`--delete-older-than 7d`) |
 | Docker | **not installed**: `docker.service` and `docker.socket` are `not-found`, no `docker` in the system profile. `/var/lib/docker` (52 G) is the directory the daemon left behind |
 | Disk | `/` 915 G, 225 G used (26 %) |
 | `nix.conf` | `substituters = https://cache.nixos.org/ https://cache.flox.dev` -- MinIO left with Docker |
 | DHCP and DNS | NetworkManager `Wired connection 2` on `enp8s0`: `ipv4.method auto`, `dhcp-send-hostname` at its default (yes), no `dhcp-hostname` -- the system hostname goes to the router. The Dream Router's DNS answers `ac-box.localdomain -> 192.168.1.51` and the PTR back. Nothing in any tree or config resolves the Z840 by name; every consumer names `192.168.1.51` |
 | `/etc/nixos` | `configuration.nix` is the 12 Sep tombstone: a `throw` whose text names `github:imkarrer/homelab#ac-box` twice. `hardware-configuration.nix` has the same content as the tracked `hosts/ac-box/hardware-configuration.nix` (the tracked one is nixfmt'd; `diff` of the two minus comments differs in layout only) |
-| `/var/lib/homelab` | `{pending,last-applied}-closure.json`, both `aa48765` (the cutover's own record, so the idle deploy unit is a no-op); `{pending,last-applied}-environment-agent-hub.json`, both `b16781d` (live); five records of tenants gone since the cutover (section 6) |
+| `/var/lib/homelab` | `{pending,last-applied}-closure.json`, both `aa48765` (the cutover's own record, so the idle deploy unit is a no-op); `{pending,last-applied}-environment-agent-hub.json`, both `9a55c11` (*refreshed:* staged by the poll 14:18:35 UTC from agent-hub build 34, applied 14:18:38 -- 09:18 CDT -- restarting `agent-hub-llm`, whose environment now carries ygc.15's `AGENT_HUB_PARALLEL=2`); five records of tenants gone since the cutover (section 6) |
 | Seen from arcade-box | Prometheus targets `192.168.1.51:9100` (job `node`) and `192.168.1.51:8100` (job `agent-hub`), both `host="ac-box"`, both up; `HostLoadHigh: node_load5{host="ac-box"} > 56` |
 | Backup | `/home/nixos/backup/status`: `LAST_RESULT=ok`, `RESULT_ac-box=ok` (`DIRS_ac-box=/var/lib/agent-hub /var/lib/qdrant`), `RESULT_arcade-box=ok`, 13 snapshots, 1.848 GiB, last success 28 Sep 09:33 UTC |
 | WSL mirror | `/home/nixos/backup/ac-box/var/lib/`: `agent-hub` 284 K and `qdrant` 763 M (mirrored nightly), `monitoring` 12 K (frozen since observability stopped declaring it on 16 Sep; it holds the `secrets\r` twin). The four moved directories (`ac-host`, `arcade`, `grafana`, `prometheus2`) are **already gone**: the directory's mtime is 26 Sep 16:02 UTC, the cutover's step 4.6.5 |
@@ -69,7 +75,12 @@ when that file is absent. A commit that sets `name = "llm-box"` without the
 `nixosuser` and `ac` **zero keys**. Switching it locks everyone out of a host
 that is key-only since the cutover's D7; the way back is the console. The
 other half alone (directory moved, name kept) fails evaluation loudly. So the
-rename commit's proof includes the key count (7.2, P1).
+rename commit's proof includes the key count (7.2, P1). *Refreshed:* 7.2's
+first commit closes the quiet half too -- `identity.nix` now throws
+"hosts/llm-box/ssh-keys.local.nix is missing." instead of falling back
+(re-measured on a scratch copy: the name-only change that built with zero
+keys before now fails evaluation), so neither half evaluates alone. P1
+stays, as the proof that the keys are the same two.
 
 **D2. Two ssh aliases for the transition, one at the end.** `Host llm-box`
 is added before the push (7.1), because `hub-status.sh` ssh's to each flake
@@ -132,7 +143,7 @@ ygc.17 and ygc.19 are editing some of these files as this is written, so
 | Tree (ref) | Hits | (a) | (b) | (c) | (d) |
 | --- | --- | --- | --- | --- | --- |
 | homelab (`main`, `1a3a7ff`) | 710 | 201 (12 L, 4 throw-text, 3 s) | 82 (21 s) | 426 | 1 |
-| ac-host (`0fdf591`) | 73 | 4 | 32 | 18 | 19 |
+| ac-host (`4da4918`, *refreshed*: ygc.19 landed) | 40 | 3 | 0 | 21 | 16 |
 | agent-hub (`b16781d`) | 96 | 56 (5 L) | 2 | 37 | 1 |
 | home-arcade (`71b34a0`) | 62 | 0 | 26 | 36 | 0 |
 | bead-loop (`origin/main`, `9a5af46`) | 89 | 1 | 6 | 39 | 43 |
@@ -224,10 +235,15 @@ The prose commit (7.2, commit B) -- docs and the agent-facing text:
   .#nixosConfigurations.ac-box…` for the deploy script; the deploy edge that
   runs is arcade-box's)
 - `modules/observability/default.nix` 19, 36 **s**, 285;
-  `modules/observability/scripts/docker_name_exporter.py` 4
+  `modules/observability/scripts/docker_name_exporter.py` 4 (**not** in
+  commit B: the file is the exporter's store path, so the comment is part of
+  a derivation -- editing it restarts `docker-name-exporter` on arcade-box,
+  outside P4; it rides with the next change that rebuilds the exporter)
 - `modules/platform/secrets.nix` 27 **s**, 67 **s**, 121 **s**
   (`defaultSopsFile`), 489
-- `modules/tenant/environment-pull.nix` 528;
+- `modules/tenant/environment-pull.nix` 528 (**not** in commit B, for the same
+  reason: the line is a `#` comment inside the pull script's bash text, so
+  editing it changes both hosts' pull units);
   `tests/fixtures/environment-floxhub-tenants.nix` 2, 4;
   `tests/fixtures/metrics-quiet-tenants.nix` 68
 - `hosts/arcade-box/tenants/arcade.nix` 1, 5, 23 ("arcade on ac-box",
@@ -261,27 +277,24 @@ The prose commit (7.2, commit B) -- docs and the agent-facing text:
 
 ### 3.3 The other trees
 
-**ac-host** -- (a) 4: `.cursor/skills/ac-ops/SKILL.md` 16; `README.md` 39;
-`scripts/bootstrap_ssh.py` 9; `scripts/sync_series_models.py` 31 (its
-reason -- "the Z840 still has a /var/lib/ac-host tree on disk" -- ends with
-the strip). (b) 32, nearly all `homelab-ygc.19`'s list, which writes "the
-Z840" where a hostname meant it: `.buildkite/pipeline.yml` 4;
-`.flox/env/manifest.toml` 5; `DEV.md` 13; `compose/docker-compose.buildkite.yml`
-1, 25, 39, 66, 90, 195, 204 (`BUILDKITE_AGENT_NAME` defaults to `ac-box`);
-`compose/docker-compose.yml` 17, 22; `compose/env.buildkite.example` 3, 5;
-`docs/ci-cd.md` 3, 12, 86; `flake.nix` 15, 16, 20; `monitoring/secrets.example`
-1; `scripts/bootstrap_ssh.py` 28, 169 (a directory removed on 8 Sep);
-`scripts/ci_containerize.sh` 18; `scripts/ci_image_smoke.py` 8;
-`scripts/ci_queue_prod.py` 20; `scripts/ci_series_pack.sh` 2;
-`scripts/github_release.py` 3, 26; `scripts/steamcmd_login.sh` 2;
-`shared/pending_deploy.py` 1, 180. (c) 18: `.gitignore` 20, 21 (dead
-patterns), `README.md` 21, 51, `docs/deploy-audit.md` (8),
-`docs/plan-dual-nic.md` 5, `docs/runbook-dual-nic.md` 167, 172, 176,
-`modules/ac-host.nix` 59, `scripts/acctl.py` 442. (d) 19: the
-`AC_BOX_HOST`/`AC_BOX_USER` variables ("the Assetto Corsa box", still true of
-arcade-box; neither is set in the live `.env`, so their defaults apply) in
-`compose/env.example`, `compose/env.dev.example`, `scripts/settings.py`,
-`scripts/unifi_pf.py`, `scripts/bootstrap_ssh.py` and the two dual-NIC docs.
+**ac-host** -- *refreshed at `4da4918`* (`homelab-ygc.19` landed: it writes
+"the Z840" where a hostname meant that machine, retired
+`scripts/bootstrap_ssh.py`, and marked the dual-NIC plan and runbook as
+history). (a) 3, all naming the Z840 as `ac-box`: `.cursor/skills/ac-ops/SKILL.md`
+16 (the host list: "`ac-box` -- the HP Z840 ... Not for this skill");
+`README.md` 39 ("the alias `ac-box` is the Z840 at `192.168.1.51`");
+`scripts/sync_series_models.py` 31 ("`ac-box` is the Z840 now, which still
+has a /var/lib/ac-host tree on disk" -- a reason that also ends with the
+strip). (b) none left. (c) 21: `.gitignore` 20, 23, 24 (the dead
+`hosts/ac-box/` patterns and their note); `README.md` 21, 51 (the gone
+`hosts/ac-box/` row, the retired bootstrap); `docs/deploy-audit.md` (9);
+`docs/plan-dual-nic.md` 3, 7 and `docs/runbook-dual-nic.md` 3, 169, 174, 178
+(marked history by ygc.19); `flake.nix` 20 (the removed
+`nixosConfigurations.ac-box`). (d) 16: the `AC_BOX_HOST`/`AC_BOX_USER`
+variables ("the Assetto Corsa box", still true of arcade-box; neither is set
+in the live `.env`, so their defaults apply) in `compose/env.example` 10, 11,
+`compose/env.dev.example` 7, 8, `scripts/settings.py` 58, 62,
+`scripts/unifi_pf.py` 42 and the two dual-NIC docs (9).
 
 **agent-hub** -- (a) 56: `.buildkite/pipeline.yml` 3, 12;
 `.flox/env/manifest.lock` 24, 188 (generated from the manifest's hook and
@@ -402,7 +415,7 @@ Classify each new line by the rule above, not by the file it is in.
 | Tree | A push does | So |
 | --- | --- | --- |
 | homelab | CI on arcade-box's agent, `queue-closure` stages, arcade-box's `homelab-deploy` switches within a minute (deferring while anyone races). The Z840 takes it only by the hand switch | the rename's push is 7.3 and 7.4 |
-| ac-host | CI, `queue-prod` stages the tree, the bot's 03:00 DOWNTIME build applies it and recycles the lobbies in the window | one push with ygc.19; it lands the next night |
+| ac-host | CI, `queue-prod` stages the tree, the bot's 03:00 DOWNTIME build applies it and recycles the lobbies in the window | ygc.19 already landed (`4da4918`, staged for the 29 Sep 03:00 apply); the sweep is 3 lines, one push, applied at the next 03:00 |
 | agent-hub | CI; within ~10 minutes the Z840's poll stages the green sha and the pull checks it out and **restarts `agent-hub-llm`** -- every new sha, docs-only included (drainable) | pause bead-loop's lanes around it, or push while they are idle |
 | home-arcade | CI; a push whose manifest or lock differ becomes a FloxHub generation and `arcade-environment-pull` bounces `arcade-freeciv` and `arcade-mindustry` (freely, AGENTS.md); one that changes neither stages the live generation again and bounces nothing | a sweep touching only `README.md`, `docs/` and `windows/` bounces nothing; the three `manifest.toml` comment lines cost one bounce |
 | bead-loop | PR, CI on arcade-box's agent, automerge; `bead-loop-deploy.timer` on the WSL machine downloads the release and recycles the loop when idle | worktree from `origin/main` |
@@ -452,7 +465,8 @@ its own, only comments. Per script, after the rename:
   the reboot), a closure behind HEAD that "only a hand switch moves" (from
   the push to the switch), and a reboot owed because the initrd differs
   (from the switch to the reboot). Its one literal host, the discovery
-  fallback at 22, changes in the rename commit.
+  fallback at 22, is gone in the rename commit: a failed discovery walks the
+  directories under `hosts/` instead.
 - `hub-backup.sh` ssh's to `root@<homelab.host.networks.lan.address>` from
   the eval, **not** the alias, and checks the key against the operator's
   `known_hosts` by address: the pull is unaffected. It stages under
@@ -789,13 +803,20 @@ push, `bd`).
 
 1. ygc.15 and ygc.17 have landed. They edit files the rename moves or
    rewrites (`hosts/ac-box/configuration.nix`, `hosts/ac-box/tenants/agent-hub.nix`,
-   `docs/current-state.md`, `docs/architecture.md`). If ygc.15's homelab half
-   is on `main`, the Z840's hand switch carries it and its new variables reach
-   `agent-hub-llm` at the reboot (`restartIfChanged = false`); its agent-hub
-   half is pushed after 7.5's proofs, which is the order ygc.15 needs anyway.
+   `docs/current-state.md`, `docs/architecture.md`). *Satisfied (refreshed):*
+   both landed as `47f5616`, and the 7.2 branch is rebased onto `main`
+   `472b608` above them. The Z840 took `47f5616` by hand at 09:04 CDT
+   (generation 128) and the poll applied agent-hub `9a55c11` at 09:18,
+   restarting `agent-hub-llm` with ygc.15's variables -- so ygc.15's unit
+   change is already live and the rename's switch carries none of it (7.4).
 2. `bash /home/nixos/src/homelab/scripts/hub-status.sh`: no verdict prefixed
    `ac-box:` or `arcade-box:`; both closure sections `CLEAN`, the Z840 on
    HEAD -- so its hand switch carries the rename and nothing unread.
+   *Refreshed:* at `472b608` the Z840 (on `47f5616`) is one commit behind,
+   and that commit is an ac-host lock bump outside its closure (stamp-stripped
+   drvPaths identical, section 1): a "behind HEAD" line for it is expected,
+   and nothing unread rides along. A hand switch to `472b608` first would
+   clear the line and change nothing else.
 3. The backup's last run ok for both hosts (6.3, S2's command, with
    `RESULT_ac-box`).
 
@@ -876,6 +897,22 @@ the stale-since-the-cutover sweep rides here). Four texts to get right:
 - **P5** `bash /home/nixos/src/homelab/scripts/hub-gates.sh homelab <worktree>`:
   `===== GATES PASS - safe to push =====`.
 
+*Done on `wt/homelab-ygc.9`, 28 Sep (refreshed)*, rebased onto `main`
+`472b608`, as three commits after this runbook's: **0**, `identity.nix`
+throws on a missing keys file (both hosts' stamp-stripped drvPaths
+unchanged); **A**, the rename as listed above, plus the hardware file's own
+re-fetch note; **B**, the prose -- 3.1's second list, 3.2's (b) lines less
+**s** and less the two derivation-bound lines 3.2 marks, and what has gone
+stale since the cutover and was found meanwhile: `homelab-land`'s confirm
+table (`ssh ac-box` for two records on arcade-box, and home-arcade/agent-hub
+still called module-only), the two queue scripts' skip hints, `hub/repos.psv`'s
+"no commit status" note, `current-state.md`'s first-night bullet, the
+architecture diagram's Z840 sha, and `runbook-restore.md` section 2 (restic
+under `sudo`). B is closure-neutral: both stripped drvPaths equal A's. P1-P5
+as they ran are section 10's first rows. ADR 0010's Status, `CONTEXT.md`,
+architecture rows 41/43, `current-state.md` and `runbook-restore.md` carry
+`<rename-date>` / `<rename-sha>` placeholders for 7.3.
+
 ### 7.3 The push -- supervisor
 
 Merge, push. CI (arcade-box's agent) builds both toplevels, `queue-closure`
@@ -917,9 +954,11 @@ ssh llm-box "nixos-rebuild dry-activate --flake github:imkarrer/homelab/$SHA#llm
 ```
 
 Expected: `would activate the configuration...` and no unit under `would
-stop`, `would restart`, `would reload` or `would start`. A `would NOT stop`
-or `NOT restarting` line for `agent-hub-llm.service` is ygc.15's unit change
-riding along (7.0) and is fine. Anything else is a stop (section 8).
+stop`, `would restart`, `would reload` or `would start`. *Refreshed:* nor a
+`would NOT stop` or `NOT restarting` line for `agent-hub-llm.service` --
+ygc.15's unit change is already live (7.0), and P3 measured the switch's
+whole unit delta as `homelab-deploy.service`, an inactive oneshot. Anything
+else is a stop (section 8).
 
 ```bash
 ssh llm-box "nixos-rebuild switch --flake github:imkarrer/homelab/$SHA#llm-box"; echo "exit $?"
@@ -1044,11 +1083,11 @@ Section 6: S1-S6, then 6.4, then 6.5.
 ### 7.10 The other trees -- a bead each, after 7.5
 
 In the order the costs of 3.8 make cheap: workstation (free), home-arcade
-(free unless it touches `manifest.toml`), bead-loop (a PR), ac-host (with
-ygc.19, applied at the next 03:00), agent-hub last (a model-server restart;
-the lanes paused, and its bench scripts' `ssh ac-box` lines are **L**). Each
-sweep takes both (a) and (b) of 3.3; the lines the previous session held
-back ride here.
+(free unless it touches `manifest.toml`), bead-loop (a PR), ac-host (three
+(a) lines since ygc.19; applied at the next 03:00), agent-hub last (a
+model-server restart; the lanes paused, and its bench scripts' `ssh ac-box`
+lines are **L**). Each sweep takes both (a) and (b) of 3.3; the lines the
+previous session held back ride here.
 
 ### 7.11 The tracker -- supervisor
 
@@ -1059,7 +1098,7 @@ back ride here.
 | `arcade-box-bootstrap-facts` | the Z840 is llm-box; the hand switch is `…#llm-box`; its environment arrives by its own poll (ygc.14), not "pulled by hand"; aliases `llm-box -> .51`, `arcade-box -> .50` |
 | `buildkite-cluster-and-sandbox` | the agent is `arcade-box`; "privileged is the only option" held on arcade-box too (cutover runbook, phase 3) |
 | `closure-switches-continuously` | the continuous edge is arcade-box's; its proof is `ssh arcade-box 'journalctl -u homelab-deploy …'`. Also stale in it: "hub/repos.psv keeps agent-push=ask" (it is `yes` since 16 Sep) |
-| `configuration-revision-drvpath-proof` | the recipe's `nixosConfigurations.ac-box` -> `.llm-box` or `.arcade-box` |
+| `configuration-revision-drvpath-proof` | the recipe's `nixosConfigurations.ac-box` -> `.llm-box` or `.arcade-box`; and `(import <nixpkgs> {}).lib.mkForce` -> the flake's own `f.inputs.nixpkgs.lib.mkForce` (`let f = builtins.getFlake …`), which 7.2's proofs used |
 | `flox-environment-deploy-edge` | `agent-hub-llm` runs on llm-box; agent-hub's staging half is the poll; MinIO is no substituter on the Z840 |
 | `homelab-agent-push-yes` | a push switches arcade-box within a minute, the Z840 by hand |
 | `homelab-glossary` | "'The box' = ac-box" is wrong since ADR 0010: Box is any host, named |
@@ -1076,7 +1115,7 @@ Open beads that say `ac-box`:
 | `homelab-bfq.5` | its baseline was the Z840 at `CPUWeight 0.05`; ci-box's comparison is now with arcade-box, which needs a baseline of its own |
 | `homelab-bfq.11` | its probe results are the Z840's (history); arcade-box's are in the cutover runbook, phase 3 |
 | `homelab-bqo.10` (deferred) | "the runner on ac-box" -> llm-box; a token there needs a `secrets/llm-box.yaml` (section 5), since the Z840 imports no sops |
-| `homelab-ygc.15`, `homelab-ygc.19` (in progress) | paths `hosts/ac-box/…` are `hosts/llm-box/…` once 7.3 lands |
+| `homelab-ygc.15`, `homelab-ygc.19` | closed 28 Sep (*refreshed*); their `hosts/ac-box/…` paths are history, `hosts/llm-box/…` from 7.3 on: nothing to change |
 | `homelab-ygc`, `homelab-bqo` (epics) | titles are history: leave |
 
 bead-loop's own tracker (`bl-*`, bead-loop's `.beads`, not this hub's) has
@@ -1211,9 +1250,14 @@ root@192.168.1.51:/var/lib/ac-host-dev/ /home/nixos/backup/z840-ac-host-dev/`.
 
 ## 10. As it ran
 
-_Empty until executed. One row per step: when (CDT), who, what happened, the
-proof's actual output where it differed from the expected._
+_One row per step: when (CDT), who, what happened, the proof's actual output
+where it differed from the expected._
 
 | When | Step | What happened |
 | --- | --- | --- |
-| | | |
+| 28 Sep 09:30-10:30, worker | 7.2 | Rebased onto `main` `472b608`; commits 0, A, B on `wt/homelab-ygc.9` (7.2's closing paragraph). Before commit 0, the D1 scratch copy (name only, no `git mv`) evaluated to `nixos-system-llm-box-…` with `[]` keys; after it, the same copy fails: "hosts/llm-box/ssh-keys.local.nix is missing." |
+| 28 Sep, worker | P1 | `2` keys; `root`, `nixosuser` and `ac` on the branch's `llm-box` all digest `f8b52b7e…4385`, the same as `main`'s `ac-box` |
+| 28 Sep, worker | P2 | `llm-box` |
+| 28 Sep, worker | P3 | `main` `ac-box` `36m0m21k…` against branch `llm-box` `8ryp4kg4…`: `etc-hostname` (`ac-box` -> `llm-box`), `string-hosts` (`127.0.0.2 ac-box` -> `llm-box`), `homelab-deploy` (`host=ac-box` -> `host=llm-box`) and so `unit-homelab-deploy.service`, `system-units`, `hosts`, `etc`, `activate`; `initrd-hostname` and so `initrd-linux-6.18.48`, `boot.json`. Four changed values, all the name; nothing else. `47f5616`'s stripped `ac-box` is `36m0m21k…` too, so this is the Z840's whole switch |
+| 28 Sep, worker | P4 | `main` `0kb3qih8…` against branch `lsnqfkwj…`: `prometheus.rules` (`node_load5{host="ac-box"} > 56` -> `llm-box`), `rules-checkrules-checked`, `prometheus.yml` (the two `192.168.1.51` targets' `host` label, `ac-box` -> `llm-box`, read from `services.prometheus.scrapeConfigs` on both sides), `prometheus.yml-checkconfig-checked`, `unit-prometheus.service`, `system-units`, `etc`, `activate`. No derivation named for `ac-host`, `docker` or `ac-host-ci` |
+| 28 Sep, worker | P5 | `===== GATES PASS - safe to push =====`; the gate ran `nix flake check --no-build --accept-flake-config` (all checks evaluate: `arcade-box`, `llm-box` and the nine harnesses) |
