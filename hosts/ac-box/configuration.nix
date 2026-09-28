@@ -219,8 +219,8 @@ in
   # agent-hub tree, read from the checkout at <environment.dir>. This block
   # used to set those as options the module rendered into the table; the
   # module stopped reading them on 18 Sep 2026 (.12) and they are gone with
-  # it. What stays is what the HOST decides: the threads and context this
-  # host affords, the port, the landing page, which models exist by
+  # it. What stays is what the HOST decides: the threads, context and coder
+  # slots this host affords, the port, the landing page, which models exist by
   # name and kind (the landing page lists them), and the vector store.
   services.agent-hub = {
     enable = true;
@@ -283,6 +283,13 @@ in
       # decision for tuning time (ADR 0010), not a host fact.
       threads = 28;
 
+      # Per slot: what one conversation gets. The coder's --ctx-size is the
+      # total its build splits across its `parallel` slots, so the stub
+      # renders contextSize * parallel as AGENT_HUB_CTX_TOTAL beside this
+      # value's AGENT_HUB_CTX, for the coder's line in llama-swap.yaml to
+      # read: the coder's total context is derived, not a second number to
+      # keep in step by hand (homelab-ygc.15).
+      #
       # Not larger, even though the model natively supports 262144 and
       # the machine would hold the KV cache for it. The binding
       # constraint on CPU is PREFILL, not RAM: prompt processing is
@@ -294,6 +301,9 @@ in
       # decision (homelab-route) rather than a hardware one. Not raised in
       # the same change that swapped the engine; one variable at a time.
       contextSize = 32768;
+
+      # Two coder slots, so a second agent session is not queued (homelab-7bu).
+      parallel = 2;
 
       # nginx in front, so http://<lan>:8100/ is a page that lists chat
       # models and the embedding model apart and opens each chat model in
@@ -383,7 +393,7 @@ in
   # stays where it is.
   #
   # What the stub declares, since .11, is the unit: `command` and the
-  # seven AGENT_HUB_* variables the manifest's hook would otherwise default
+  # AGENT_HUB_* variables the tenant's table and manifest read
   # (set here, from THIS file's values, so no default in the tenant tree is
   # load-bearing on the box -- the .1 review's finding 1), and the skeleton
   # the retired modules/agent-hub.nix used to supply: the description,
@@ -436,6 +446,11 @@ in
           AGENT_HUB_MODELS = "${toString llm.dataDir}/models";
           AGENT_HUB_THREADS = toString llm.llm.threads;
           AGENT_HUB_CTX = toString llm.llm.contextSize;
+          # The coder's slot count, and its --ctx-size: the total its build
+          # splits across those slots, computed here because a llama-swap
+          # macro cannot multiply (homelab-ygc.15).
+          AGENT_HUB_PARALLEL = toString llm.llm.parallel;
+          AGENT_HUB_CTX_TOTAL = toString (llm.llm.contextSize * llm.llm.parallel);
           AGENT_HUB_LISTEN = listen;
           # llama-swap.yaml's `startPort`; one spelling, the option's.
           AGENT_HUB_BACKEND_PORT = toString llm.llm.backendPort;

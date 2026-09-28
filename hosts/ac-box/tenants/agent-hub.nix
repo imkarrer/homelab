@@ -17,11 +17,11 @@
 #
 # Kept as an option set under the module's old name, services.agent-hub,
 # because that is what configuration.nix already sets and reads
-# (llm.threads, llm.contextSize, llm.port, llm.backendPort, llm.landingPage,
-# lanAddress, dataDir, stateDir, vectors.port, the models' kind and
-# description) -- one spelling per value, so the stub and the page cannot
-# drift. This file is host-local: it is imported by hosts/ac-box only, and
-# a second host composing this tenant writes its own.
+# (llm.threads, llm.contextSize, llm.parallel, llm.port, llm.backendPort,
+# llm.landingPage, lanAddress, dataDir, stateDir, vectors.port, the models'
+# kind and description) -- one spelling per value, so the stub and the page
+# cannot drift. This file is host-local: it is imported by hosts/ac-box
+# only, and a second host composing this tenant writes its own.
 #
 # Gone with the move, because nothing reads them: the module's llama-swap
 # table fields (engine, extraArgs, concurrent, a model's modelPath / vae /
@@ -164,9 +164,31 @@ in
         type = lib.types.int;
         default = 8192;
         description = ''
-          KV cache context length for the chat models. The stub passes it
-          as AGENT_HUB_CTX (llama-swap.yaml's `ctx` macro; the embedding
-          model has its own 8192 there).
+          KV cache context length for the chat models, PER SLOT: what one
+          conversation gets. The stub passes it as AGENT_HUB_CTX
+          (llama-swap.yaml's `ctx` macro, the whole --ctx-size of a
+          one-slot backend) and, times `parallel`, as AGENT_HUB_CTX_TOTAL
+          (the `ctx_total` macro: the coder's --ctx-size, the total its
+          build splits across its slots). The coder's total context is
+          therefore derived -- contextSize per slot times `parallel` --
+          so a change here reaches every backend that reads either macro.
+          A backend with its own literal --ctx-size in the table (the
+          embedding model, utility) does not read this.
+        '';
+      };
+
+      parallel = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 1;
+        description = ''
+          Slots on the chat backend that serves concurrent clients -- the
+          coder, which agent sessions share -- passed by the stub as
+          AGENT_HUB_PARALLEL (llama-swap.yaml's `parallel` macro, that
+          backend's --parallel). Each slot gets `contextSize`: the stub
+          passes contextSize times this as AGENT_HUB_CTX_TOTAL (the
+          `ctx_total` macro, its --ctx-size), because that build splits
+          --ctx-size across the slots and a llama-swap macro cannot
+          multiply. 1 serves one client at a time; the rest queue.
         '';
       };
 
