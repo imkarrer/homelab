@@ -848,7 +848,7 @@ diff /tmp/ac-box-docker-before-reboot.txt /tmp/ac-box-docker-after-reboot.txt  #
 ssh ac-box 'ss -tulnp' > /tmp/ac-box-sockets-after-reboot.txt
 diff /tmp/ac-box-sockets-before-reboot.txt /tmp/ac-box-sockets-after-reboot.txt
 ssh ac-box 'curl -s localhost:9090/api/v1/targets | head -c 400'
-bash scripts/hub-status.sh; echo "EXIT=$?"    # the reboot line must be gone from the verdict
+bash scripts/hub-status.sh; echo "EXIT=$?"    # no "booted" line: it prints one only while booted != current
 ```
 
 Resume races:
@@ -857,10 +857,16 @@ Resume races:
 ssh ac-box 'python3 /var/lib/ac-host/src/scripts/acctl.py --env prod resume'
 ```
 
-**Acceptance criterion:** `booted == current`; every container name from the
-before capture is back; every listening socket from the before capture is back;
-`ac-host-ci.service` is active *without a human running `docker compose`*; no
-failed units; `hub-status.sh` no longer reports the owed reboot.
+**Acceptance criterion:** `booted == current` — the `readlink` pair above
+prints one path twice; every container name from the before capture is back;
+every listening socket from the before capture is back; `ac-host-ci.service`
+is active *without a human running `docker compose`*; no failed units.
+`hub-status.sh` no longer reporting an owed reboot is not a test: since
+`homelab-bqo.63` (27 Sep 2026) it owes one only when the kernel, initrd,
+kernel-modules or kernel-params differ between booted and current (kernel,
+initrd and modules by store path, params by content), and here none do (the
+table above), so it prints "same kernel, initrd, kernel-modules and
+kernel-params - no reboot owed" before this reboot as well.
 
 ### Rollback
 
@@ -897,8 +903,12 @@ The decommission is complete when:
 4. `ac-host-ci-minio-init-1` is still present and still `Exited (0)` — and
    nobody removed it.
 5. `readlink -f /run/booted-system` equals `readlink -f /run/current-system`.
-6. `bash scripts/hub-status.sh` no longer lists the owed reboot, and the closure
-   drift line reflects a switch that actually happened.
+6. `bash scripts/hub-status.sh` prints no `booted` line (it prints one only
+   while booted != current), and the closure drift line reflects a switch that
+   actually happened. Its silence on an owed reboot is not evidence: since
+   `homelab-bqo.63` it owes one only for a kernel, initrd, kernel-modules or
+   kernel-params difference, and this reboot carries none — criterion 5 is
+   the check.
 7. `docs/current-state.md` §2's Decommission table is updated: three rows
    closed, `inquire-platform` (a registry decision, out of scope here) still
    open, and the two corrections in Appendix B folded in.
