@@ -993,8 +993,9 @@ answers (empty until a model is asked for); the 4B answers; `nodename="llm-box"`
 Within ten minutes, `ssh llm-box 'journalctl -u agent-hub-environment-poll
 --since "-15min" --no-pager | tail -2'` shows a `Finished` tick. Within a
 minute, 7.3's target query still shows both `llm-box` targets `up`.
-`hub-status.sh`: llm-box and arcade-box `CLEAN`, llm-box's booted line "no
-reboot owed", no verdict prefixed with either host. Then
+`hub-status.sh`: llm-box and arcade-box `CLEAN`, **no** `booted` line for
+llm-box (it prints one only while booted != current; the `readlink` pair
+above is the reboot's proof), no verdict prefixed with either host. Then
 `bead-supervisor resume cpu; bead-supervisor resume gpu`.
 
 The operator, afterwards:
@@ -1134,14 +1135,19 @@ Stop -- not judge -- at any of these:
   warning.
 - **P3/P4** name a derivation 4.1 does not. On arcade-box, anything with
   `ac-host`, `docker` or `ac-host-ci` in its name.
-- **7.3**: arcade-box's `homelab-deploy` fails, or restarts anything but
-  `prometheus.service`.
+- **7.3**: the pushed sha's build is not green, arcade-box's `homelab-deploy`
+  fails or has not applied it, or it restarts anything but
+  `prometheus.service`. 7.4 names a sha CI has built, or does not run.
 - **7.4 dry-activate** lists a unit under stop, restart, reload or start.
 - **7.4 switch** exits non-zero, `systemctl --failed` is non-empty, or `ssh
   llm-box` stops answering.
 - **7.5**: the Z840 does not answer ssh within 10 minutes of the reboot
-  (the operator goes to the console), or `agent-hub-llm` is not active, or
-  `:8100` does not answer.
+  (the operator goes to the console), or the kernel hostname is not
+  `llm-box` (it booted another generation), or `agent-hub-llm` is not
+  active, or `:8100` does not answer. A reboot longer than 5 minutes also
+  posts `NodeExporterDown` to Discord (`for: 5m`) -- expected, not an abort.
+- **7.6**: `LAST_RESULT` or `RESULT_llm-box` is not `ok`, or there is no
+  `SNAPSHOT_llm-box`: keep `/home/nixos/backup/ac-box`.
 - **Section 5**: `VALUES-DIFFER`, or a recipient count other than 2.
 - **6.3**: any precondition unmet. **6.4**: any non-zero exit.
 
@@ -1149,11 +1155,12 @@ Rollback, by how far it got:
 
 - Before 7.3's push: drop the branch; remove `Host llm-box` if wanted.
   Nothing moved.
-- After the push, before 7.4: `git revert` both commits and push --
+- After the push, before 7.4: `git revert -m 1 <merge>` (or commits A and
+  B, if it went in by fast-forward; commit 0 can stay) and push --
   arcade-box switches its labels back; the Z840 was never touched.
 - After 7.4's switch, before the reboot: `ssh llm-box nixos-rebuild switch
   --rollback` (the generation before, which 7.0 made HEAD-before-the-rename;
-  127 on 28 Sep), and the revert above. Minutes.
+  128, `47f5616`, on 28 Sep), and the revert above. Minutes.
 - After the reboot: pick that generation in the systemd-boot menu at the
   console, or `nixos-rebuild switch --rollback` then reboot; the revert above;
   keep or restore `Host ac-box`. Nothing about the name touches data.

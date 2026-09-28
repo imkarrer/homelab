@@ -59,9 +59,13 @@ refactor was a no-op (`drvPath` unchanged) rather than merely evaluable.
 Never hand-edit arcade-box or llm-box. Read-only SSH inspection is always
 fine. The migration exception (CONTEXT.md): an agent may apply a pushed
 revision with `nixos-rebuild switch --flake
-github:imkarrer/homelab/<full-sha>#<host>` — on llm-box that is the closure's
-only edge, since no CI agent stages there (ADR 0010) — and may run host-side
-steps a runbook in `docs/` spells out verbatim. Two conditions: the sha must
+github:imkarrer/homelab/<full-sha>#<host>`, and may run host-side steps a
+runbook in `docs/` spells out verbatim. On llm-box that switch is the
+closure's only edge, since no CI agent stages there (ADR 0010); it no longer
+lapses the way ADR 0006 wrote it would. On arcade-box `homelab-deploy` is the
+edge, and a hand switch there is for a broken path unit only, never for
+impatience (`homelab-land` §5): it skips the deploy unit's busy check. Two
+conditions: the sha must
 already be on origin, and the agent must stop — not judge — at a runbook's
 abort criteria. On arcade-box,
 `ac-host-static.service` or `docker.service` under stop/restart in

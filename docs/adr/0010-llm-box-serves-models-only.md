@@ -1,6 +1,6 @@
 # ADR 0010: The Z840 Serves Models And Nothing Else; arcade-box Hosts The Rest
 
-**Status:** Accepted, 26 Sep 2026 -- half one landed that day, half two
+**Status:** Accepted, 26 Sep 2026 -- half one landed that day, half two on
 28 Sep 2026. The operator executed the cutover on 26 Sep, which is the
 acceptance (`docs/runbook-arcade-box-cutover.md`, "As it ran"; `aa48765`, PR
 #11): arcade-box runs `assetto`, `bot`, `arcade`, `observability` and `ci` at
