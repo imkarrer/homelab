@@ -101,7 +101,9 @@ commit `daac96f` carry the full account; do not re-add either path to it. Fetch
 them read-only from the host they describe, `<host>:/etc/nixos/hardware-configuration.nix`
 (both hosts keep one there; arcade-box's was fetched that way on 26 Sep 2026),
 and never invent one. Each `hosts/<host>/configuration.nix` *throws* on a
-missing hardware file rather than substituting the `.example` stub.
+missing hardware file rather than substituting the `.example` stub, and
+`modules/platform/identity.nix` throws on a missing keys file rather than
+giving root, `nixosuser` and `ac` an empty list — a lockout on a key-only host.
 
 **Everything is public except one file.** `whitelist.json` holds third-party
 `steam_id` + `discord_id` pairs and stays box state, never git. Credentials go
