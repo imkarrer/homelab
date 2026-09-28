@@ -49,7 +49,7 @@ landed on both hosts the same day (`docs/architecture.md` Part III, rows
 | Tenants | `assetto`, `bot`, `arcade`, `observability`, `ci` — five in `/etc/homelab/tenants.json` | `agent-hub` — one in `/etc/homelab/tenants.json` |
 | Closure reaches it | by itself: its own agent's `queue-closure` stages, `homelab-deploy` (`schedule = "continuous"`, ADR 0006/0008) switches within a minute — `pending-closure.json` 13:47 CDT, `last-applied-closure.json` 13:48, running `ab21161` | by hand: `nixos-rebuild switch --refresh --flake github:imkarrer/homelab/<sha>#ac-box`. `homelab-deploy.timer` is armed and nothing stages on this host; its `pending-closure.json` is the cutover's own record, 10:27 CDT (ADR 0010, "no machinery"; architecture row 41) |
 | Tenant tree (`ac-host`) | `queue-prod` on this agent; the bot's 03:00 DOWNTIME build applies. `last-downtime.json` reads `2026-09-26T08:00:12Z` — the Z840's last run, copied over; tonight's is the first here | none |
-| Environments (ADR 0009) | `arcade`: FloxHub generation 2 of `imkarrer/arcade`, staged by `queue-environment` on this agent, applied by `arcade-environment-pull` (`pinned-environment-arcade`, 08:08 CDT) | `agent-hub`: `agent-hub-environment-poll.timer` reads GitHub every 10 minutes for a green sha (`homelab-ygc.14`); `agent-hub-environment-pull` applies it. Buildkite publishes no commit status for `agent-hub` today, so the poll stages nothing yet (row 35) |
+| Environments (ADR 0009) | `arcade`: FloxHub generation 2 of `imkarrer/arcade`, staged by `queue-environment` on this agent, applied by `arcade-environment-pull` (`pinned-environment-arcade`, 08:08 CDT) | `agent-hub`: `agent-hub-environment-poll.timer` reads GitHub every 10 minutes for a green sha (`homelab-ygc.14`); `agent-hub-environment-pull` applies it. First live run 26 Sep, 20:19 CDT: agent-hub `b16781d`, staged and applied six seconds apart with no hand step (row 35) |
 | Tiers | shares of 31 GiB / 12 threads; `fence = false` on `background` and `batch` (§3) | `homelab.enforce.slices = false` (`homelab-ygc.13`): no slices, no `MemoryMax`, no fence (§3) |
 | Docker | yes — 9 containers | none: `docker.service` inactive, no `docker` in the closure |
 | CI agent | `arcade-box` on `queue=self` (`BUILDKITE_AGENT_NAME` read from the container); builds both hosts' toplevels | none |
@@ -88,9 +88,15 @@ hand switches its only kind. Every unit named in this paragraph except
 - **agent-hub's script defaults** (`homelab-ygc.7`): `vectors-smoke.sh` and
   `compare.sh` in the agent-hub tree still name `192.168.1.50`; deferred to
   that tree's first push. homelab's three scripts moved in `44a8954`.
-- **Commit statuses** (architecture row 35, an operator step in Buildkite):
-  `agent-hub`, `homelab` and `home-arcade` publish none, so the Z840's poll —
-  the one automatic edge that host has — has nothing to read.
+- ~~**Commit statuses**~~ (architecture row 35, an operator step in
+  Buildkite) **Settled 26 Sep, 20:05 CDT** (27 Sep 01:05 UTC) — the first
+  `buildkite/agent-hub` status, `success` on `4f4e83b`; `buildkite/homelab`
+  follows from 20:14 (`afecdf6`, build 174). Read 28 Sep from
+  `gh api /repos/imkarrer/<tree>/commits/<sha>/status`. The Z840's poll —
+  the one automatic edge that host has, and the one unit that reads a
+  status — staged from agent-hub's at 20:19. `home-arcade` has not pushed
+  since 19 Sep, so whether its pipeline publishes is unobserved; no unit
+  reads it.
 - **The first night on arcade-box**: the bot's 03:00 DOWNTIME build on this
   host's agent, the 04:30 `hub-backup` pull from two hosts, and the removal
   of the four moved directories from `/home/nixos/backup/ac-box/var/lib/`
@@ -129,8 +135,8 @@ Live from the Z840, 26 Sep 2026 17:45 CDT, closure `ab21161`.
 | `agent-hub-llm.service` | agent-hub | Running in `system.slice` — there is no tier slice on this host (`homelab.enforce.slices = false`, `homelab-ygc.13`; `systemctl list-units --type=slice` shows none). `AllowedCPUs = 0-27` and `NUMAPolicy = interleave` on the unit itself: the 28 physical cores, a placement fact, not a fence; `MemoryMax = infinity`. `llama-swap` listens on `127.0.0.1:8100` over four models; the loaded `llama-server` runs `--threads 28` (`ps`). `restartIfChanged = false`: a switch does not bounce it. |
 | `nginx.service` | agent-hub | Landing page and proxy on `192.168.1.51:8100` (the tenant's `llm` port, scope `lan`); `system.slice`. |
 | `qdrant.service` | agent-hub | `192.168.1.51:6333` (`vectors`, scope `lan`); `system.slice`. State `/var/lib/qdrant`, `backup = true`. |
-| `agent-hub-environment-pull.{path,timer}` | agent-hub | The applying half of ADR 0009's edge, armed; `last-applied-environment-agent-hub.json` 25 Sep 21:20 CDT. |
-| `agent-hub-environment-poll.timer` | agent-hub | The staging half since `ab21161` (`homelab-ygc.14`): `OnUnitActiveSec=10min`, last 17:38, next 17:48 CDT. Two GitHub API calls per tick; stages a sha only when `buildkite/agent-hub` reads `success` on it, which today it never does (row 35). |
+| `agent-hub-environment-pull.{path,timer}` | agent-hub | The applying half of ADR 0009's edge, armed; `last-applied-environment-agent-hub.json` 25 Sep 21:20 CDT at this reading, then 20:19:58 the same evening: `b16781d`, the poll's first staged sha, restarting `agent-hub-llm` (the record and both units' journals, read 28 Sep). |
+| `agent-hub-environment-poll.timer` | agent-hub | The staging half since `ab21161` (`homelab-ygc.14`): `OnUnitActiveSec=10min`, last 17:38, next 17:48 CDT. Two GitHub API calls per tick; stages a sha only when `buildkite/agent-hub` reads `success` on it — first at 20:19:52 CDT, `b16781d`, green in build 32 (row 35). |
 | `prometheus-node-exporter.service` | platform, not a tenant (`modules/platform/node-exporter.nix`, `homelab-ygc.10`) | `192.168.1.51:9100`, opened on `enp8s0` only, scraped by arcade-box. Not in the port registry — the module header says why, and what it costs. |
 | `homelab-deploy.{path,timer}` | platform | Armed (every 10 minutes) with nothing to do: no agent stages here. Accepted (architecture row 41). |
 
@@ -140,7 +146,7 @@ Live from the Z840, 26 Sep 2026 17:45 CDT, closure `ab21161`.
 | --- | --- | --- |
 | The Z840's closure edge | ac-box | No CI agent, so nothing stages a closure on this host; every switch is an operator's, from a sha on origin. **Accepted** (ADR 0010; row 41). |
 | MinIO's images | arcade-box | Running from `docker save \| docker load` copies; the compose file's `image:` lines are not pullable (`homelab-ygc.11`). |
-| Commit statuses | Buildkite | None published for `agent-hub`, `homelab`, `home-arcade`; the Z840's poll depends on them (row 35, operator). |
+| ~~Commit statuses~~ | Buildkite | **Settled 26 Sep** — `agent-hub`'s published from 20:05 CDT and `homelab`'s from 20:14; the Z840's poll, the one unit that reads a status, staged from agent-hub's at 20:19. `home-arcade` unobserved: no push since 19 Sep (row 35). |
 
 ### Decommission
 
