@@ -1,6 +1,6 @@
 ---
 name: homelab-hub
-description: Establish the true three-way state of the home server - what ac-box actually runs, what is on origin, what is uncommitted in the WSL trees. Use before touching ac-host, homelab, agent-hub or home-arcade; when asked what is deployed, live, or up; to find drift; and before landing, pushing, or deploying anything.
+description: Establish the true three-way state of the home servers - what arcade-box and llm-box actually run, what is on origin, what is uncommitted in the WSL trees. Use before touching ac-host, homelab, agent-hub or home-arcade; when asked what is deployed, live, or up; to find drift; and before landing, pushing, or deploying anything.
 ---
 
 # homelab hub
@@ -116,7 +116,7 @@ Each line names a distinct failure, and they are not interchangeable:
 
 ## The standing rules
 
-- Treat ac-box as **read-only**. Inspect with ssh; change it by landing in git
+- Treat both hosts as **read-only**. Inspect with ssh; change a host by landing in git
   and letting the pipeline carry it. The migration exception and its two
   conditions are in `AGENTS.md`.
 - A hand-edit on the box is a debugging step, never a resting state. Land it in

@@ -48,7 +48,7 @@ fi
 # the signal that staging did not happen.
 if [ ! -d "$STATE" ] || [ ! -w "$STATE" ]; then
   echo "skip queue-closure: $STATE is not a writable directory here"
-  echo "  (agent not on ac-box, or ac-host-ci has not been recreated with the mount)"
+  echo "  (agent not on arcade-box, or ac-host-ci has not been recreated with the mount)"
   exit 0
 fi
 

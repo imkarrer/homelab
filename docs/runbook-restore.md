@@ -1,4 +1,4 @@
-# Restore Runbook: getting ac-box's state back
+# Restore Runbook: getting a host's state back
 
 The backup this runbook restores from is `scripts/hub-backup.sh` (bead
 `homelab-bqo.38`, `docs/architecture.md` Part III row 22). Read the first two
@@ -16,10 +16,10 @@ marked as a box action and carries its own abort criteria.
 
 | | |
 |---|---|
-| Runs on | the operator's WSL machine, **not** ac-box. A backup that lives on the machine it is backing up is not one. |
+| Runs on | the operator's WSL machine, **not** either host. A backup that lives on the machine it is backing up is not one. |
 | Schedule | `hub-backup.timer`, 04:30 **America/Chicago** (09:30 UTC), `Persistent=true` |
-| Staging mirror | `/home/nixos/backup/<host>/<that host's absolute path>` — last night's tree, readable directly. `ac-box/` is where it has always been; `arcade-box/` beside it since 26 Sep 2026 (`homelab-ygc.4`), and each host is its own restic host and forget group |
-| restic repo | `/home/nixos/backup/restic` |
+| Staging mirror | `/home/nixos/backup/<host>/<that host's absolute path>` — last night's tree, readable directly. `arcade-box/` since 26 Sep 2026 (`homelab-ygc.4`), which is where every tenant but `agent-hub` is; `llm-box/` since the rename (<rename-date>). Each host is its own restic host and forget group. `ac-box/` is the Z840's tree from 14 Sep to the rename, frozen and removed by hand after the first `llm-box` snapshot (`docs/runbook-llm-box-rename.md` 7.6); its history, and every tenant's before 26 Sep, stays in restic under host `ac-box` |
+| restic repo | `/home/nixos/backup/restic`, `root:root 0700` (the timer runs as root), so restic runs under `sudo` (section 2) |
 | Repo password | `restic-repo-password` in `secrets/ac-box.yaml` (sops; two recipients, the box's host key and the operator's) |
 | Retention | 7 daily, 4 weekly, 6 monthly |
 | Status | `/home/nixos/backup/status`, one `KEY=VALUE` per line; `scripts/hub-status.sh` prints its age and complains past three days |
@@ -114,15 +114,21 @@ can be short the last two hours of samples and nothing else. The header of
 ```bash
 cd /home/nixos/src/homelab
 grep . /home/nixos/backup/status                  # when did this last work?
-RESTIC=$(nix build --no-link --print-out-paths nixpkgs#restic)/bin/restic
+RESTIC_BIN=$(nix build --no-link --print-out-paths nixpkgs#restic)/bin/restic
 export RESTIC_REPOSITORY=/home/nixos/backup/restic
 export RESTIC_PASSWORD="$( . scripts/lib/sops-secret.sh; hub_sops_secret restic-repo-password )"
+# The repo is root:root 0700, so restic runs as root: sudo passes the two
+# variables through, and --no-cache keeps restic out of root's home.
+RESTIC="sudo --preserve-env=RESTIC_REPOSITORY,RESTIC_PASSWORD $RESTIC_BIN --no-cache"
 $RESTIC snapshots
 ```
 
 `RESTIC_PASSWORD` is an environment variable and not a command-line argument
 deliberately: `ps` shows argv to every user on the machine. Close the shell
-when you are done, and never `echo` it.
+when you are done, and never `echo` it. `$RESTIC` stays unquoted below, so
+the shell splits it back into the `sudo` command. What it restores keeps the
+host's numeric owners and modes, so reading the scratch copy needs `sudo`
+too.
 
 If `hub_sops_secret` fails, the problem is the age identity, not the backup:
 it needs `~/.ssh/id_ed25519_ac-host` (see `.sops.yaml`). Without either that
@@ -132,10 +138,12 @@ key or the box's host key, the repo is unreadable — that is the design.
 
 ## 3. Restoring a single file
 
-**First, try the mirror.** No password, no restic, and it is the same bytes:
+**First, try the mirror.** No password, no restic, and it is the same bytes
+(the mirror keeps the host's owners and modes -- `/var/lib/ac-host` is `0750
+root` -- so reading it takes `sudo`):
 
 ```bash
-ls -l /home/nixos/backup/ac-box/var/lib/ac-host/whitelist.json
+sudo ls -l /home/nixos/backup/arcade-box/var/lib/ac-host/whitelist.json
 ```
 
 If that file is the one you want, copy it back (section 4's box-action rules
@@ -146,15 +154,19 @@ file was deleted more than one run ago:
 
 ```bash
 # Which snapshots hold it, and what it looked like in each
-$RESTIC find --long /home/nixos/backup/ac-box/var/lib/ac-host/whitelist.json
+$RESTIC find --long /home/nixos/backup/arcade-box/var/lib/ac-host/whitelist.json
 
 # Pull one version out to a scratch directory -- NEVER straight over the box
 $RESTIC restore <snapshot-id> --target /tmp/restore \
-  --include /home/nixos/backup/ac-box/var/lib/ac-host/whitelist.json
+  --include /home/nixos/backup/arcade-box/var/lib/ac-host/whitelist.json
 
 # The restored path keeps the staging tree's absolute shape:
-cat /tmp/restore/home/nixos/backup/ac-box/var/lib/ac-host/whitelist.json
+sudo cat /tmp/restore/home/nixos/backup/arcade-box/var/lib/ac-host/whitelist.json
 ```
+
+A version from before 26 Sep 2026 is under restic host `ac-box` and the path
+`/home/nixos/backup/ac-box/var/lib/...`: every tenant ran on the Z840 until
+the cutover.
 
 Always restore to a scratch target and compare before putting anything back.
 `sha256sum` both sides; if they match, the file was never the problem.
@@ -163,7 +175,7 @@ Always restore to a scratch target and compare before putting anything back.
 
 ## 4. Restoring a whole tenant
 
-> **This is a box action.** `AGENTS.md`: ac-box changes by landing in git and
+> **This is a box action.** `AGENTS.md`: a host changes by landing in git and
 > letting the pipeline deploy — but state is not in git, and a restore is
 > exactly the case that has no git path. An agent may run the steps below
 > *verbatim*; it may not improvise around them, and it stops at any abort
@@ -187,17 +199,21 @@ it underneath a live process is how a partial restore becomes a corrupt one.
 
 ```bash
 $RESTIC restore <snapshot-id> --target /tmp/restore \
-  --include /home/nixos/backup/ac-box/var/lib/arcade
-cd /tmp/restore/home/nixos/backup/ac-box/var/lib && ls -ln arcade
-du -sh arcade
+  --include /home/nixos/backup/arcade-box/var/lib/arcade
+cd /tmp/restore/home/nixos/backup/arcade-box/var/lib && sudo ls -ln arcade
+sudo du -sh arcade
 ```
+
+The staging path names the host the tenant ran on at the snapshot:
+`arcade-box` for every tenant but `agent-hub` since 26 Sep 2026, `llm-box`
+for `agent-hub` since the rename, `ac-box` for anything older (§3).
 
 `ls -ln` shows numeric owners: they are the box's UIDs, preserved by
 `rsync --numeric-ids` and by restic. They will not match this machine's passwd
 and are not supposed to.
 
 **Abort** if the tree is empty, if the top directory's mode is not what the
-table in `hosts/ac-box/tenants.nix` implies, or if `du` is wildly smaller than
+table in `hosts/<host>/tenants.nix` implies, or if `du` is wildly smaller than
 the box's current directory. A restore that silently puts back less than there
 was is worse than no restore.
 
@@ -212,24 +228,29 @@ that crash-looped the lobbies.
 
 ### 4c. Put it on the box
 
+Every step names the host the tenant runs on -- arcade-box
+(`192.168.1.50`) for arcade, shown here, and for assetto and
+observability; llm-box (`192.168.1.51`) for agent-hub. The ssh steps and
+the rsync target must name the same machine.
+
 ```bash
 # 1. stop the tenant's units (arcade shown; assetto needs a window and a drain)
-ssh ac-box 'systemctl stop arcade-freeciv arcade-mindustry'
+ssh arcade-box 'systemctl stop arcade-freeciv arcade-mindustry'
 
 # 2. move the live directory aside -- never delete it; it is the rollback
-ssh ac-box 'mv /var/lib/arcade /var/lib/arcade.broken-$(date +%F)'
+ssh arcade-box 'mv /var/lib/arcade /var/lib/arcade.broken-$(date +%F)'
 
 # 3. push the restored tree, preserving numeric ownership
 sudo rsync -a --numeric-ids \
   -e "ssh -i /home/nixos/.ssh/id_ed25519_ac-host -o UserKnownHostsFile=/home/nixos/.ssh/known_hosts" \
-  /tmp/restore/home/nixos/backup/ac-box/var/lib/arcade \
+  /tmp/restore/home/nixos/backup/arcade-box/var/lib/arcade \
   root@192.168.1.50:/var/lib/
 
 # 4. verify before starting anything
-ssh ac-box 'ls -ln /var/lib/ | grep arcade; du -sh /var/lib/arcade'
+ssh arcade-box 'ls -ln /var/lib/ | grep arcade; du -sh /var/lib/arcade'
 
 # 5. start the units, then watch them
-ssh ac-box 'systemctl start arcade-freeciv arcade-mindustry; systemctl status arcade-freeciv'
+ssh arcade-box 'systemctl start arcade-freeciv arcade-mindustry; systemctl status arcade-freeciv'
 ```
 
 **Abort at step 4** if the owner, group or mode differs from the directory you
@@ -303,7 +324,7 @@ pull unit checks before saying "already applied; nothing to do" — left in
 place, the unit would never rebuild it. So after step 3 of 4c, and before
 starting anything:
 
-1. Move the restored worktree aside: `ssh ac-box 'mv /var/lib/agent-hub/env
+1. Move the restored worktree aside: `ssh llm-box 'mv /var/lib/agent-hub/env
    /var/lib/agent-hub/env.restored'`. (Left in place without `.git`, the pull
    unit refuses to clone over it anyway — "exists and is not a git
    checkout".)
@@ -314,12 +335,15 @@ starting anything:
    directory; if it went too, the sha is the 41 bytes in the mirror's
    `env/.git/HEAD` — the backup keeps that one file for this reason.
 3. Re-stage it and let the pull unit do the rest. If the pending file is
-   still there: `ssh ac-box 'systemctl start
+   still there: `ssh llm-box 'systemctl start
    agent-hub-environment-pull.service'` (its timer would fire within ten
-   minutes anyway). If it is gone: either re-run the tenant tree's last green
-   `main` build in Buildkite (its `trigger: homelab` step writes the pending
-   file through `scripts/hub-queue-environment.sh`), or write the pending
-   file on the box as root the way that script does, then start the unit.
+   minutes anyway). If it is gone: the host's own poll
+   (`agent-hub-environment-poll`, every ten minutes) stages the tree's green
+   `main` HEAD by itself -- a re-run Buildkite build no longer does, since
+   its `trigger: homelab` step writes on the agent's host, arcade-box. For
+   any other sha, write the pending file on the host as root the way
+   `scripts/hub-queue-environment.sh` does (`docs/runbook-llm-box-rename.md`
+   7.8 has the exact record), then start the unit.
    The unit clones the tree, `git checkout --detach`es the sha as the tenant
    user, activates once online and restarts the stub under the quiet policy
    — so 4c's step 5 is *not* run by hand for this tenant. The by-hand
@@ -388,7 +412,7 @@ journalctl -u hub-backup -n 50
 ```
 
 The unit files in `hub/systemd/` are the canonical text and are deliberately
-**not** in ac-box's closure: nothing under `modules/` imports them. On a host
+in **no** host's closure: nothing under `modules/` imports them. On a host
 where `/etc/systemd/system` is writable the same two files install the ordinary
 way — `sudo cp hub/systemd/hub-backup.* /etc/systemd/system/ && sudo systemctl
 daemon-reload && sudo systemctl enable --now hub-backup.timer`.

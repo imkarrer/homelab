@@ -1,6 +1,6 @@
-# The nightly backup of ac-box's declared state, run on the OPERATOR'S WSL
-# machine -- not on ac-box. Deliberately not part of ac-box's closure: the
-# whole point of row 22's backup is that it survives the box, so the machine
+# The nightly backup of both hosts' declared state, run on the OPERATOR'S WSL
+# machine -- not on either host. Deliberately not part of any host's closure:
+# the whole point of row 22's backup is that it survives the box, so the machine
 # that holds the copy must also be the machine that decides to take it. Nothing
 # in modules/ imports this file, and nothing should.
 #

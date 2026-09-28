@@ -1,4 +1,4 @@
-# The `ci` tenant as hosts/ac-box/tenants.nix declares it, for the ci
+# The `ci` tenant as hosts/arcade-box/tenants.nix declares it, for the ci
 # harness: the same conditional `units` (the two new stub names join the
 # list only with native on -- a stub outside `units` is environment.nix's
 # refusal, and an unconditional list would change the inventory with

@@ -134,7 +134,7 @@ in
   # arcade: the host side (hosts/arcade-box/tenants/arcade.nix -- the user,
   # the directories, the SMB and rsync exports on the LAN address) and the
   # two game servers as stubs from home-arcade's flox environment, exactly
-  # as hosts/ac-box/configuration.nix declares them.
+  # as the Z840's configuration.nix declared them until the cutover.
   #
   # environment.enable follows modules/tenant/environment-pull.nix's
   # first-switch order and is the one BUILD-UP flag that flips BEFORE the

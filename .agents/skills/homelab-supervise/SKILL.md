@@ -31,7 +31,7 @@ child bead per worker (`bd create --parent=<id>`), each landable alone.
 One worktree, then one worker, per bead. Which worker is a routing
 decision — the [`homelab-route`](../homelab-route/SKILL.md) skill: a bounded,
 gate-verifiable task whose prompt fits in ~6k tokens goes to
-`homelab-local-worker` (agent-hub's model on ac-box: free, private, slow);
+`homelab-local-worker` (agent-hub's model on llm-box: free, private, slow);
 everything else goes to `homelab-worker`. Route local in the background and
 keep working; a local task is minutes, not seconds.
 

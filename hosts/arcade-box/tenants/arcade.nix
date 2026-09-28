@@ -1,8 +1,8 @@
-# arcade on ac-box: everything the tenant's NixOS module used to contribute
+# arcade on arcade-box: everything the tenant's NixOS module used to contribute
 # that is NOT a game server's unit -- the arcade user and group, the library
 # and state directories, the SMB and rsync exports of /srv/arcade and the
 # unit that keeps the Samba password -- plus the host facts
-# hosts/ac-box/configuration.nix reads to fill the two unit stubs
+# hosts/arcade-box/configuration.nix reads to fill the two unit stubs
 # (homelab.tenants.arcade.environment).
 #
 # Moved here from home-arcade's modules/arcade-hub.nix on 18 Sep 2026
@@ -20,7 +20,7 @@
 # because that is what configuration.nix already sets and reads
 # (lanAddress, stateDir, freeciv.port, mindustry.port/map/mode) -- one
 # spelling per value, so the stubs and the exports cannot drift. Host-local:
-# imported by hosts/ac-box only.
+# imported by hosts/arcade-box only.
 #
 # Gone with the move, because nothing reads them: freeciv.enable and
 # mindustry.enable (declaring the stub is the enable now), the

@@ -3,8 +3,8 @@
 Platform layer for two hosts (ADR 0010, cut over 26 Sep 2026): `arcade-box`,
 a Lenovo M920q Tiny that runs the Assetto Corsa lobbies, the AC Discord bot,
 the kid arcade hub, the Prometheus/Grafana stack and the Buildkite agent, at
-`192.168.1.50`; and `ac-box`, the HP Z840 that runs the CPU-only model server
-and nothing else, at `192.168.1.51` (`llm-box` once `homelab-ygc.9` renames
+`192.168.1.50`; and `llm-box`, the HP Z840 that runs the CPU-only model server
+and nothing else, at `192.168.1.51` (`ac-box` until `homelab-ygc.9` renamed
 it). Owns both hosts and the one contract; tenants are flox environments, or
 the one flake input that is not yet (`ac-host`).
 
@@ -36,7 +36,7 @@ Design rationale and the full migration plan (hosted, outside version control):
 | L0 | `modules/platform/` | hardware, NICs, identity, Docker daemon, Nix, sshd, boot |
 | L1 | `modules/tenant/` | the contract: schema, port registry, tiers, metrics, drain |
 | L2 | `modules/observability/`, `modules/ci/` | shared services that *consume* the contract |
-| L3 | environments | `arcade`, `agent-hub` as flox environments (a unit stub each, in the host that runs it: `hosts/arcade-box/` for arcade, `hosts/ac-box/` for agent-hub; ADR 0009); `assetto` as the `ac-host` flake input — declare, never reach |
+| L3 | environments | `arcade`, `agent-hub` as flox environments (a unit stub each, in the host that runs it: `hosts/arcade-box/` for arcade, `hosts/llm-box/` for agent-hub; ADR 0009); `assetto` as the `ac-host` flake input — declare, never reach |
 
 Dependency direction is one-way: L0 knows nothing about tenants, L1 knows only
 the schema, L2 reads declarations, L3 declares without knowing its neighbours.
@@ -113,7 +113,7 @@ which is why the two files above are tracked in a public repo.
 ## Working agreements for automated changes
 
 `AGENTS.md` is the operating contract: roles (supervisor / worker), the
-gate, the read-only rule (its section is still headed "ac-box is read-only";
-it is applied to both hosts, and `homelab-ygc.9` rewords it) and its one
-migration exception, which tenants may be bounced, and the tracker policy. It is binding for agents and
-a fair summary for humans.
+gate, the read-only rule for both hosts and its one migration exception (a
+pushed revision applied by hand, the only edge llm-box has), which tenants may
+be bounced, and the tracker policy. It is binding for agents and a fair
+summary for humans.

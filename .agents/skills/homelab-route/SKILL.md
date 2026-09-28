@@ -1,6 +1,6 @@
 ---
 name: homelab-route
-description: Decide which model does a piece of homelab work - the supervisor's own frontier model, or agent-hub's local Qwen3-Coder on ac-box (free, private, slow). Use when dispatching a worker, when asked to delegate to agent-hub or the local model, and when a task looks like it could be routed local.
+description: Decide which model does a piece of homelab work - the supervisor's own frontier model, or agent-hub's local Qwen3-Coder on llm-box (free, private, slow). Use when dispatching a worker, when asked to delegate to agent-hub or the local model, and when a task looks like it could be routed local.
 ---
 
 # Routing work between models
@@ -8,7 +8,7 @@ description: Decide which model does a piece of homelab work - the supervisor's 
 Two backends exist. The supervisor picks per task; the task, not the
 backend, decides.
 
-| | Frontier (the supervisor's own model) | agent-hub (`agent-hub-llm` on ac-box) |
+| | Frontier (the supervisor's own model) | agent-hub (`agent-hub-llm` on llm-box) |
 | --- | --- | --- |
 | Model | whatever the harness runs | `coder`: Qwen3-Coder-Next 80B-A3B, Q8_0, ctx 32k; `instruct`: its general-purpose sibling for prose and judgement; both behind llama-swap, one loaded at a time (`hub-ask.sh -M`) |
 | Cost | per token, external | zero, and nothing leaves the LAN |

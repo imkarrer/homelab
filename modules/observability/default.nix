@@ -16,7 +16,7 @@
 # Deliberately not bundled with moving the file: this used to declare its own
 # Grafana firewall rule alongside homelab.tenants' identical one (beads
 # homelab-bqo.30, fixed below) -- the observability tenant in
-# hosts/ac-box/tenants.nix already knows every port this module opens or
+# hosts/arcade-box/tenants.nix already knows every port this module opens or
 # binds, so the contract is the single source of truth for what gets a
 # firewall rule; this module's job is only to actually run the services at
 # the addresses/ports the contract already knows about.
@@ -282,9 +282,10 @@ in
   users.users.grafana.extraGroups = [ "monitoring" ];
 
   # No firewall rule declared here (beads homelab-bqo.30): the observability
-  # tenant in hosts/ac-box/tenants.nix already claims grafana as
+  # tenant in hosts/arcade-box/tenants.nix already claims grafana as
   # number = 3000, scope = "lan", so modules/tenant/ports.nix derives the
-  # identical enp8s0/3000 opening whenever homelab.enforce.firewall is on --
+  # identical 3000 opening on the lan interface whenever
+  # homelab.enforce.firewall is on --
   # this module hardcoding the same rule a second time was pure redundancy,
   # not a second real source of truth. Every other exporter here
   # (prometheus/alertmanager/node/cadvisor/unpoller/udr-fw/docker-names)

@@ -65,8 +65,8 @@
       # Non-loopback address exercises metricsEndpoint.address (added 12 Sep
       # 2026): the real agent-hub-llm binds the LAN address only, and this is
       # the one tenant in the fixture whose target must NOT come out as
-      # 127.0.0.1:<port>. Written as a literal, unlike hosts/ac-box/tenants.nix
-      # which references config.homelab.host.networks.lan.address, because
+      # 127.0.0.1:<port>. Written as a literal, unlike a host's own tenants.nix,
+      # which must reference config.homelab.host.networks.lan.address, because
       # this fixture is shared with tests/eval-quiet.nix, whose module list
       # has no homelab.host.* at all -- a `config.homelab.host` reference here
       # would break that harness. The literal must equal

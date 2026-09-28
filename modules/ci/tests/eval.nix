@@ -1,7 +1,7 @@
 # Eval harness for modules/ci/default.nix.
 #
-# The module is live on ac-box (generation 31, 12 Sep 2026), so the real
-# composition IS evaluated -- by `nix flake check`'s ac-box toplevel. This
+# The module is live on arcade-box (since the cutover, 26 Sep 2026), so the real
+# composition IS evaluated -- by `nix flake check`'s arcade-box toplevel. This
 # harness is the other half: it is not a full system evaluation and does not
 # try to be. It proves the module's own logic evaluates cleanly and produces
 # the expected shape against stubs of the option surface it touches -- and,
@@ -11,7 +11,7 @@
 # eval-environment.nix composes them: pinned lib/pkgs, the tenant harness's
 # stubs (stub-systemd, stub-nix, stub-etc), a fake flox package, the
 # host's own facts file, and a `ci` tenant fixture that mirrors
-# hosts/ac-box/tenants.nix's entry.
+# hosts/arcade-box/tenants.nix's entry.
 #
 # Usage:
 #   nix --extra-experimental-features "nix-command flakes" eval \

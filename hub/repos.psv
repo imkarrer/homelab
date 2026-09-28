@@ -53,9 +53,10 @@ homelab|/home/nixos/src/homelab|git@github.com:imkarrer/homelab|buildkite|yes
 #   agent-hub   -> the Z840 (llm-box). No agent there since the cutover, so
 #                  agent-hub-environment-poll on that host reads GitHub for a
 #                  green sha (homelab-ygc.14) and agent-hub-environment-pull
-#                  applies it. Buildkite publishes no commit status for this
-#                  pipeline as of 26 Sep 2026, so the poll stages nothing until
-#                  it does (architecture row 35).
+#                  applies it. The status it reads, buildkite/agent-hub, has
+#                  been published since 26 Sep 2026, 20:05 CDT; the poll's first
+#                  live run staged and applied b16781d at 20:19 (architecture
+#                  rows 35 and 40).
 #   home-arcade -> arcade-box. queue-environment on arcade-box's agent stages
 #                  the FloxHub generation; arcade-environment-pull applies it.
 agent-hub|/home/nixos/src/agent-hub|git@github.com:imkarrer/agent-hub|environment|yes

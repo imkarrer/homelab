@@ -18,10 +18,11 @@ are in. Green is the literal line `===== GATES PASS - safe to push =====`. Anyth
 else is red, and a red gate pushed to `main` stalls **every** deploy behind
 `wait: ~`, not just this one.
 
-For `homelab` the script evaluates `nixosConfigurations.ac-box`. The module
-harnesses are a second, cheaper check that the contract still *rejects* what
-it should (a port collision, an overrun) — ac-box has nothing to reject, so
-the toplevel alone cannot prove it:
+For `homelab` the script evaluates every host in `nixosConfigurations`
+(`arcade-box`, `llm-box`). The module harnesses are a second, cheaper check
+that the contract still *rejects* what it should (a port collision, an
+overrun) — neither host has anything to reject, so the toplevels alone cannot
+prove it:
 
 ```bash
 cd /home/nixos/src/homelab && nix flake check --no-build     # ~4s
@@ -43,11 +44,11 @@ was meant. Two checks close that gap, and the handoff names which one applied:
   byte-identical before and after. Capture it on a clean tree first.
 
   ```bash
-  nix eval --raw '.#nixosConfigurations.ac-box.config.system.build.toplevel.drvPath'
+  nix eval --raw '.#nixosConfigurations.<host>.config.system.build.toplevel.drvPath'
   ```
 
 - **A behaviour change**: the `drvPath` differs, and one of these says why —
-  `nix eval` of the specific option that moved (`.#nixosConfigurations.ac-box.config.homelab.tenants.<n>.units`),
+  `nix eval` of the specific option that moved (`.#nixosConfigurations.<host>.config.homelab.tenants.<n>.units`),
   or a new `modules/*/tests/eval*.nix` case that throws on the input the
   change now rejects. The harnesses are discovered by glob; a new file needs
   no registration.

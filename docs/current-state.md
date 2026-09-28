@@ -1,4 +1,4 @@
-# Current State: What arcade-box and ac-box Actually Run
+# Current State: What arcade-box and llm-box Actually Run
 
 The standing answer to "what is deployed, and does it conform?" — maintained,
 not archived. `docs/noop-reconciliation.md` is the *phase 1* survey and is
@@ -42,19 +42,19 @@ arcade-box at `192.168.1.50`, and left `agent-hub` alone on the Z840 at
 landed on both hosts the same day (`docs/architecture.md` Part III, rows
 36–41); as of 17:45 CDT both run `ab21161`.
 
-| | arcade-box | ac-box (the Z840; `llm-box` after `homelab-ygc.9`) |
+| | arcade-box | llm-box (the Z840; `ac-box` until `homelab-ygc.9`) |
 | --- | --- | --- |
 | Hardware | Lenovo ThinkCentre M920q Tiny: i7-8700T, 6 cores / 12 threads, 31 GiB usable, 954 GB NVMe (`lscpu`, `/proc/meminfo`, `lsblk`, 26 Sep) | HP Z840: 2 × E5-2680 v4, 28 cores / 56 threads, 251 GiB (`lscpu` 26 Sep; `dmidecode` 19 Sep) |
 | Address | `192.168.1.50/24` on `eno2`, MAC `e8:6a:64:f4:81:94` — a Dream Router reservation; the lobby forwards point here (§4) | `192.168.1.51/24` on `enp8s0`, MAC `c8:d3:ff:b9:28:0b` — a reservation; `eno1` has no carrier and no address (§4) |
 | Tenants | `assetto`, `bot`, `arcade`, `observability`, `ci` — five in `/etc/homelab/tenants.json` | `agent-hub` — one in `/etc/homelab/tenants.json` |
-| Closure reaches it | by itself: its own agent's `queue-closure` stages, `homelab-deploy` (`schedule = "continuous"`, ADR 0006/0008) switches within a minute — `pending-closure.json` 13:47 CDT, `last-applied-closure.json` 13:48, running `ab21161` | by hand: `nixos-rebuild switch --refresh --flake github:imkarrer/homelab/<sha>#ac-box`. `homelab-deploy.timer` is armed and nothing stages on this host; its `pending-closure.json` is the cutover's own record, 10:27 CDT (ADR 0010, "no machinery"; architecture row 41) |
+| Closure reaches it | by itself: its own agent's `queue-closure` stages, `homelab-deploy` (`schedule = "continuous"`, ADR 0006/0008) switches within a minute — `pending-closure.json` 13:47 CDT, `last-applied-closure.json` 13:48, running `ab21161` | by hand: `nixos-rebuild switch --refresh --flake github:imkarrer/homelab/<sha>#llm-box`. `homelab-deploy.timer` is armed and nothing stages on this host; its `pending-closure.json` is the cutover's own record, 10:27 CDT (ADR 0010, "no machinery"; architecture row 41) |
 | Tenant tree (`ac-host`) | `queue-prod` on this agent; the bot's 03:00 DOWNTIME build applies. `last-downtime.json` reads `2026-09-26T08:00:12Z` — the Z840's last run, copied over; tonight's is the first here | none |
 | Environments (ADR 0009) | `arcade`: FloxHub generation 2 of `imkarrer/arcade`, staged by `queue-environment` on this agent, applied by `arcade-environment-pull` (`pinned-environment-arcade`, 08:08 CDT) | `agent-hub`: `agent-hub-environment-poll.timer` reads GitHub every 10 minutes for a green sha (`homelab-ygc.14`); `agent-hub-environment-pull` applies it. First live run 26 Sep, 20:19 CDT: agent-hub `b16781d`, staged and applied six seconds apart with no hand step (row 35) |
 | Tiers | shares of 31 GiB / 12 threads; `fence = false` on `background` and `batch` (§3) | `homelab.enforce.slices = false` (`homelab-ygc.13`): no slices, no `MemoryMax`, no fence (§3) |
 | Docker | yes — 9 containers | none: `docker.service` inactive, no `docker` in the closure |
 | CI agent | `arcade-box` on `queue=self` (`BUILDKITE_AGENT_NAME` read from the container); builds both hosts' toplevels | none |
-| Prometheus | here; scrapes the Z840 as a peer (`homelab.host.peers.ac-box`: job `node` on 9100, job `agent-hub` on 8100; `homelab-ygc.10`) | a node exporter on `192.168.1.51:9100` (`modules/platform/node-exporter.nix`); no collector |
-| Secrets | sops-nix, `secrets/ac-box.yaml` (the file keeps its name; it carries both hosts' recipients, runbook D4) | imports no secrets module (`flake.nix`, the ac-box list since `aa48765`) |
+| Prometheus | here; scrapes the Z840 as a peer (`homelab.host.peers.llm-box`: job `node` on 9100, job `agent-hub` on 8100; `homelab-ygc.10`) | a node exporter on `192.168.1.51:9100` (`modules/platform/node-exporter.nix`); no collector |
+| Secrets | sops-nix, `secrets/ac-box.yaml` (the file keeps its name; it carries both hosts' recipients, runbook D4) | imports no secrets module (`flake.nix`, the Z840's list since `aa48765`) |
 | Booted vs current | switched since boot: booted `kgy5zbf1…`, current `ayg73n6b…` — the continuous edge at work, expected | switched since boot: booted `wdpgr3i6…` (`aa48765`, the 15:37 UTC reboot), current `ym3pjykm…` (`ab21161`) |
 
 ### History: how the Z840 got here (12 Sep 2026)
@@ -73,10 +73,13 @@ hand switches its only kind. Every unit named in this paragraph except
 
 ### What is still owed
 
-- **The rename** (ADR 0010 half two, `homelab-ygc.9`): the Z840 is `ac-box`
-  in `hosts/`, `secrets/ac-box.yaml`, `~/.ssh/config`, `homelab.host.peers`,
-  the tracker and every tree's docs. Until it lands, "ac-box" in a verdict
-  means the Z840.
+- **The rest of the rename** (ADR 0010 half two, `homelab-ygc.9`,
+  `docs/runbook-llm-box-rename.md`). The Z840 became `llm-box` on
+  <rename-date> — `hosts/`, the flake, its hostname, `homelab.host.peers` and
+  the ssh alias. Still owed under the same bead: `secrets/ac-box.yaml`'s
+  rename (section 5), the strip of the moved state from the Z840's disk
+  (section 6), the other trees' docs (7.10) and the tracker (7.11). In
+  anything older, "ac-box" means the Z840 (CONTEXT.md).
 - **MinIO's restart** (`homelab-ygc.11`): `minio/minio` and `minio/mc` are
   gone from every public registry, so `modules/ci` now builds
   `homelab/minio:nixpkgs` and `homelab/minio-client:nixpkgs` from homelab's
@@ -103,11 +106,13 @@ hand switches its only kind. Every unit named in this paragraph except
   status — staged from agent-hub's at 20:19. `home-arcade` has not pushed
   since 19 Sep, so whether its pipeline publishes is unobserved; no unit
   reads it.
-- **The first night on arcade-box**: the bot's 03:00 DOWNTIME build on this
-  host's agent, the 04:30 `hub-backup` pull from two hosts, and the removal
-  of the four moved directories from `/home/nixos/backup/ac-box/var/lib/`
-  after arcade-box's first snapshot (runbook 4.6, step 5). Not yet observed
-  as of this writing.
+- ~~**The first night on arcade-box**~~ **Observed 27 Sep.** At 03:00 the
+  bot queued DOWNTIME (`ac-host-ops` build 28) and the lobbies recycled on
+  this host; the 04:30 `hub-backup` pulled from both hosts that night and the
+  next (`RESULT_arcade-box=ok` beside the Z840's); the 28 Sep DOWNTIME applied
+  ac-host `0fdf591` (`last-downtime.json` 08:00:11Z, read 28 Sep). The four
+  moved directories had already left `/home/nixos/backup/ac-box/var/lib/` on
+  26 Sep at 16:02 UTC (that directory's mtime; runbook 4.6, step 5).
 
 ---
 
@@ -129,10 +134,10 @@ Live from arcade-box, 26 Sep 2026 17:45 CDT, closure `ab21161`.
 | `ac-host-bot.service` (active, exited) + `ac-host-bot-1` | bot | Declared; unit in `system.slice`, container `CgroupParent = critical.slice` (still assetto's compose project, declared as shared). It queues the 03:00 DOWNTIME build on this host's agent; the first such night is tonight. |
 | `arcade-freeciv`, `arcade-mindustry` | arcade | `interactive.slice`. 5556/tcp and 4555/udp (freeciv), 6567 tcp+udp and 20151/udp (Mindustry) live and declared. Generation 2 of `imkarrer/arcade`, run path `f6m1q3pd…` — the path the Z840 ran. |
 | `samba-smbd`, `samba-winbindd`, `rsync` | arcade | `interactive.slice`; 139/445/873 bound on `192.168.1.50` — the stations' mount and the two rsync stations followed the address, unchanged. |
-| observability, 8 units: `prometheus`, `grafana`, `alertmanager`, `cadvisor`, `unifi-poller`, `udr-fw-exporter`, `docker-name-exporter`, `prometheus-node-exporter` | observability | All `interactive.slice`. Grafana on `192.168.1.50:3000`; 9090, 9093, 9100, 9102, 9130–9132 on loopback; 9094 (alertmanager cluster) on the wildcard. Since `116c12e` the scrape config also carries the Z840 as a peer with `host=` on every target, and the host alerts are per machine: `HostDiskHigh`, `HostLoadHigh` (arcade-box > 6, ac-box > 56), `HostMemLow`, `NodeExporterDown`, `CadvisorDown`. |
+| observability, 8 units: `prometheus`, `grafana`, `alertmanager`, `cadvisor`, `unifi-poller`, `udr-fw-exporter`, `docker-name-exporter`, `prometheus-node-exporter` | observability | All `interactive.slice`. Grafana on `192.168.1.50:3000`; 9090, 9093, 9100, 9102, 9130–9132 on loopback; 9094 (alertmanager cluster) on the wildcard. Since `116c12e` the scrape config also carries the Z840 as a peer with `host=` on every target, and the host alerts are per machine: `HostDiskHigh`, `HostLoadHigh` (arcade-box > 6, llm-box > 56), `HostMemLow`, `NodeExporterDown`, `CadvisorDown`. |
 | `ac-host-ci.service` (active, exited) + `ac-host-ci-agent-1`, `ac-host-ci-minio-1` | ci | `batch.slice` (unit and both containers' `CgroupParent`), beside `nix-daemon`. Agent `arcade-box` on `queue=self`, `--spawn 1`; MinIO on 127.0.0.1:9000/9001 serving the copied `ac-host-ci_minio-data` (3.9 GB, 5,913 files; the cache bucket inside it 2,355 objects, 3.6 GiB). Image source since `homelab-ygc.11`: `homelab/minio:nixpkgs` and `homelab/minio-client:nixpkgs`, built by `modules/ci` from homelab's nixpkgs pin (`pkgs.minio` 2025-10-15T17-29-55Z, `pkgs.minio-client` 2025-08-13T08-35-41Z) and `docker load`ed by the unit's `ExecStartPre` at every start — no registry. The containers move onto them at the first deliberate restart after the switch; until then `ac-host-ci-minio-1` runs the loaded copy of `minio/minio:latest` (RELEASE.2025-09-07T16-13-09Z, id `14cea493d9a3`). |
 
-### ac-box — conforming
+### llm-box — conforming
 
 Live from the Z840, 26 Sep 2026 17:45 CDT, closure `ab21161`.
 
@@ -150,7 +155,7 @@ Live from the Z840, 26 Sep 2026 17:45 CDT, closure `ab21161`.
 
 | Item | Host | Gap |
 | --- | --- | --- |
-| The Z840's closure edge | ac-box | No CI agent, so nothing stages a closure on this host; every switch is an operator's, from a sha on origin. **Accepted** (ADR 0010; row 41). |
+| The Z840's closure edge | llm-box | No CI agent, so nothing stages a closure on this host; every switch is an operator's, from a sha on origin. **Accepted** (ADR 0010; row 41). |
 | MinIO's images | arcade-box | Running from `docker save \| docker load` copies; the compose file's `image:` lines are not pullable (`homelab-ygc.11`). |
 | ~~Commit statuses~~ | Buildkite | **Settled 26 Sep** — `homelab`'s published from 18:16 CDT and `agent-hub`'s from 20:05; the Z840's poll, the one unit that reads a status, staged from agent-hub's at 20:19. `home-arcade` unobserved: no push since 19 Sep (row 35). |
 
@@ -161,7 +166,7 @@ Live from the Z840, 26 Sep 2026 17:45 CDT, closure `ab21161`.
 | ~~`/etc/nixos/configuration.nix`~~ | **Done** — a `throw` since 12 Sep on the Z840. The hardware file is kept, on both hosts, at `/etc/nixos/hardware-configuration.nix`. |
 | ~~`wpa_supplicant.service`~~ | **Done** — `mkForce false` in `network.nix`, gone at gen 31; the same line keeps arcade-box's `wlo1` idle. |
 | ~~`inquire-platform`~~ | **Removed from the registry 12 Sep** — a personal project, never part of the homelab. |
-| The moved state on the Z840's disk: `/var/lib/ac-host` (12 G), `/var/lib/arcade`, `/srv/arcade`, `/var/lib/grafana`, `/var/lib/prometheus2`, and `/var/lib/docker` (52 G, the daemon's directory left behind when Docker left the closure) | Frozen at the cutover's final delta (runbook 4.4), the rollback ladder's last rung; `ls`/`du` on ac-box, 26 Sep evening. Nothing reads them. Their removal belongs to the rename's runbook (`homelab-ygc.9`), after arcade-box's first backed-up night. |
+| The moved state on the Z840's disk: `/var/lib/ac-host` (12 G), `/var/lib/arcade`, `/srv/arcade`, `/var/lib/grafana`, `/var/lib/prometheus2`, and `/var/lib/docker` (52 G, the daemon's directory left behind when Docker left the closure) | Frozen at the cutover's final delta (runbook 4.4), the rollback ladder's last rung; `ls`/`du` on the Z840, 26 Sep evening. Nothing reads them. Their removal belongs to the rename's runbook (`homelab-ygc.9`, `docs/runbook-llm-box-rename.md` section 6), after arcade-box's first backed-up night. |
 | `/var/lib/homelab/{pending,last-applied}-environment-{arcade,ci}.json`, `pinned-environment-arcade` on the Z840 | Records of tenants no longer declared there (18 Sep mtimes). Same runbook. |
 
 ---
@@ -182,7 +187,7 @@ Live from `systemctl show <slice> -p CPUWeight -p MemoryMax -p AllowedCPUs`,
 | `batch.slice` | 300 | 13.95 GiB | none | `ac-host-ci` (agent, MinIO), `nix-daemon` |
 | `system.slice` | 100 | none | — | `ac-host-static`, `ac-host-bot`, `ac-host-env`, platform (sshd, fail2ban, docker, NetworkManager) |
 
-**ac-box** — no tier slice exists (`homelab.enforce.slices = false`):
+**llm-box** — no tier slice exists (`homelab.enforce.slices = false`):
 
 | Slice | CPUWeight | MemoryMax | AllowedCPUs | Members |
 | --- | --- | --- | --- | --- |
@@ -268,9 +273,10 @@ option namespace is single-spelled. The findings below are the exceptions.
 ### Findings
 
 **F1 — A silent fallback decides whether the system can boot.**
-`hosts/ac-box/configuration.nix` selects `hardware-configuration.nix` if
-`builtins.pathExists` finds it, else `.example`, which states it will not boot
-a real machine. A flake copies only *git-tracked* files into the store, so this
+`hosts/ac-box/configuration.nix` (now `hosts/llm-box/`) selects
+`hardware-configuration.nix` if `builtins.pathExists` finds it, else
+`.example`, which states it will not boot a real machine. A flake copies
+only *git-tracked* files into the store, so this
 conditional is really testing "is the file tracked?" — and the answer today is
 yes (`git ls-files` confirms both it and `ssh-keys.local.nix` are tracked;
 `.gitignore` carries a NOTE explaining they were deliberately un-ignored for
@@ -315,7 +321,7 @@ a warm store and the MinIO substituter. That is true today and worth
 re-examining if CI ever moves off ac-box, because it would then be a
 from-source system build on every push.
 
-**Per host since 26 Sep 2026:** `checks.ac-box` and `checks.arcade-box` are
+**Per host since 26 Sep 2026:** `checks.arcade-box` and `checks.llm-box` are
 both full toplevels, and both build on arcade-box's agent — CI did move off
 the Z840, and the Z840's system is now built on a 6-core Tiny from a store
 that agent's `/nix` volume re-warmed from MinIO and cache.nixos.org. The
@@ -437,7 +443,7 @@ Input names are now checked against `nix flake metadata` first.
 **Coverage caveat.** A composed eval proves what is *reachable* from a host's
 config, not the whole module — and since 26 Sep 2026 that is per host:
 arcade's body is reached through `nixosConfigurations.arcade-box`,
-agent-hub's through `.ac-box`, and `hub-gates.sh` evaluates every host the
+agent-hub's through `.llm-box`, and `hub-gates.sh` evaluates every host the
 flake declares. `agent-hub` is imported but
 `services.agent-hub.enable` defaults false, so its gate proves its option
 declarations compose and little of its config body. Strictly better than zero,
@@ -491,7 +497,7 @@ because they compare the *box* against the *declarations* rather than git
 against git:
 
 ```bash
-for h in arcade-box ac-box; do
+for h in arcade-box llm-box; do
   ssh $h 'hostname; nixos-version --configuration-revision; readlink -f /run/booted-system /run/current-system'
   ssh $h 'systemctl --failed; systemctl list-units --type=service --state=active --no-legend'
   ssh $h 'systemctl list-units --type=slice --no-legend; for s in critical interactive background batch; do systemctl show $s.slice -p CPUWeight -p MemoryMax -p AllowedCPUs -p ActiveState; done'
@@ -500,7 +506,7 @@ for h in arcade-box ac-box; do
   ssh $h 'cat /etc/homelab/tenants.json; ls -la /var/lib/homelab'
 done
 ssh arcade-box 'docker ps -a --format "{{.Names}}\t{{.Status}}\t{{.Label \"com.docker.compose.project\"}}"; for c in $(docker ps -q); do docker inspect -f "{{.Name}} {{.HostConfig.CgroupParent}}" $c; done'
-ssh ac-box 'systemctl show agent-hub-llm -p Slice -p AllowedCPUs -p MemoryMax; systemctl list-timers agent-hub-environment-poll.timer homelab-deploy.timer'
+ssh llm-box 'systemctl show agent-hub-llm -p Slice -p AllowedCPUs -p MemoryMax; systemctl list-timers agent-hub-environment-poll.timer homelab-deploy.timer'
 ```
 
 `--state=active`, not `running`: `ac-host-static`, `ac-host-bot`,
@@ -551,10 +557,9 @@ human decision is more useful recorded as such than silently dropped.
   2026** — README points at `<host>:/etc/nixos/hardware-configuration.nix`;
   the `src` copy is the tenant tree's and travelled to arcade-box with it.
 
-**Standing rules while doing any of this.** Both hosts are read-only (AGENTS.md
-still heads the rule "ac-box is read-only"; `homelab-ygc.9` rewords it): inspect
-over ssh; change arcade-box by landing in git and letting its deploy unit
-switch it, and the Z840 by landing in git and switching it from the pushed
-sha (ADR 0010). A hand-edit on either host is a debugging step, never a
+**Standing rules while doing any of this.** Both hosts are read-only
+(AGENTS.md, "The hosts are read-only"): inspect over ssh; change arcade-box
+by landing in git and letting its deploy unit switch it, and the Z840 by
+landing in git and switching it from the pushed sha (ADR 0010). A hand-edit on either host is a debugging step, never a
 resting state — land it the same session. Leave `bd` writes to the
 coordinator.

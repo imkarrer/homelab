@@ -45,8 +45,8 @@
 # itself). The order is therefore:
 #
 #   1. switch the closure that renders the cluster token into the agent's env
-#   2. ssh ac-box sudo systemctl restart ac-host-ci
-#   3. hub-pipeline.sh agents         -> `ac-box` connected, cluster non-null
+#   2. ssh arcade-box sudo systemctl restart ac-host-ci
+#   3. hub-pipeline.sh agents         -> `arcade-box` connected, cluster non-null
 #   4. hub-pipeline.sh adopt ac-host; adopt ac-host-ops; adopt ac-host-series
 #   5. hub-pipeline.sh homelab; hub-pipeline.sh home-arcade
 #   6. push to homelab; watch the agent log for homelab/builds/1
@@ -126,7 +126,7 @@ agents() {
 hazard() {
   echo "== the cluster: $BUILDKITE_CLUSTER_NAME $CLUSTER =="
   echo "  Only an agent registered with a token minted for this cluster serves a"
-  echo "  pipeline in it. While ac-box's agent is unclustered, every job on a"
+  echo "  pipeline in it. While arcade-box's agent is unclustered, every job on a"
   echo "  clustered pipeline queues and does not run: ci tenant, drainable, but"
   echo "  it stays that way until the closure with the cluster token has been"
   echo "  switched AND \`systemctl restart ac-host-ci\` has run from ssh (never"

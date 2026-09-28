@@ -17,7 +17,7 @@ skills:
 
 tasks:
   - name: What is live belongs to homelab-hub
-    prompt: "What's actually running on ac-box right now, and does it match what's on origin?"
+    prompt: "What's actually running on llm-box right now, and does it match what's on origin?"
     activates: [homelab-hub]
 
   - name: Is my change green belongs to homelab-verify
@@ -29,7 +29,7 @@ tasks:
     activates: [homelab-land]
 
   - name: Could the local model do this belongs to homelab-route
-    prompt: "Could agent-hub's local Qwen on ac-box write this commit message instead of you?"
+    prompt: "Could agent-hub's local Qwen on llm-box write this commit message instead of you?"
     activates: [homelab-route]
 
   # Asked as a question, not an order. The imperative form — "pick the ready
@@ -60,10 +60,10 @@ tasks:
     activates: []
 
   - name: Explains the no-op proof from the skill, not from memory
-    prompt: "I moved a comment in modules/tenant/resources.nix in the homelab tree. How do I prove that changed nothing on ac-box?"
+    prompt: "I moved a comment in modules/tenant/resources.nix in the homelab tree. How do I prove that changed nothing on the hosts?"
     expect: >
       The answer says to compare the drvPath of
-      nixosConfigurations.ac-box's system.build.toplevel before and after
+      nixosConfigurations.<host>'s system.build.toplevel, for each host, before and after
       the change (byte-identical means no-op), via `nix eval --raw`. It
       does not claim a green gate alone proves it, and it does not claim
       the local check proves the change activates cleanly on the box.

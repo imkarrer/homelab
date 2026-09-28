@@ -1,7 +1,7 @@
 # Fixture for eval-environment.nix's floxhub cases: the arcade tenant as
-# hosts/ac-box/tenants.nix declares it (tier, the two game units, no
+# hosts/arcade-box/tenants.nix declares it (tier, the two game units, no
 # state.dirs -- so dir derives to /var/lib/arcade/env) with the stubs
-# hosts/ac-box/configuration.nix carries (homelab-158.5, whole units since
+# hosts/arcade-box/configuration.nix carries (homelab-158.5, whole units since
 # .11): source.kind = floxhub, two stubs from one environment, the values
 # the box's services.arcade-hub computes written as literals -- the
 # descriptions and WorkingDirectory the retired modules/arcade-hub.nix used

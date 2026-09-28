@@ -16,17 +16,21 @@ The HP Z840, which since the cutover of 26 Sep 2026 runs `agent-hub` and
 nothing else: all 28 physical cores and all 251 GiB, unsliced and unfenced
 (`homelab.enforce.slices = false`). At `192.168.1.51`. Its closure has no
 deploy edge — an operator switches it by hand from a sha on origin (ADR
-0010) — and its environment arrives by its own poll of GitHub. The rename
-from `ac-box` is `homelab-ygc.9`; until it lands this machine is `ac-box`.
-_Avoid_: ac-box (after the rename). "The Z840" is the hardware, fine as a
-name for the machine across the rename; it is what the docs dated 26 Sep 2026
-use.
+0010) — and its environment arrives by its own poll of GitHub. Renamed from
+`ac-box` on <rename-date> (`homelab-ygc.9`, `docs/runbook-llm-box-rename.md`).
+_Avoid_: ac-box. "The Z840" is the hardware, fine as a name for the machine
+across the rename; it is what the docs dated 26 Sep 2026 use.
 
 **ac-box**:
-The Z840's name in `hosts/`, `secrets/`, ssh config and the tracker until
-`homelab-ygc.9` renames it `llm-box`. In anything dated 26 Sep 2026 or later
-it means the model host alone; in anything earlier it means the one machine
-that ran all six tenants, and that doc's "the box" is this machine.
+Not a host name any more. The Z840's name — in `hosts/`, the flake, its
+hostname, the ssh alias and the tracker — until <rename-date>, when
+`homelab-ygc.9` renamed it `llm-box`. It is how history reads: in anything
+dated before 26 Sep 2026 it means the one machine that ran all six tenants,
+and that doc's "the box" is this machine; from 26 Sep to the rename it means
+the model host alone. It survives where history is kept or no host is
+meant: restic's `ac-box` snapshots, `secrets/ac-box.yaml` until its own
+rename (that runbook, section 5), and the `acbox` model-provider key.
+_Avoid_: as a name for either host now.
 
 **arcade-box**:
 The small always-on host (a Lenovo M920q Tiny) that since 26 Sep 2026 runs
@@ -45,8 +49,8 @@ has a name.
 Another homelab host as one host's configuration sees it:
 `homelab.host.peers.<name>` names it, carries its address (read from that
 host's own `host.nix`, never retyped) and lists what this host's Prometheus
-scrapes from it. arcade-box's peer is `ac-box` (llm-box once renamed); the
-host being scraped declares none.
+scrapes from it. arcade-box's peer is `llm-box`; the host being scraped
+declares none.
 
 **Platform layer**:
 Everything on a box that is not a workload — hardware, identity, the
@@ -103,7 +107,7 @@ merges it.
 **Closure** (or **system closure**):
 The complete built operating system for one box — every package, unit and
 config — produced from a specific `homelab` commit. One commit builds one
-closure per host (`nixosConfigurations.ac-box`, `.arcade-box`), so "both
+closure per host (`nixosConfigurations.llm-box`, `.arcade-box`), so "both
 hosts on `ab21161`" means each runs its own. Changing a box's platform means
 switching it to a new closure.
 _Avoid_: build, image, generation (a generation is a closure's slot in the

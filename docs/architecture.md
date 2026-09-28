@@ -30,11 +30,11 @@ cannot show is that the dependency arrow only ever points one way.
 
 ```mermaid
 flowchart TD
-    L3["<b>L3 · tenants</b><br/>ac-host · home-arcade · agent-hub<br/><i>declare, never reach — ac-host as a flake input; home-arcade and agent-hub (since 18 Sep 2026, ADR 0009, homelab-158.11) as flox environments whose whole units are stubs in the host that runs them (hosts/arcade-box for arcade, hosts/ac-box for agent-hub), with no flake input and no Nix of their own in the closure</i>"]
+    L3["<b>L3 · tenants</b><br/>ac-host · home-arcade · agent-hub<br/><i>declare, never reach — ac-host as a flake input; home-arcade and agent-hub (since 18 Sep 2026, ADR 0009, homelab-158.11) as flox environments whose whole units are stubs in the host that runs them (hosts/arcade-box for arcade, hosts/llm-box for agent-hub), with no flake input and no Nix of their own in the closure</i>"]
     L2["<b>L2 · shared services</b><br/>modules/observability · modules/ci · modules/deploy<br/><i>consume the contract</i>"]
     L1["<b>L1 · the contract</b><br/>modules/tenant<br/>schema · ports · resources · metrics · quiet"]
     L0["<b>L0 · platform</b><br/>modules/platform<br/>hardware · NICs · identity · Docker · Nix · sshd · boot"]
-    HOST["<b>host composition</b><br/>hosts/arcade-box/ · hosts/ac-box/<br/><i>the one place allowed to know both sides — one per host, one contract, one shared platform list in flake.nix</i>"]
+    HOST["<b>host composition</b><br/>hosts/arcade-box/ · hosts/llm-box/<br/><i>the one place allowed to know both sides — one per host, one contract, one shared platform list in flake.nix</i>"]
 
     L3 -- "declare against" --> L1
     L2 -- "read declarations" --> L1
@@ -64,7 +64,9 @@ Z840 has one automatic edge and no closure edge**: `agent-hub`'s environment
 is staged by the host's own poll of GitHub (`homelab-ygc.14`) and applied by
 its pull unit, and its closure is switched by an operator from a sha already
 on origin (ADR 0010, "no machinery"). The diagram is that shape, read off
-both hosts on 26 Sep 2026 17:45 CDT; the paragraphs after it are the history
+both hosts on 26 Sep 2026 17:45 CDT, with the Z840 under the name it took at
+the rename (`homelab-ygc.9`) and its running sha left to `hub-status.sh`,
+since only a hand moves it; the paragraphs after it are the history
 of how the arcade-box edges were proven, on the Z840, 12–16 Sep, and in them
 "the box" and "ac-box" mean the Z840 when it ran every tenant.
 
@@ -81,12 +83,12 @@ flowchart LR
         C4 --> C5["arcade-environment-pull"] --> C6["arcade-freeciv · arcade-mindustry<br/><b>generation 2</b>"]
     end
 
-    subgraph Z ["ac-box (the Z840) — 192.168.1.51 — agent-hub"]
+    subgraph Z ["llm-box (the Z840) — 192.168.1.51 — agent-hub"]
         direction LR
         D4["agent-hub-environment-poll.timer<br/>every 10 min: main HEAD + status<br/>buildkite/agent-hub<br/><i>published from 20:05 CDT; first sha staged 20:19 (row 35)</i>"]
         D4 -- "a green sha" --> D5["pending-environment-agent-hub.json"]
         D5 --> D6["agent-hub-environment-pull"] --> D7["agent-hub-llm<br/><b>llama-swap on :8100</b>"]
-        OP["an operator, from WSL<br/>nixos-rebuild switch --refresh<br/>--flake github:imkarrer/homelab/&lt;sha&gt;#ac-box"] --> Z6["/run/current-system<br/><b>ab21161</b>"]
+        OP["an operator, from WSL<br/>nixos-rebuild switch --refresh<br/>--flake github:imkarrer/homelab/&lt;sha&gt;#llm-box"] --> Z6["/run/current-system<br/><b>the sha last switched by hand</b>"]
         ZT["homelab-deploy.timer<br/><i>armed; nothing stages here</i>"] -.-> Z6
     end
 
@@ -200,7 +202,7 @@ flowchart TB
         COMPOSE --> BAT
     end
 
-    subgraph Z ["ac-box (the Z840) — 28 cores / 56 threads, 251 GiB — enforce.slices = false, no tier slice exists"]
+    subgraph Z ["llm-box (the Z840) — 28 cores / 56 threads, 251 GiB — enforce.slices = false, no tier slice exists"]
         direction TB
         subgraph ZSYS ["system.slice — weight 100, uncapped"]
             Z1["<b>agent-hub-llm</b><br/>llama-swap → llama-server --threads 28<br/>unit AllowedCPUs 0-27 (placement, not a fence) · NUMA interleave"]
@@ -240,8 +242,8 @@ container scopes under `system.slice` no matter who invoked it. Only
 | **Tenants** | 6 declared across two hosts, 6 in the two inventories: arcade-box's `/etc/homelab/tenants.json` lists `assetto`, `bot`, `arcade`, `observability`, `ci`; the Z840's lists `agent-hub`. Every running tenant unit is in exactly one tenant's `units` on exactly one host. |
 | **Network** | arcade-box: `eno2` at `192.168.1.50` carries everything — LAN, forwarded AC traffic, the stations' SMB, sshd; no `mgmt` entry, the Tiny has one port. The Z840: `enp8s0` at `192.168.1.51`; `eno1` administratively up with **no carrier**, declared `mgmt` with no address (ADR 0007, row 11). Both addresses are Dream Router reservations by MAC and the nine lobby forwards point at `.50` — `docs/current-state.md` §4 has the router's facts (`homelab-bqo.42`). |
 | **Secrets** | sops-nix on arcade-box: `secrets/ac-box.yaml` (the name predates the split; it carries both hosts' recipients) rendered at activation — `ci-env`, the tenant tree's `.env` (`ac-host-env.service`), the observability files, `arcade-smb-password`. The Z840 imports no secrets module: nothing on it needs one (`flake.nix`, the ac-box list since `aa48765`). `whitelist.json` is arcade-box state, never git. |
-| **Metrics** | One Prometheus, on arcade-box. Its local jobs plus the Z840 as a peer (`homelab.host.peers.ac-box`, `116c12e`): `node` at `192.168.1.51:9100` from `modules/platform/node-exporter.nix`, `agent-hub` at `192.168.1.51:8100` through the tenant's nginx; `host=` on every target, host alerts per machine. |
-| **Gates** | `checks.ac-box`, `checks.arcade-box` (both full toplevels) and the harness checks `check.nix` discovers under `modules/*/tests/eval*.nix` (nine on 26 Sep 2026), all built on arcade-box's agent; `hub-gates.sh` evaluates every `nixosConfigurations` attribute, so a third host is gated the moment it exists. |
+| **Metrics** | One Prometheus, on arcade-box. Its local jobs plus the Z840 as a peer (`homelab.host.peers.llm-box`, `116c12e`): `node` at `192.168.1.51:9100` from `modules/platform/node-exporter.nix`, `agent-hub` at `192.168.1.51:8100` through the tenant's nginx; `host=` on every target, host alerts per machine. |
+| **Gates** | `checks.arcade-box`, `checks.llm-box` (both full toplevels) and the harness checks `check.nix` discovers under `modules/*/tests/eval*.nix` (nine on 26 Sep 2026), all built on arcade-box's agent; `hub-gates.sh` evaluates every `nixosConfigurations` attribute, so a third host is gated the moment it exists. |
 | **Reporting** | `hub-status.sh` is host-aware since `homelab-ygc.4` (`scripts/lib/hosts.sh` reads the hosts off the flake): one BOX section per host, closure drift exact per host via `configurationRevision`, environment pairs per tenant. `HOMELAB_BOX=<host>` narrows to one. |
 
 ---
@@ -282,7 +284,7 @@ flowchart LR
         B3 -- "wait: ~" --> B4["queue-closure<br/>stages rev to<br/>/var/lib/homelab on arcade-box"]
         B4 --> B5["homelab-deploy on arcade-box<br/>continuous (ADR 0008) · consults quiet policy<br/><b>defers if assetto busy</b>"]
         B5 -- "nixos-rebuild switch<br/>--flake …/rev#arcade-box" --> B6["arcade-box /run/current-system<br/>== origin/main"]
-        OP["an operator (ADR 0010)"] -- "nixos-rebuild switch --refresh<br/>--flake …/&lt;sha&gt;#ac-box" --> B7["the Z840 /run/current-system<br/>== a sha on origin"]
+        OP["an operator (ADR 0010)"] -- "nixos-rebuild switch --refresh<br/>--flake …/&lt;sha&gt;#llm-box" --> B7["the Z840 /run/current-system<br/>== a sha on origin"]
     end
 
     subgraph ENV ["tenant environment (ADR 0009)"]
@@ -323,7 +325,7 @@ Properties the target must hold, none optional (ADR 0006 "Consequences"):
 ## II.2 Where work runs
 
 Two hosts, two shapes, and since 26 Sep 2026 Part I already draws both
-(ADR 0010; `hosts/arcade-box/configuration.nix`, `hosts/ac-box/configuration.nix`).
+(ADR 0010; `hosts/arcade-box/configuration.nix`, `hosts/llm-box/configuration.nix`).
 
 ```mermaid
 flowchart TB
@@ -346,7 +348,7 @@ flowchart TB
         end
     end
 
-    subgraph Z ["ac-box → llm-box — no tiers, no slices, no fence (enforce.slices = false)"]
+    subgraph Z ["llm-box (the Z840) — no tiers, no slices, no fence (enforce.slices = false)"]
         direction TB
         Z1["<b>agent-hub-llm</b><br/>all 28 physical cores (AllowedCPUs 0-27 as placement) · all 251 GiB · 28 threads<br/>NUMA interleave · a second 80B resident"]
         Z2["nginx :8100 · qdrant :6333 · node exporter :9100"]
@@ -434,9 +436,9 @@ onward are the two-host shape (ADR 0010, cut over 26 Sep 2026).
 | 38 | **The `ac-host_ac-server` Docker volume was in no state inventory.** It holds the Assetto Corsa dedicated server, installed once by steamcmd, which anonymous Steam cannot reinstall; the lobbies crash-looped (exit 8) on the new host until it was copied from the Z840's disk. | assetto declares the volume as backed-up state; `docs/runbook-restore.md` says how it goes back before the lobbies start. | **Done 26 Sep** — `039fe75` (PR #15, `homelab-ygc.12`). `hub-backup.sh` pulls it nightly with the rest of arcade-box's state. |
 | 39 | **The Z840 had no collector after observability left**: the machine serving the models was the one nobody could graph, and the alert rules carried `ac-box` and 56 threads as literals. | `homelab.host.peers` on arcade-box (address read from the peer's own `host.nix`, never retyped); `modules/platform/node-exporter.nix` on the Z840, bound to the LAN address and opened on `enp8s0` only; host-agnostic alerts with `host=` on every target. | **Done 26 Sep** — `116c12e` (PR #16, `homelab-ygc.10`). Jobs `node` and `agent-hub` at `192.168.1.51`; `HostLoadHigh` per machine, arcade-box > 6, ac-box > 56 (its 28 generation threads sit at load 28–30 by design). |
 | 40 | The operator's machine named `192.168.1.50:8100` for the model server in five script defaults (`hub-ask.sh`, `hub-index.sh`, `hub-search.sh`; agent-hub's `vectors-smoke.sh`, `compare.sh`) — the lobby host's address since the cutover. | Defaults moved to `192.168.1.51`. | **Done 26 Sep** — homelab's three in `44a8954` (PR #12); agent-hub's two in agent-hub `68f50f5`, with `b16781d` correcting `compare.sh`'s fence note (agent-hub PR #7, merged 20:14 CDT, 27 Sep 01:14 UTC; `homelab-ygc.7`). That push was the Z840 poll edge's first live run (`homelab-ygc.14`, row 35): staged 20:19:52, applied 20:19:58, no hand step. |
-| 41 | **The Z840's closure has no deploy edge.** Since the cutover the only CI agent is arcade-box's, so `queue-closure` writes arcade-box's `pending-closure.json`; the Z840's is frozen at the cutover's own record (10:27 CDT) and `homelab-deploy.timer` is armed there with nothing to do. Every closure change reaches it as `nixos-rebuild switch --refresh --flake github:imkarrer/homelab/<sha>#ac-box`, by hand. | Nothing — **accepted** (ADR 0010, "why llm-box gets no machinery"): one tenant, no lobbies, no agent that could restart itself, changes rare and interactive. The cost is visible rather than hidden: `hub-status.sh` reports the Z840's drift as a number per host, and a green homelab push switches arcade-box in a minute while the Z840 waits for a hand. | **Accepted 26 Sep 2026.** Revisited only by the rename (`homelab-ygc.9`), when the idle deploy units go or stay by a decision. |
+| 41 | **The Z840's closure has no deploy edge.** Since the cutover the only CI agent is arcade-box's, so `queue-closure` writes arcade-box's `pending-closure.json`; the Z840's is frozen at the cutover's own record (10:27 CDT) and `homelab-deploy.timer` is armed there with nothing to do. Every closure change reaches it as `nixos-rebuild switch --refresh --flake github:imkarrer/homelab/<sha>#llm-box`, by hand. | Nothing — **accepted** (ADR 0010, "why llm-box gets no machinery"): one tenant, no lobbies, no agent that could restart itself, changes rare and interactive. The cost is visible rather than hidden: `hub-status.sh` reports the Z840's drift as a number per host, and a green homelab push switches arcade-box in a minute while the Z840 waits for a hand. | **Accepted 26 Sep 2026.** The rename (`homelab-ygc.9`, <rename-date>) kept the idle deploy units on llm-box (`docs/runbook-llm-box-rename.md` 9.7): removing them inside the rename would have put unit stops into the one switch whose `dry-activate` was meant to show none, and it is a behaviour change, not a name. Removing them is a bead of its own. |
 | 42 | `ac-host`'s `docker-compose.buildkite.yml` names `minio/minio:latest` and `minio/mc:latest`, which Docker Hub refused on 26 Sep ("pull access denied" — the repositories are gone, quay.io's copies private, upstream's community edition source-only); arcade-box's CI cache runs on images `docker save \| docker load`ed from the Z840. | No registry at all: `modules/ci` builds `homelab/minio:nixpkgs` and `homelab/minio-client:nixpkgs` from homelab's own nixpkgs pin with `dockerTools` (`pkgs.minio` 2025-10-15T17-29-55Z, `pkgs.minio-client` 2025-08-13T08-35-41Z; exposed read-only as `homelab.ci.images`), and `ac-host-ci.service`'s `ExecStartPre` `docker load`s both before `docker-compose up`; the compose file in `ac-host` names the two tags verbatim. The tag is constant, the bytes move with `flake.lock`, and compose recreates only `minio`/`minio-init` for a changed image — never the agent. | `homelab-ygc.11` — **homelab half done 27 Sep 2026**; the `ac-host` half is the compose file naming the tags. Order: this half switches on arcade-box BEFORE the compose file on disk names the tags; the reverse plus a restart or reboot is `up -d` failing on an image the daemon does not have, no agent, and no pipeline able to fix it. Live at the first deliberate `systemctl restart ac-host-ci` from ssh with the agent idle (HAZARD 2 — a switch restarts nothing): `minio` and `minio-init` move onto the new IDs, the volume is read in place (proven on WSL: 2025-09-07's data read by 2025-10-15). `pkgs.minio` is insecure-marked in nixpkgs (abandoned upstream); the acknowledgement is scoped to the image, not `nixpkgs.config`, and leaving MinIO is a bead of its own. |
-| 43 | ADR 0010 half two: the Z840 is still `ac-box` — `hosts/ac-box/`, `secrets/ac-box.yaml`, `~/.ssh/config`, `homelab.host.peers.ac-box`, the tracker and every tree's docs — the day the lobbies left it. | Rename to `llm-box`, its own runbook (ADR 0010, "Rename, not alias"). | `homelab-ygc.9` — **Open.** `hosts/arcade-box/host.nix` imports the Z840's `host.nix` by path and fails loudly when the directory moves, by design. |
+| 43 | ADR 0010 half two: the Z840 is still `ac-box` — `hosts/ac-box/`, `secrets/ac-box.yaml`, `~/.ssh/config`, `homelab.host.peers.ac-box`, the tracker and every tree's docs — the day the lobbies left it. | Rename to `llm-box`, its own runbook (ADR 0010, "Rename, not alias"). | `homelab-ygc.9` — **Renamed <rename-date>** at `<rename-sha>` (`docs/runbook-llm-box-rename.md` 7.1–7.5): `hosts/llm-box/`, `nixosConfigurations.llm-box`, the hostname, `homelab.host.peers.llm-box` and the ssh alias, in one commit because a name without its directory had evaluated to a host with zero authorized keys — `modules/platform/identity.nix` now throws on a missing keys file instead. Still open under the bead: `secrets/ac-box.yaml`'s rename (section 5), the strip of the Z840's disk (section 6), the other trees' sweeps and the tracker (7.10, 7.11). |
 
 ### What the delta says, read as a whole
 

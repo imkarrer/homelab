@@ -2,7 +2,7 @@
 # Bump one flake input to its tip and push the lock, so a tenant push reaches
 # the box. Closes docs/architecture.md Part III row 24: "push to tenant ->
 # deployed" was false for home-arcade, agent-hub and ac-host's .nix module,
-# because they reach ac-box only through homelab's closure, and the closure
+# because they reach a host only through homelab's closure, and the closure
 # only moves when flake.lock does. Since 18 Sep 2026 (homelab-158.11) that
 # is ac-host alone: agent-hub and home-arcade are flox environments with
 # their own edge (hub-queue-environment.sh), and a bump trigger from either

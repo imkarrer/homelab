@@ -9,7 +9,7 @@
 # The value is read from stdin, never from an argument -- an argument would
 # sit in shell history and `ps`. At a terminal the prompt hides the echo;
 # piped input works too (one-time migration of a value the box already has:
-#   ssh ac-box "grep ^DISCORD_TOKEN= /var/lib/ac-host/.env | cut -d= -f2-" \
+#   ssh arcade-box "grep ^DISCORD_TOKEN= /var/lib/ac-host/.env | cut -d= -f2-" \
 #     | scripts/hub-secret-set.sh discord-token
 # ). A trailing newline is stripped; nothing else is touched.
 #

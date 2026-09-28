@@ -29,7 +29,7 @@ supervisor decomposes, you do not.
 
 ## What you may do
 
-- Read anything. Inspect ac-box over ssh, read-only (`systemctl status`,
+- Read anything. Inspect either host over ssh, read-only (`systemctl status`,
   `journalctl`, `docker ps`, `cat`), whenever a fact about the live box
   settles a question the repo cannot.
 - Edit files in your worktree.
@@ -44,7 +44,7 @@ supervisor decomposes, you do not.
 - `bd` writes (`create`, `update`, `close`, `remember`). `bd prime`'s
   "you MUST `bd close`" is addressed to the supervisor; report instead.
 - Merging into `main`, and `git push`.
-- Anything that changes ac-box. A runbook step, a switch, a restart — name it
+- Anything that changes a host. A runbook step, a switch, a restart — name it
   in the handoff and stop.
 
 ## Handoff

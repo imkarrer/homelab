@@ -1,15 +1,17 @@
 # ADR 0010: The Z840 Serves Models And Nothing Else; arcade-box Hosts The Rest
 
-**Status:** Accepted, 26 Sep 2026 -- half one landed, half two open. The
-operator executed the cutover that day, which is the acceptance
-(`docs/runbook-arcade-box-cutover.md`, "As it ran"; `aa48765`, PR #11):
-arcade-box runs `assetto`, `bot`, `arcade`, `observability` and `ci` at
+**Status:** Accepted, 26 Sep 2026 -- half one landed that day, half two
+<rename-date>. The operator executed the cutover on 26 Sep, which is the
+acceptance (`docs/runbook-arcade-box-cutover.md`, "As it ran"; `aa48765`, PR
+#11): arcade-box runs `assetto`, `bot`, `arcade`, `observability` and `ci` at
 `192.168.1.50`, and the Z840 runs `agent-hub` alone at `192.168.1.51`,
-unsliced and unfenced (`homelab-ygc.13`). Half two, the rename to `llm-box`,
-is `homelab-ygc.9`; until it lands the Z840 is still `ac-box` in `hosts/`,
-`secrets/`, ssh and the tracker. Proposed 19 Sep 2026, before any hardware
-was bought, because the host names and the glossary change touch every tree
-before a single unit moves.
+unsliced and unfenced (`homelab-ygc.13`). Half two, the rename to `llm-box`
+(`homelab-ygc.9`, `docs/runbook-llm-box-rename.md`), landed at
+`<rename-sha>`: `hosts/llm-box`, the flake attribute, the hostname, the peer
+label and the ssh alias. The secrets file's rename and the strip of the
+Z840's disk follow in that runbook's sections 5 and 6. Proposed 19 Sep 2026,
+before any hardware was bought, because the host names and the glossary
+change touch every tree before a single unit moves.
 
 ## Context
 

@@ -1,4 +1,5 @@
-# LIVE on ac-box since generation 31, 12 Sep 2026. Imported by flake.nix
+# LIVE on arcade-box since the cutover of 26 Sep 2026, and on the Z840 (then
+# ac-box) from generation 31, 12 Sep 2026, until then. Imported by flake.nix
 # (f461509, proven a no-op while inert) and enabled by
 # hosts/ac-box/configuration.nix (4257aea), after a human ran the HAZARD 1
 # adoption sequence below from a plain SSH session. It was drafted as a
@@ -99,7 +100,7 @@
 # --------------------------------------------------------------------------
 # HAZARD 2 -- THE BOOTSTRAP HAZARD
 # --------------------------------------------------------------------------
-# ac-host-ci-agent-1 is the Buildkite agent that builds and deploys ac-box
+# ac-host-ci-agent-1 is the Buildkite agent that builds and deploys arcade-box
 # itself (that is the entire point of this stack). Any change that stops or
 # restarts that agent -- a `nixos-rebuild switch` that touches this unit, a
 # plain `systemctl restart ac-host-ci`, anything -- MUST NEVER be shipped as
@@ -111,9 +112,9 @@
 #
 # Concretely: adopting this module, and every future `nixos-rebuild switch`
 # that changes systemd.services.ac-host-ci, is applied from a plain
-# interactive SSH session on ac-box -- never from a `.buildkite` pipeline
+# interactive SSH session on arcade-box -- never from a `.buildkite` pipeline
 # step, never triggered by a CI job. This is the same class of constraint
-# this task itself operates under (never write to ac-box; every
+# this task itself operates under (never write to a host; every
 # nixos-rebuild is a human action from a real terminal).
 #
 # The images are under the same rule (IMAGES below). A switch that changes
@@ -252,7 +253,7 @@
 # renders it from sops (sops.templates.ci-env, at /run/secrets/rendered/
 # ci-env) and sets homelab.ci.envFile to that path. The option's default
 # below is the pre-sops location under the tenant tree, kept so a host
-# without the secrets module still has a working shape; on ac-box it is
+# without the secrets module still has a working shape; on arcade-box it is
 # overridden. Both readers are on the host, so the rendered file is used in
 # place -- no symlink, no copy unit (secrets.nix's header, "the third
 # shape"). A changed render does NOT restart this unit: restartIfChanged =
@@ -548,7 +549,7 @@ in
         systemd. Defaults to false: this is a draft for a post-cutover phase
         (beads homelab-bqo.19) and must not go true until a human has run
         the adoption sequence documented at the top of this file, from a
-        plain SSH session on ac-box (never from a Buildkite pipeline step --
+        plain SSH session on arcade-box (never from a Buildkite pipeline step --
         see the bootstrap-hazard comment above).
       '';
     };
@@ -574,7 +575,7 @@ in
         module or its tests. The default is the hand-placed, gitignored
         location under the tenant tree; modules/platform/secrets.nix sets
         it to the sops-rendered file (/run/secrets/rendered/ci-env) on any
-        host that imports it, which ac-box does.
+        host that imports it, which arcade-box does.
       '';
     };
 
@@ -709,7 +710,7 @@ in
 
     # NOT set here: virtualisation.docker.enable. The platform layer
     # (modules/platform/docker.nix) turns the daemon on the moment any
-    # tenant declares needsDocker = true, and hosts/ac-box/tenants.nix's `ci`
+    # tenant declares needsDocker = true, and hosts/arcade-box/tenants.nix's `ci`
     # entry already does. This module assumes that ownership rather than
     # duplicating it -- see docker.nix's own header on why the daemon has
     # exactly one owner.

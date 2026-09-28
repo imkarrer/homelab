@@ -38,7 +38,7 @@ DEFAULT_MAINTENANCE_WINDOW = "03:00"
 
 # Restarting docker.service takes every container on the box down with it.
 # ac-host-static.service's activation script does `docker rm -f` on the AC
-# race containers (ac-box:/var/lib/ac-host/src) -- restarting or stopping it
+# race containers (arcade-box:/var/lib/ac-host/src) -- restarting or stopping it
 # destroys whatever race is running. Both are always worth a loud, separate
 # warning regardless of which tenant "owns" them.
 DANGER_UNITS = frozenset({"docker.service", "ac-host-static.service"})

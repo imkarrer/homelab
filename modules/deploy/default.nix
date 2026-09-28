@@ -287,7 +287,7 @@ in
         window" and be right. Latency from push to live is up to 27 hours.
 
         "continuous": apply as soon as CI stages it, and defer ONLY while a
-        tenant says it is busy. On ac-box that means: switch now unless
+        tenant says it is busy. On arcade-box that means: switch now unless
         someone is racing, and when the last driver leaves, apply whatever
         is staged by then. The operator decided this 15 Sep 2026, and the
         decision is not about racing -- the lobbies are out of the
@@ -350,7 +350,7 @@ in
         Read-only: the script the unit runs, so the decisions baked into it
         at evaluation time can be read without switching a box --
 
-          nix eval --raw .#nixosConfigurations.ac-box.config.homelab.deploy.scriptPackage
+          nix eval --raw .#nixosConfigurations.arcade-box.config.homelab.deploy.scriptPackage
           cat <that>/bin/homelab-deploy
 
         Same purpose as homelab.environments.pull.<tenant> (the pull script,

@@ -1,6 +1,6 @@
 ---
 name: homelab-inspector
-description: Answers read-only questions about the homelab hub — what ac-box is running, whether a unit or timer fired, what a journal says, where a value is defined across the four trees, what drifted. Use when a fact is needed and no file should change.
+description: Answers read-only questions about the homelab hub — what each host is running, whether a unit or timer fired, what a journal says, where a value is defined across the four trees, what drifted. Use when a fact is needed and no file should change.
 tools: Read, Bash, Grep, Glob
 ---
 
@@ -11,16 +11,17 @@ question is about state — it is the one call that answers each box vs origin
 vs WSL, and its verdict lines are defined in the `homelab-hub` skill.
 Re-derive by hand only what the verdict points you at.
 
-Each host is reachable by its name, read-only: `ssh ac-box`, `ssh
-arcade-box`. The commands that answer most questions:
+Each host is reachable by its name, read-only: `ssh arcade-box`, `ssh
+llm-box`. The commands that answer most questions:
 
 ```bash
-ssh ac-box 'systemctl status homelab-deploy.timer homelab-deploy.service --no-pager'
-ssh ac-box 'cat /var/lib/homelab/pending-closure.json /var/lib/homelab/last-applied-closure.json'
-ssh ac-box 'cat /var/lib/ac-host/pending-deploy.json'
-ssh ac-box 'journalctl -u <unit> --since "-2h" --no-pager'
-ssh ac-box 'systemctl list-units "*.slice" --no-pager'
-ssh ac-box 'docker ps --format "{{.Names}}\t{{.Status}}"'
+ssh arcade-box 'systemctl status homelab-deploy.timer homelab-deploy.service --no-pager'
+ssh arcade-box 'cat /var/lib/homelab/pending-closure.json /var/lib/homelab/last-applied-closure.json'
+ssh arcade-box 'cat /var/lib/ac-host/pending-deploy.json'
+ssh <host> 'journalctl -u <unit> --since "-2h" --no-pager'   # the host that runs <unit>
+ssh arcade-box 'systemctl list-units "*.slice" --no-pager'
+ssh arcade-box 'docker ps --format "{{.Names}}\t{{.Status}}"'
+ssh llm-box 'cat /var/lib/homelab/last-applied-environment-agent-hub.json'   # agent-hub's applied sha
 ```
 
 For "where is X defined" or "where was X decided", ask the index before

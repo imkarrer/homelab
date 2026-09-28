@@ -4,7 +4,7 @@
 #
 # Why this exists: Buildkite stopped creating unclustered pipelines (13 Sep
 # 2026: POST /pipelines -> 422 "Cluster must be specified"), so every pipeline
-# the ac-box agent serves lives in the Default cluster, and an agent joins a
+# the arcade-box agent serves lives in the Default cluster, and an agent joins a
 # cluster with a token minted FOR that cluster. The API returns the value
 # exactly once, in the create response; this script hands it to sops in the
 # same process and shows only the token's description and uuid. Rotation is
@@ -12,7 +12,7 @@
 #
 # Needs the API token with write_clusters (lib/buildkite-token.sh finds it).
 #
-# Usage: hub-cluster-token.sh [description]     default: "ac-box <date>"
+# Usage: hub-cluster-token.sh [description]     default: "arcade-box <date>"
 set -euo pipefail
 ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 # shellcheck source=scripts/lib/buildkite-token.sh
@@ -22,7 +22,7 @@ ROOT=$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")/.." && pwd)
 
 ORG=isaac-karrer
 CLUSTER="$BUILDKITE_CLUSTER_ID"   # lib/buildkite-cluster.sh; hub-pipeline.sh reads the same file
-DESC="${1:-ac-box $(date +%F)}"
+DESC="${1:-arcade-box $(date +%F)}"
 
 export NIX_CONFIG="experimental-features = nix-command flakes"
 TOKEN=$(buildkite_token) || exit 2

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# The one Buildkite cluster ac-box serves. Sourced by hub-pipeline.sh (every
-# pipeline object carries this cluster_id) and hub-cluster-token.sh (the agent
-# token is minted for it). One file so the two cannot disagree.
+# The one Buildkite cluster arcade-box's agent serves. Sourced by
+# hub-pipeline.sh (every pipeline object carries this cluster_id) and
+# hub-cluster-token.sh (the agent token is minted for it). One file so the
+# two cannot disagree.
 #
 # "Default cluster", the org's only one. Since 13 Sep 2026 Buildkite refuses
 # to create an unclustered pipeline (POST /pipelines without cluster_id ->

@@ -486,7 +486,7 @@
   # homelab.ci.envFile, into EnvironmentFile= and both `--env-file`s; its
   # default is the hand-placed path under the tenant tree, and this is the
   # platform saying the file is now rendered here instead. Set beside the
-  # template rather than in hosts/ac-box so the two cannot drift apart.
+  # template rather than in hosts/arcade-box so the two cannot drift apart.
   homelab.ci.envFile = config.sops.templates.ci-env.path;
 
   # The copy: /run/secrets/rendered/ac-host-env -> /var/lib/ac-host/.env as a

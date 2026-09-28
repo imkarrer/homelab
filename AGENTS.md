@@ -1,11 +1,11 @@
 # Agent instructions — homelab
 
 This repo is the hub for four source trees (`hub/repos.psv`), the platform
-layer of `ac-box`, and the single `bd` tracker for work landing in any of
-them. `README.md`'s **Pinned conventions** are binding: namespace, tenant
-names, port scopes, unit-name stability, tier semantics, state paths,
-nixpkgs ownership and the public/private boundary are decided; a module does
-not re-litigate them.
+layer of its two hosts (`arcade-box`, `llm-box`), and the single `bd` tracker
+for work landing in any of them. `README.md`'s **Pinned conventions** are
+binding: namespace, tenant names, port scopes, unit-name stability, tier
+semantics, state paths, nixpkgs ownership and the public/private boundary are
+decided; a module does not re-litigate them.
 
 ## Roles
 
@@ -19,7 +19,7 @@ Two roles, and every session is one of them:
   `wt/<bead>`). It edits, commits on that branch, runs the gate against
   the worktree, and returns a handoff. Four definitions in
   `.agents/agents/`: `homelab-worker` (changes), `homelab-local-worker`
-  (changes drafted by agent-hub's model on ac-box — the `homelab-route` skill
+  (changes drafted by agent-hub's model on llm-box — the `homelab-route` skill
   says which tasks; `scripts/hub-ask.sh` is the wire), `homelab-inspector`
   (read-only facts), `homelab-reviewer` (a diff against the rules below).
 
@@ -54,15 +54,17 @@ refactor was a no-op (`drvPath` unchanged) rather than merely evaluable.
 | What is actionable now | `bd ready` — the one open-work list |
 | What a word means — box, tree, closure, window, bead | `CONTEXT.md`, the glossary; use its term, not a synonym |
 
-## ac-box is read-only
+## The hosts are read-only
 
-Never hand-edit ac-box. Read-only SSH inspection is always fine. Migration
-exception, until ADR 0006's timer has been watched firing: an agent may apply
-a pushed revision with `nixos-rebuild switch --flake
-github:imkarrer/homelab/<full-sha>#ac-box`, and may run box-side steps a
-runbook in `docs/` spells out verbatim. Two conditions: the sha must already
-be on origin, and the agent must stop — not judge — at a runbook's abort
-criteria. `ac-host-static.service` or `docker.service` under stop/restart in
+Never hand-edit arcade-box or llm-box. Read-only SSH inspection is always
+fine. The migration exception (CONTEXT.md): an agent may apply a pushed
+revision with `nixos-rebuild switch --flake
+github:imkarrer/homelab/<full-sha>#<host>` — on llm-box that is the closure's
+only edge, since no CI agent stages there (ADR 0010) — and may run host-side
+steps a runbook in `docs/` spells out verbatim. Two conditions: the sha must
+already be on origin, and the agent must stop — not judge — at a runbook's
+abort criteria. On arcade-box,
+`ac-host-static.service` or `docker.service` under stop/restart in
 `dry-activate` is an abort, full stop.
 
 The closure gates (`diff-closures`, `switch-to-configuration dry-activate`)
@@ -114,7 +116,7 @@ bash scripts/hub-status.sh        # three-way state: each box vs origin vs WSL t
 Run it before acting and after landing. It answers what the box runs, what
 is on origin, and what is uncommitted here — in one call, so none of it gets
 re-derived by hand. Exit 1 prints what is unreconciled; the `homelab-hub`
-skill defines each verdict line. A hand-edit on ac-box is a debugging step,
+skill defines each verdict line. A hand-edit on a host is a debugging step,
 never a resting state: land it the same session.
 
 Two sessions never share a working tree. Registry checkouts under
