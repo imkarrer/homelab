@@ -85,9 +85,13 @@ hand switches its only kind. Every unit named in this paragraph except
   carry the `docker save | docker load`ed 2025-09-07 copies until a
   deliberate `systemctl restart ac-host-ci` from ssh with the agent idle,
   once both halves are on the box.
-- **agent-hub's script defaults** (`homelab-ygc.7`): `vectors-smoke.sh` and
-  `compare.sh` in the agent-hub tree still name `192.168.1.50`; deferred to
-  that tree's first push. homelab's three scripts moved in `44a8954`.
+- ~~**agent-hub's script defaults**~~ (`homelab-ygc.7`) **Landed 26 Sep,
+  20:14 CDT** (27 Sep 01:14 UTC), agent-hub PR #7, fast-forwarded: `68f50f5`
+  moved `vectors-smoke.sh`'s `LLM` and `QDRANT` and `compare.sh`'s second
+  target to `192.168.1.51`; `b16781d` stopped `compare.sh` claiming a cgroup
+  fence the Z840 no longer has. That push was the Z840 poll edge's first
+  live run (`homelab-ygc.14`): green in build 32, staged 20:19:52, applied
+  20:19:58. homelab's three scripts moved in `44a8954`.
 - ~~**Commit statuses**~~ (architecture row 35, an operator step in
   Buildkite) **Settled 26 Sep, 20:05 CDT** (27 Sep 01:05 UTC) — the first
   `buildkite/agent-hub` status, `success` on `4f4e83b`; `buildkite/homelab`
