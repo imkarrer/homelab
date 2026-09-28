@@ -5,7 +5,7 @@
 # Prometheus that watched it moved to arcade-box with everything else -- and
 # so had no node exporter: the machine serving the models was the one machine
 # nobody could graph. arcade-box's Prometheus scrapes it over the LAN instead
-# (hosts/arcade-box/host.nix, homelab.host.peers.ac-box, read by
+# (hosts/arcade-box/host.nix, homelab.host.peers.llm-box, read by
 # modules/observability/default.nix), which needs an exporter here bound to
 # the LAN address and a hole in the firewall for it. Both are this module.
 #

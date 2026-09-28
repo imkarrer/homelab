@@ -1,6 +1,6 @@
 # Fixture for environment.nix's harness: the agent-hub tenant as
-# hosts/ac-box/tenants.nix declares it (tier, unit, state dir -- the facts
-# the stub reads) and its stub as hosts/ac-box/configuration.nix declares
+# hosts/llm-box/tenants.nix declares it (tier, unit, state dir -- the facts
+# the stub reads) and its stub as hosts/llm-box/configuration.nix declares
 # it, values written as literals because this fixture has no
 # services.agent-hub to read them from. Unit names carry their suffix, as
 # tenants.nix spells them and as fixtures/resources-tenants.nix explains at

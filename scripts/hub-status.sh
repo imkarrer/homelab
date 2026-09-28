@@ -16,11 +16,18 @@ note() { PROBLEMS+=("${BOX:+$BOX: }$1"); }
 . "$HUB/scripts/lib/hosts.sh"
 # The hosts this report walks: flake.nix's nixosConfigurations (lib/hosts.sh,
 # ~0.05 s; HOMELAB_BOX=<host> narrows to one). Discovery failing is a verdict
-# -- the report then covers ac-box alone and says so -- not a crash: every
-# section below still answers for the host it can reach.
+# -- the report then walks the directories under hosts/ and says so -- not a
+# crash: every section below still answers for the host it can reach. The
+# directories are the same names without an evaluation, and no second
+# spelling of them: modules/platform/identity.nix reads
+# hosts/<homelab.host.name>/ and throws when it is absent, so a host the flake
+# declares has one (a literal host here went stale at the rename to llm-box).
 if ! HOSTS=$(hub_hosts "$HUB"); then
-  HOSTS=ac-box
-  note "host discovery failed (nix eval of $HUB#nixosConfigurations) - this report covers ac-box only; scripts/hub-gates.sh homelab says why"
+  HOSTS=""
+  for f in "$HUB"/hosts/*/host.nix; do
+    [ -e "$f" ] && HOSTS="$HOSTS${HOSTS:+ }$(basename "$(dirname "$f")")"
+  done
+  note "host discovery failed (nix eval of $HUB#nixosConfigurations) - this report walks hosts/'s directories instead (${HOSTS:-none}); scripts/hub-gates.sh homelab says why"
 fi
 ago() {  # ago <epoch> -> "47 min" / "6 h" / "3 d": the age the operator reads
   local s=$(( $(date +%s) - ${1:-0} ))

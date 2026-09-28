@@ -122,7 +122,7 @@ let
       # also mirrors ports.nix's rule for scope = "mgmt": nothing may point
       # at an interface that has no address. Write the value as a REFERENCE
       # -- `config.homelab.host.networks.lan.address`, the way
-      # hosts/ac-box/configuration.nix already feeds services.agent-hub
+      # hosts/llm-box/configuration.nix already feeds services.agent-hub
       # .lanAddress -- never as a literal; a literal passes today and fails
       # evaluation the day the address moves, which is the assertion doing
       # its job, but late and by surprise.

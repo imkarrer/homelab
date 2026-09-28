@@ -8,7 +8,7 @@
 # on a second address with nothing that would double up: no lobbies, no
 # bot, no Buildkite agent.
 #
-# Same two reasons as hosts/ac-box/configuration.nix for what lives here:
+# Same two reasons as hosts/llm-box/configuration.nix for what lives here:
 # the hardware import (a literal path -- `imports` cannot read `config`),
 # and the wiring of tenant options to host facts.
 { config, lib, ... }:
@@ -113,8 +113,8 @@ in
   # writes no assetto entry to the inventory, so homelab-deploy's busy check
   # does not consult a script that is not here yet. 4.2 flips all four.
   #
-  # lanInterface is set even while off, and it is the one line ac-box never
-  # needed: the module's default is `enp8s0`, which is ac-box's NIC name and
+  # lanInterface is set even while off, and it is the one line the Z840 never
+  # needed: the module's default is `enp8s0`, which is llm-box's NIC name and
   # nobody else's. Read from the host fact, never repeated.
   # ---------------------------------------------------------------------------
   services.ac-host = {

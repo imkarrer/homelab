@@ -59,7 +59,7 @@ steps:
     command: |
       bash scripts/hub-queue-environment.sh "$HOMELAB_STAGE_ENVIRONMENT" "$HOMELAB_STAGE_REV"
 
-  - label: ":nix: flake check (ac-box + module eval harnesses)"
+  - label: ":nix: flake check (both hosts + module eval harnesses)"
     if: build.env("HOMELAB_BUMP_INPUT") == null && build.env("HOMELAB_STAGE_ENVIRONMENT") == null
     command: |
       nix --extra-experimental-features "nix-command flakes" flake check -L --accept-flake-config
@@ -68,8 +68,8 @@ steps:
     # (flox.conf) but not a default one. flake.nix names it in nixConfig so
     # this build can substitute flox (modules/platform/flox.nix) instead of
     # compiling it -- a Rust program with a bundled nix -- in batch.slice.
-    # checks.${system}.ac-box (flake.nix) IS
-    # nixosConfigurations.ac-box.config.system.build.toplevel -- the same
+    # checks.${system}.<host> (flake.nix; arcade-box and llm-box) IS
+    # nixosConfigurations.<host>.config.system.build.toplevel -- the same
     # cheap gate flake.nix's own comment describes: catches a port
     # collision, a broken tenant module, or a bad lock bump before a human
     # opens a maintenance window.
@@ -77,8 +77,8 @@ steps:
     # checks.${system}.eval-* are the module eval harnesses
     # (modules/*/tests/eval*.nix, via modules/tenant/tests/check.nix): the
     # unit-level coverage proving ports.nix still REJECTS a colliding
-    # fixture, which the host config alone cannot exercise since ac-box has
-    # no such fixture to reject. Until 12 Sep 2026 that ran as its own step
+    # fixture, which the host configs alone cannot exercise since neither has
+    # such a fixture to reject. Until 12 Sep 2026 that ran as its own step
     # (./modules/ci/scripts/run-eval-tests.sh); now that every case is a
     # flake check, the step would have evaluated the same table twice. A
     # failing case is an evaluation error naming the case, so it surfaces

@@ -1,5 +1,5 @@
 # The second file in this repo containing literals specific to one machine
-# (hosts/ac-box/host.nix is the first, and its header's rule holds: adapting
+# (hosts/llm-box/host.nix is the first, and its header's rule holds: adapting
 # to another box is a new hosts/<name>/host.nix plus a tenant choice).
 # Values below were surveyed live on the Lenovo M920q on 26 Sep 2026, over
 # the installer's login, read-only: docs/runbook-arcade-box-cutover.md
@@ -11,9 +11,10 @@ let
   # file is the one place its address is a literal (its header's rule), and a
   # peer entry repeating it would be the second spelling that goes quietly
   # wrong the day the reservation moves. host.nix files take no module
-  # arguments, so the import is a plain call; when homelab-ygc.9 renames the
-  # directory to llm-box this line fails loudly, which is the right outcome.
-  acBox = (import ../ac-box/host.nix { }).homelab.host;
+  # arguments, so the import is a plain call. homelab-ygc.9 renamed the
+  # directory to llm-box, and the next move fails this line loudly, which is
+  # the right outcome.
+  llmBox = (import ../llm-box/host.nix { }).homelab.host;
 in
 {
   homelab.host = {
@@ -41,8 +42,8 @@ in
       };
     };
 
-    # The same Dream Router ac-box polls; the two hosts share one LAN and
-    # one controller. See hosts/ac-box/host.nix for why this is not a
+    # The same Dream Router the Z840 sits behind; the two hosts share one LAN
+    # and one controller. See hosts/llm-box/host.nix for why this is not a
     # gateway field.
     unifi.address = "192.168.1.1";
 
@@ -53,18 +54,18 @@ in
     # this entry is the only place that machine is watched from. Each job
     # keeps the name the Z840's own Prometheus scraped it under, on purpose:
     # see the option's description in modules/platform/host-options.nix.
-    peers.${acBox.name} = {
-      address = acBox.networks.lan.address;
+    peers.${llmBox.name} = {
+      address = llmBox.networks.lan.address;
       # HostLoadHigh's line for the Z840: its whole thread count, not half.
       # Its one tenant spins 28 generation threads on 28 physical cores by
       # design (homelab-ygc.13), so node_load5 lives at 28-30 through every
       # long model session -- half the threads is its operating point, not
       # an alert. Above 56 something besides the model server is running
       # the machine flat out.
-      loadHigh = acBox.capacity.cpuThreads;
+      loadHigh = llmBox.capacity.cpuThreads;
       metrics = [
         # The platform's node exporter on the Z840 (modules/platform/
-        # node-exporter.nix, enabled in hosts/ac-box/configuration.nix).
+        # node-exporter.nix, enabled in hosts/llm-box/configuration.nix).
         # "node" is a job this host scrapes locally too, so the Z840 joins it
         # as a second instance; curation is per job, so the keep regex is the
         # local node job's verbatim, and modules/observability asserts that
@@ -75,7 +76,7 @@ in
           keep = "up|node_cpu_seconds_total|node_memory_MemTotal_bytes|node_memory_MemAvailable_bytes|node_filesystem_avail_bytes|node_filesystem_size_bytes|node_load1|node_load5|node_load15|node_systemd_unit_state";
         }
         # llama-swap's /metrics through agent-hub's nginx on the tenant's LAN
-        # port (hosts/ac-box/tenants/agent-hub.nix, llm.port): llamacpp:* from
+        # port (hosts/llm-box/tenants/agent-hub.nix, llm.port): llamacpp:* from
         # the loaded model, llamaswap_* from the proxy. A job of its own with
         # no curation, as the Z840's own Prometheus had it before the cutover.
         {

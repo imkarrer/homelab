@@ -46,7 +46,7 @@
 
 let
   hostOptions = ../../platform/host-options.nix;
-  hostFacts = ../../../hosts/ac-box/host.nix;
+  hostFacts = ../../../hosts/llm-box/host.nix;
   floxModule = ../../platform/flox.nix;
   schema = ../schema.nix;
   enforce = ../enforce.nix;
@@ -855,7 +855,7 @@ in
       ];
   };
 
-  # poll = true on the tree kind (ac-box's agent-hub since the cutover):
+  # poll = true on the tree kind (llm-box's agent-hub since the cutover):
   # the oneshot and the timer, placed where the pull is, and a script that
   # asks api.github.com for imkarrer/agent-hub, writes queue-environment's
   # record with the pull's registry remote as `tree`, and does nothing

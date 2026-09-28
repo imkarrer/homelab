@@ -1,10 +1,10 @@
 # NOT a fallback, and nothing imports it. It will not boot a real machine.
 #
-# It was the fallback while hosts/ac-box/hardware-configuration.nix was
+# It was the fallback while this directory's hardware-configuration.nix was
 # gitignored, and that is exactly the problem: a flake copies only git-tracked
 # files, so builds from github:imkarrer/homelab took this branch silently and
-# green. The real file is tracked now and hosts/ac-box/configuration.nix throws
-# rather than reaching here. See .gitignore's NOTE and commit daac96f.
+# green. The real file is tracked now and this directory's configuration.nix
+# throws rather than reaching here. See .gitignore's NOTE and commit daac96f.
 #
 # Kept only as the shape a new host's file takes. For a new host, generate its
 # own on that machine — never copy this one:

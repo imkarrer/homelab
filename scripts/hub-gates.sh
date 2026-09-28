@@ -14,7 +14,7 @@ REG="${HUB_REGISTRY:-$HUB/hub/repos.psv}"
 REPO="${1:-ac-host}"
 PATHX=$(awk -F'|' -v r="$REPO" '$1==r{print $2}' "$REG")
 [ -n "$PATHX" ] || { echo "unknown repo: $REPO (see $REG)"; exit 2; }
-# How the tree reaches ac-box (the registry's `deploy` column): "environment"
+# How the tree reaches its host (the registry's `deploy` column): "environment"
 # means through its own edge (ADR 0009), never through the hub's closure,
 # which decides below whether there is a composition to evaluate at all.
 DEPLOY=$(awk -F'|' -v r="$REPO" '$1==r{print $4}' "$REG")
@@ -25,7 +25,7 @@ fi
 cd "$PATHX" || exit 2
 
 # flox at ONE pinned version (ADR 0009, question 6): the `flox` input of the
-# hub's flake.lock, which modules/platform/flox.nix installs on ac-box. This
+# hub's flake.lock, which modules/platform/flox.nix installs on every host. This
 # script used to carry its own copy of the tag ("v1.14.0", because a lock
 # written by a newer flox was unreadable in the CI agent container); a second
 # spelling of a pin is the drift README forbids, so the tag now lives in
@@ -187,7 +187,7 @@ fi
 # checks the real composition rather than the module in isolation.
 #
 # Unless nothing composes it. A tree whose registry row says deploy=environment
-# (agent-hub, home-arcade since 18 Sep 2026, homelab-158.11) reaches ac-box as
+# (agent-hub, home-arcade since 18 Sep 2026, homelab-158.11) reaches its host as
 # a flox environment -- a sha or a FloxHub generation its own CI stages, the
 # box's pull unit applies -- and its flake is an input of no host: the unit
 # that runs it is a stub in homelab's closure, and the box owes it nothing
@@ -208,7 +208,7 @@ fi
 #                    no new configuration anywhere.
 #   input name       the registry name from hub/repos.psv.
 # hub/repos.psv deliberately gains no `consumer` column: homelab's flake.nix
-# already states which trees compose into ac-box and under which input name, and
+# already states which trees compose into which host under which input name, and
 # a column would be a second spelling of a decided fact -- which README's Pinned
 # conventions forbid -- free to drift out of agreement with the flake. Silent
 # drift is the defect being closed here, not a tool to close it with.
@@ -268,7 +268,7 @@ if [ -f flake.nix ]; then
     if [ -z "$hubhosts" ]; then
       echo "  NO NIX GATE: $REPO declares no nixosConfigurations, and neither"
       echo "  does the hub tree $HUB -- there is no host to compose it through."
-      echo "  Its modules would reach ac-box unproven."
+      echo "  Its modules would reach a host unproven."
       RC=1
     elif ! printf ' %s ' "$hubinputs" | grep -q " $REPO "; then
       echo "  NO NIX GATE: $HUB/flake.nix has no input named '$REPO'."
@@ -303,7 +303,7 @@ elif [ "$DEPLOY" = environment ]; then
   # will run. Said out loud rather than counted as a skip.
   echo "== nix eval: $REPO is manifest-only (deploy=environment); the closure holds its unit, nothing to evaluate here =="
 else
-  # Not a Nix tree at all. Nothing here reaches ac-box
+  # Not a Nix tree at all. Nothing here reaches a host
   # through a system closure, so there is no eval to run -- but it is still a
   # gate that did not happen, and it says so rather than passing quietly.
   SKIPPED+=("nix eval: $REPO has no flake.nix, so nothing was evaluated")

@@ -7,7 +7,7 @@
 # reads flake.lock and fetches the exact revision flake.nix pins. That
 # closes finding F7 (docs/current-state.md): these assertions are the only
 # proof a colliding fixture is still rejected, and proving it against a
-# different lib than ac-box is built with proves nothing about ac-box. See
+# different lib than the hosts are built with proves nothing about them. See
 # pinned-nixpkgs.nix for the measurement showing the channel and the pin are
 # genuinely two different trees on this machine.
 #
@@ -51,7 +51,7 @@ let
       fixture,
       extraModules ? [ ],
       checks ? (_: [ ]),
-      # The host stub: stub-host.nix (lan + a mgmt with no address, ac-box's
+      # The host stub: stub-host.nix (lan + a mgmt with no address, llm-box's
       # shape) unless a case says otherwise -- the singleNic* cases swap in
       # stub-host-single-nic.nix, which declares no mgmt network at all.
       stub ? stubHost,

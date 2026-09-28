@@ -67,8 +67,8 @@ let
   # Only enabled tenants that opted into a metrics endpoint at all.
   tenantsWithMetrics = filterAttrs (_: t: t.enable) tenantsDeclaringMetrics;
 
-  # The addresses this host actually has. mgmt's is null on ac-box today
-  # (eno1 cabled but down, hosts/ac-box/host.nix), so it is filtered out here
+  # The addresses this host actually has. mgmt's is null on llm-box today
+  # (eno1 cabled but down, hosts/llm-box/host.nix), so it is filtered out here
   # rather than compared against -- a tenant referencing
   # homelab.host.networks.mgmt.address would already fail schema.nix's
   # `types.str` on the null, but a literal of what mgmt WILL be must fail

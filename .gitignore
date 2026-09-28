@@ -33,7 +33,7 @@ __pycache__/
 # scripts/hub-links.sh regenerates them from hub/repos.psv.
 hub/trees/
 
-# Per-machine Claude Code permission grants (the ssh ac-box rule, for the migration).
+# Per-machine Claude Code permission grants (the `ssh <host>` rules, for the migration).
 # Never tracked: a grant belongs to the operator who made it, not to every agent that clones this repo.
 .claude/settings.local.json
 

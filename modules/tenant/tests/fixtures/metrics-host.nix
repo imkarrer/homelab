@@ -1,5 +1,6 @@
-# Host facts for tests/eval-metrics.nix: the two interfaces ac-box declares in
-# hosts/ac-box/host.nix, with the same addresses -- lan up at 192.168.1.50,
+# Host facts for tests/eval-metrics.nix: the two interfaces the Z840 declared in
+# its host.nix before the cutover, with the addresses it had then (it is
+# hosts/llm-box/host.nix now, lan at .51) -- lan up at 192.168.1.50,
 # mgmt cabled but down (address = null). Declared against the REAL L0 option
 # module (modules/platform/host-options.nix), which the harness imports the
 # way flake.nix does, so the shape metrics.nix's address assertion reads is
@@ -12,7 +13,7 @@
 #
 # The literal 192.168.1.50 here is what metrics-quiet-tenants.nix's agent-hub
 # entry must match -- see the comment there for why a fixture may write the
-# literal while hosts/ac-box/tenants.nix must not.
+# literal while hosts/llm-box/tenants.nix must not.
 { ... }:
 {
   homelab.host.networks = {

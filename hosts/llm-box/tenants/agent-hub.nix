@@ -1,7 +1,7 @@
-# agent-hub on ac-box: everything the tenant's NixOS module used to
+# agent-hub on llm-box: everything the tenant's NixOS module used to
 # contribute that is NOT the model server's unit -- the user and group, its
 # directories, the nginx landing page in front of llama-swap, and qdrant
-# beside it -- plus the host facts hosts/ac-box/configuration.nix reads to
+# beside it -- plus the host facts hosts/llm-box/configuration.nix reads to
 # fill the unit stub (homelab.tenants.agent-hub.environment).
 #
 # Moved here from agent-hub's modules/agent-hub.nix on 18 Sep 2026
@@ -20,7 +20,7 @@
 # (llm.threads, llm.contextSize, llm.parallel, llm.port, llm.backendPort,
 # llm.landingPage, lanAddress, dataDir, stateDir, vectors.port, the models'
 # kind and description) -- one spelling per value, so the stub and the page
-# cannot drift. This file is host-local: it is imported by hosts/ac-box
+# cannot drift. This file is host-local: it is imported by hosts/llm-box
 # only, and a second host composing this tenant writes its own.
 #
 # Gone with the move, because nothing reads them: the module's llama-swap

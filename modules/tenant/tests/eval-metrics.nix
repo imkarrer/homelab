@@ -206,7 +206,7 @@ in
 
   # A literal for the address mgmt WILL have once the dual-NIC runbook brings
   # eno1 up. mgmt.address is null today (fixtures/metrics-host.nix, matching
-  # hosts/ac-box/host.nix), so this is an address the host does not have
+  # hosts/llm-box/host.nix), so this is an address the host does not have
   # yet, and must fail -- the metrics analogue of eval.nix's mgmtNoAddress.
   addressOnDownInterface = mkCase {
     extraModules = [

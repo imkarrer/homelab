@@ -6,10 +6,10 @@
 # than from <nixpkgs>/NIX_PATH, as of 9 Sep 2026; see that file for why, and
 # for the finding (F7) it closes. That matters more here than anywhere else
 # in this directory: the numbers checked below (AllowedCPUs fences, tier
-# shares) are hand-computed against ac-box's real facts, so they are only
-# evidence about ac-box if the lib doing the computing is ac-box's.
+# shares) are hand-computed against llm-box's real facts, so they are only
+# evidence about llm-box if the lib doing the computing is llm-box's.
 # Uses the REAL modules/platform/host-options.nix and
-# the REAL hosts/ac-box/host.nix (56 threads / 251 GiB) rather than a capacity
+# the REAL hosts/llm-box/host.nix (56 threads / 251 GiB) rather than a capacity
 # stub, since both now exist in this repo -- only the systemd-shaped options
 # resources.nix writes to (systemd.slices, systemd.services.*.serviceConfig,
 # system.activationScripts) are stubbed, in tests/stub-systemd.nix.
@@ -40,7 +40,7 @@
 
 let
   hostOptions = ../../platform/host-options.nix;
-  hostFacts = ../../../hosts/ac-box/host.nix;
+  hostFacts = ../../../hosts/llm-box/host.nix;
   schema = ../schema.nix;
   enforce = ../enforce.nix;
   resources = ../resources.nix;
@@ -107,7 +107,7 @@ let
     };
 in
 {
-  # Real ac-box facts (56 threads / 251 GiB) with resources.nix's own tier
+  # Real llm-box facts (56 threads / 251 GiB) with resources.nix's own tier
   # defaults (background trimmed to 0.30, see resources.nix's comment), and
   # enforce.slices flipped on -- must evaluate cleanly, and is where the
   # derived MemoryMax/AllowedCPUs numbers are checked against hand
@@ -123,7 +123,7 @@ in
     # fence therefore separated background/batch from critical on paper while
     # they shared every physical core in reality.
     #
-    # Hand-computed against hosts/ac-box/host.nix (56 threads, threadsPerCore
+    # Hand-computed against hosts/llm-box/host.nix (56 threads, threadsPerCore
     # = 2 -> 28 physical cores) and resources.nix's own tier defaults:
     #   reservedForCritical = ceil(0.50 * 28) = 14   -> critical keeps 0-13
     #   batchCores          = ceil(0.05 * 28) = 2    -> batch gets 26-27
@@ -218,7 +218,7 @@ in
 
   # homelab.tiers.<tier>.fence = false (homelab-ygc.3, 26 Sep 2026): the
   # per-host opt-out ADR 0010 asks for on arcade-box ("tier -> slice without
-  # the cpuset fence"). Same ac-box facts and defaults as `good`, slices on,
+  # the cpuset fence"). Same llm-box facts and defaults as `good`, slices on,
   # both fenced tiers opted out: their slices must carry NO AllowedCPUs at
   # all -- not an empty string, not the range -- while MemoryMax, CPUWeight
   # and IOWeight stay exactly what `good` gets, because the flag removes one

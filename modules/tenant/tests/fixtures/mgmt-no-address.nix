@@ -1,5 +1,5 @@
 # A tenant scopes a claim to mgmt while the mgmt interface (stub-host.nix,
-# matching ac-box's real eno1 today) still has address = null -- must fail.
+# matching llm-box's real eno1 today) still has address = null -- must fail.
 {
   homelab.tenants.observability = {
     description = "test";

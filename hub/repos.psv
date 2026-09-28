@@ -1,7 +1,7 @@
 # Source trees homelab coordinates. Fields: name|path|remote|deploy|agent-push
 #   deploy      how the tree reaches a host. Two hosts since 26 Sep 2026 (ADR
 #               0010): arcade-box has the only CI agent, so every pipeline-staged
-#               edge lands there; the Z840 (ac-box) has none. Which host each
+#               edge lands there; the Z840 (llm-box) has none. Which host each
 #               tree reaches is in the comment above its row.
 #                 buildkite    its own pipeline stages it and something on the
 #                              host applies it (ac-host: queue-prod + the 03:00
@@ -27,7 +27,7 @@ ac-host|/home/nixos/src/ac-host|git@github.com:imkarrer/ac-host|buildkite|yes
 # its agent gates the push and stages the rev, its homelab-deploy switches
 # (ab21161: staged 13:47 CDT, switched 13:48). The Z840 has no agent, so a
 # push here switches arcade-box only; the Z840 takes the same sha by hand,
-# `nixos-rebuild switch --flake github:imkarrer/homelab/<sha>#ac-box`
+# `nixos-rebuild switch --flake github:imkarrer/homelab/<sha>#llm-box`
 # (docs/architecture.md Part III row 41, the accepted gap).
 # DECISION on
 # agent-push: "yes" means an agent pushing green IS switching the server.
@@ -50,7 +50,7 @@ homelab|/home/nixos/src/homelab|git@github.com:imkarrer/homelab|buildkite|yes
 # Z840 directly; it reached it through homelab's closure when flake.lock
 # moved (row 24). Now the tree's own green build is what reaches its host, one
 # hop, and hub-status prints the staged/applied pair per tenant. Which host:
-#   agent-hub   -> the Z840 (ac-box). No agent there since the cutover, so
+#   agent-hub   -> the Z840 (llm-box). No agent there since the cutover, so
 #                  agent-hub-environment-poll on that host reads GitHub for a
 #                  green sha (homelab-ygc.14) and agent-hub-environment-pull
 #                  applies it. Buildkite publishes no commit status for this

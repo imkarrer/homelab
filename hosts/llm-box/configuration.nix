@@ -1,4 +1,4 @@
-# Per-host composition for ac-box.
+# Per-host composition for llm-box (the Z840; ac-box until homelab-ygc.9).
 #
 # Two things live here rather than in a platform module, both for real reasons:
 #
@@ -6,7 +6,7 @@
 #      `config`, so driving this from homelab.host.name is infinite recursion,
 #      not a style choice. It is therefore resolved with a literal path here.
 #   2. Wiring tenant options to host facts. A tenant's host side
-#      (hosts/ac-box/tenants/*.nix, since ADR 0009's modules left the
+#      (hosts/llm-box/tenants/*.nix, since ADR 0009's modules left the
 #      closure) declares and never reaches, so something has to hand arcade
 #      the LAN address -- and that something is the host composition, which
 #      is the one place allowed to know both sides.
@@ -34,18 +34,19 @@ let
       ./hardware-configuration.nix
     else
       throw ''
-        hosts/ac-box/hardware-configuration.nix is missing.
+        hosts/llm-box/hardware-configuration.nix is missing.
 
         It is tracked in git, so a clean checkout always has it -- if it is
         gone, this working tree deleted it. Restore it; do not substitute
         hardware-configuration.nix.example, which will not boot a real machine:
 
-          git checkout -- hosts/ac-box/hardware-configuration.nix
+          git checkout -- hosts/llm-box/hardware-configuration.nix
 
-        or re-fetch it read-only from the box:
+        or re-fetch it read-only from the host, where nixos-generate-config
+        wrote it, and format it the way the tracked copy is:
 
-          scp ac-box:/var/lib/ac-host/src/hosts/ac-box/hardware-configuration.nix \
-              hosts/ac-box/
+          scp llm-box:/etc/nixos/hardware-configuration.nix hosts/llm-box/
+          nix fmt hosts/llm-box/hardware-configuration.nix
 
         For a NEW host, generate that host's own file on that machine:
 
@@ -121,11 +122,19 @@ in
   };
 
   # Scraped by arcade-box's Prometheus over the LAN since the cutover left this
-  # host without a collector (hosts/arcade-box/host.nix, peers.ac-box; ADR 0010).
+  # host without a collector (hosts/arcade-box/host.nix, peers.llm-box; ADR 0010).
   homelab.platform.nodeExporter.enable = true;
 
   # ---------------------------------------------------------------------------
-  # The closure deploys itself (ADR 0006). This is the flag that makes ac-box
+  # IDLE HERE SINCE THE CUTOVER. The CI agent that stages a closure writes on
+  # the host it runs on, which is arcade-box, so nothing is ever staged on this
+  # one and it is switched by hand (flake.nix; ADR 0010, "no machinery").
+  # homelab-ygc.9 kept the edge through the rename rather than remove it
+  # inside the one switch whose dry-activate was meant to show no unit change;
+  # its removal is a bead of its own (docs/architecture.md row 41). Everything
+  # below is how it came to be enabled while this machine ran every tenant.
+  #
+  # The closure deploys itself (ADR 0006). This is the flag that made the Z840
   # self-switching: homelab's Buildkite pipeline stages a green revision into
   # /var/lib/homelab/pending-closure.json (scripts/hub-queue-closure.sh), and
   # homelab-deploy.timer applies it at homelab.host.maintenance.window --
@@ -200,7 +209,7 @@ in
 
   # ---------------------------------------------------------------------------
   # agent-hub: the local coding-agent model server (tenant declared in
-  # tenants.nix; host side in hosts/ac-box/tenants/agent-hub.nix, which
+  # tenants.nix; host side in hosts/llm-box/tenants/agent-hub.nix, which
   # since homelab-158.11 is where the option set below is declared -- the
   # tenant's own module has left the closure, ADR 0009).
   #
@@ -406,7 +415,7 @@ in
   # escalates. No slice on this host since homelab-ygc.13 (enforce.slices
   # is off); the cpuset and NUMA policy are the host's, just above. Every value below
   # is read from the same option a second reader has (services.agent-hub,
-  # hosts/ac-box/tenants/agent-hub.nix) so the two cannot drift.
+  # hosts/llm-box/tenants/agent-hub.nix) so the two cannot drift.
   homelab.tenants.agent-hub.environment =
     let
       llm = config.services.agent-hub;

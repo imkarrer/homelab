@@ -88,7 +88,7 @@
 # than a `homelab.tenants = mapAttrs ...` over config.homelab.tenants,
 # because the latter derives the attribute NAMES from the option being
 # defined and is an infinite recursion. Unconditional on purpose: the
-# resolved path must be readable (hosts/ac-box/configuration.nix builds the
+# resolved path must be readable (hosts/llm-box/configuration.nix builds the
 # stub's -config path from it) whether or not the stub is on, and an option
 # value on homelab.tenants reaches nothing in the closure by itself.
 {

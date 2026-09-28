@@ -1,9 +1,9 @@
-# The one tenant on ac-box since the cutover (ADR 0010, docs/runbook-arcade-
+# The one tenant on llm-box since the cutover (ADR 0010, docs/runbook-arcade-
 # box-cutover.md 4.2): agent-hub. The other five -- assetto, bot, arcade,
 # observability, ci -- moved to hosts/arcade-box/tenants.nix, verbatim, the
 # day the lobbies did; this file's history has every survey note they carried.
-# The Z840 is llm-box in everything but name, and the rename (homelab-ygc.9)
-# is where this file moves to hosts/llm-box/.
+# The Z840 was ac-box until the rename (homelab-ygc.9) moved this file here
+# from hosts/ac-box/; its history before that is under the old path.
 #
 # Took `config` for agent-hub's metrics.address until homelab-ygc.10 moved
 # the scrape to arcade-box's peers entry; the header keeps the module's
@@ -21,7 +21,7 @@
     agent-hub = {
       # ON as of 8 Sep 2026, in the same change that sets
       # services.agent-hub.enable + .llm.enable with a real llm.modelPath in
-      # hosts/ac-box/configuration.nix. That pairing is the rule: this flag
+      # this host's configuration.nix. That pairing is the rule: this flag
       # and the service's own enable flip together, because either one alone
       # is a lie -- this flag alone opens a firewall port and assigns a slice
       # to a unit that does not exist, and the service alone runs a unit the

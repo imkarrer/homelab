@@ -1,5 +1,5 @@
 {
-  description = "Platform layer for the homelab hosts (ac-box, arcade-box): host facts, a tenant contract, and the tenants as environments";
+  description = "Platform layer for the homelab hosts (llm-box, arcade-box): host facts, a tenant contract, and the tenants as environments";
 
   inputs = {
     # This repo owns nixpkgs, and a tenant must not drag its own copy into the
@@ -27,9 +27,9 @@
     # ADR 0009's end state): those tenants are flox environments, deployed
     # through their own edge (a sha or a FloxHub generation staged by their
     # CI, applied by modules/tenant/environment-pull.nix), and their units
-    # are the stubs hosts/ac-box/configuration.nix declares. What the box
+    # are the stubs their host's configuration.nix declares. What the host
     # owes them -- a user, directories, nginx, qdrant, samba, rsyncd -- is
-    # hosts/ac-box/tenants/agent-hub.nix and hosts/arcade-box/tenants/arcade.nix. ac-host is the one
+    # hosts/llm-box/tenants/agent-hub.nix and hosts/arcade-box/tenants/arcade.nix. ac-host is the one
     # tenant still composed as an input, and bump-lock is for it alone.
 
     # Secrets. README has said "credentials go to sops-nix" since the repo
@@ -46,7 +46,7 @@
     # flox, at ONE version for dev, CI and the box (ADR 0009, question 6).
     # This tag is the version; flake.lock pins its rev, and that lock node is
     # what scripts/hub-gates.sh builds to reproduce CI's environment locally
-    # and what modules/platform/flox.nix installs on ac-box. The CI agent
+    # and what modules/platform/flox.nix installs on every host. The CI agent
     # container carries its own flox (1.14.0 today, from ac-host's compose
     # file) and must agree with this tag by hand until that container is
     # itself built from this pin.
@@ -139,7 +139,7 @@
         # own comments cite three times. The proof survives with one
         # override on both sides:
         #
-        #   (nixosConfigurations.ac-box.extendModules {
+        #   (nixosConfigurations.<host>.extendModules {
         #     modules = [ { system.configurationRevision = lib.mkForce null; } ];
         #   }).config.system.build.toplevel.drvPath
         #
@@ -163,7 +163,7 @@
         # ADR 0009: the unit stub for a tenant that is a flox environment.
         # Since homelab-158.11 the stub is the whole unit: agent-hub-llm,
         # arcade-freeciv and arcade-mindustry exist in this closure only
-        # because hosts/ac-box/configuration.nix declares them under
+        # because their host's configuration.nix declares them under
         # homelab.tenants.<n>.environment.units, and this module renders
         # each from its skeleton fields. Emits nothing for a host that
         # declares no stub.
@@ -223,7 +223,7 @@
         # The platform's node exporter, for a host a PEER scrapes
         # (homelab-ygc.10): an option, off by default, so this line adds
         # nothing to arcade-box, which has modules/observability's own
-        # exporter; hosts/ac-box/configuration.nix turns it on. Appended,
+        # exporter; hosts/llm-box/configuration.nix turns it on. Appended,
         # not slotted in above: the prefix's order is load-bearing.
         ./modules/platform/node-exporter.nix
       ];
@@ -244,30 +244,33 @@
         deploy = ./modules/deploy;
       };
 
-      nixosConfigurations.ac-box = nixpkgs.lib.nixosSystem {
+      nixosConfigurations.llm-box = nixpkgs.lib.nixosSystem {
         inherit system;
         modules = commonModules ++ [
-          # ADR 0010, the cutover (docs/runbook-arcade-box-cutover.md 4.2): the
-          # Z840 is llm-box in everything but name. What left with the lobbies,
-          # the arcade, observability and ci: modules/observability, modules/ci,
-          # sops + modules/platform/secrets.nix, the ac-host input and the arcade
-          # host-side file -- all on arcade-box now. Docker leaves with them (no
-          # tenant here declares needsDocker). modules/deploy stays and idles: the
-          # CI agent that stages a closure writes on the host it runs on, which is
-          # arcade-box, so this host is switched by hand from now on (ADR 0010,
-          # "no machinery"); the rename to llm-box is homelab-ygc.9.
+          # ADR 0010: the Z840, which serves models and nothing else -- named
+          # ac-box until homelab-ygc.9 (docs/runbook-llm-box-rename.md). What
+          # left with the lobbies at the cutover (docs/runbook-arcade-box-
+          # cutover.md 4.2), the arcade, observability and ci: modules/
+          # observability, modules/ci, sops + modules/platform/secrets.nix, the
+          # ac-host input and the arcade host-side file -- all on arcade-box
+          # now. Docker left with them (no tenant here declares needsDocker).
+          # modules/deploy stays and idles: the CI agent that stages a closure
+          # writes on the host it runs on, which is arcade-box, so this host is
+          # switched by hand (ADR 0010, "no machinery"). The rename kept the
+          # idle edge rather than remove it in the same switch; removing it is
+          # a bead of its own (docs/architecture.md row 41).
           ./modules/deploy
 
           # L3: the one tenant. agent-hub is a flox environment (ADR 0009); its
-          # unit is the stub hosts/ac-box/configuration.nix declares, rendered by
+          # unit is the stub hosts/llm-box/configuration.nix declares, rendered by
           # modules/tenant/environment.nix, and what the host owes it -- identity,
           # directories, nginx, qdrant -- is the file below.
-          ./hosts/ac-box/tenants/agent-hub.nix
+          ./hosts/llm-box/tenants/agent-hub.nix
 
           # This host.
-          ./hosts/ac-box/host.nix
-          ./hosts/ac-box/tenants.nix
-          ./hosts/ac-box/configuration.nix
+          ./hosts/llm-box/host.nix
+          ./hosts/llm-box/tenants.nix
+          ./hosts/llm-box/configuration.nix
         ];
       };
 
@@ -305,7 +308,7 @@
       # opens a maintenance window.
       #
       # It cannot, on its own, prove the contract still REJECTS a bad config:
-      # ac-box has no collision and no overrun to reject. That proof is the
+      # neither host has a collision or an overrun to reject. That proof is the
       # eval harnesses (modules/*/tests/eval*.nix), which since 12 Sep 2026
       # are checks here too -- one derivation per harness, evaluated against
       # this flake's own nixpkgs rather than a re-read of flake.lock. Each is
@@ -317,7 +320,7 @@
       # walk. run-eval-tests.sh is now a front-end that builds these same
       # checks and prints their per-case reports.
       checks.${system} = {
-        ac-box = self.nixosConfigurations.ac-box.config.system.build.toplevel;
+        llm-box = self.nixosConfigurations.llm-box.config.system.build.toplevel;
         arcade-box = self.nixosConfigurations.arcade-box.config.system.build.toplevel;
       }
       // (import ./modules/tenant/tests/check.nix {

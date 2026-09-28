@@ -19,7 +19,7 @@ in
   networking.hostName = cfg.name;
   networking.networkmanager.enable = true;
 
-  # No wireless hardware on this host -- /sys/class/net on ac-box lists eno1,
+  # No wireless hardware on the Z840 -- /sys/class/net on llm-box listed eno1,
   # enp8s0, docker bridges and veths, nothing else -- yet wpa_supplicant.service
   # was running (found 9 Sep 2026, up since the 5th). nixpkgs'
   # networkmanager.nix turns it on as a side effect:

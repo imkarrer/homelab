@@ -1,14 +1,14 @@
 # Turns the eval harnesses (modules/*/tests/eval*.nix) into flake checks:
 # one derivation per harness that `nix flake check` builds, and that fails
 # when any case's actual pass/throw disagrees with the harness's `expected`
-# map. flake.nix's `checks` output is `{ ac-box = <toplevel>; } // .checks`
+# map. flake.nix's `checks` output is `{ <host> = <its toplevel>; … } // .checks`
 # from here.
 #
 # WHY THIS FILE EXISTS (F7's open follow-up, docs/current-state.md §4; delta
 # row 14). The harnesses are the only coverage proving ports.nix still
 # REJECTS fixtures/collision.nix and resources.nix still refuses a broken
 # budget; `nix flake check` on the host config alone cannot show that,
-# because ac-box has nothing to reject. Until 12 Sep 2026 they ran only
+# because neither host has anything to reject. Until 12 Sep 2026 they ran only
 # through modules/ci/scripts/run-eval-tests.sh, a shell loop that read each
 # harness's `expected` map and re-derived the verdict per case with one
 # `nix eval` process each. Making them flake checks puts them under the one
@@ -89,7 +89,7 @@
 # every `nix flake check` regardless. Measured 12 Sep 2026: evaluating all
 # five checks to their drvPaths takes 1.0s including loading the flake; a
 # warm `nix flake check` went 7.5-7.9s -> 7.4-8.8s, run-to-run noise. The
-# host closure's evaluation is the rest, and checks.ac-box's BUILD (the
+# host closure's evaluation is the rest, and a host check's BUILD (the
 # toplevel, minutes when it misses) dwarfs all of it.
 #
 # DISCOVERY. `harnesses` enumerates modules/*/tests/eval*.nix -- the same
@@ -260,6 +260,6 @@ in
 {
   inherit mkCheck harnesses;
 
-  # What flake.nix merges into `checks.${system}`, next to `ac-box`.
+  # What flake.nix merges into `checks.${system}`, next to the hosts' toplevels.
   checks = lib.mapAttrs (name: harness: mkCheck { inherit name harness; }) harnesses;
 }

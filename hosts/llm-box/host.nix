@@ -5,7 +5,7 @@
 
 {
   homelab.host = {
-    name = "ac-box";
+    name = "llm-box";
     timezone = "America/Chicago";
 
     networks = {

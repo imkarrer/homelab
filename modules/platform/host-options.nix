@@ -4,7 +4,7 @@
 # set exactly once, in hosts/<name>/host.nix. No other module may hardcode any
 # of it.
 #
-# Shape is pinned against the hosts/<name>/host.nix files (ac-box and
+# Shape is pinned against the hosts/<name>/host.nix files (llm-box and
 # arcade-box) — do not add a field no host sets, and do not change the shape
 # of one a host does set without updating that file in lockstep.
 { lib, ... }:
@@ -199,7 +199,7 @@ in
               private LAN), not facts about this network, so they stay at the
               use site.
 
-              Deliberately NOT networks.lan.gateway, even though on ac-box the
+              Deliberately NOT networks.lan.gateway, even though on both hosts the
               two are the same box at the same address. The consumers --
               unpoller and udr_fw_exporter.py -- speak the UniFi controller
               API; neither cares what the default route is. Surveyed live
@@ -244,7 +244,7 @@ in
               A topology fact, not a share: resources.nix needs it to build a
               correct AllowedCPUs fence, because Linux does NOT enumerate
               logical CPUs core-by-core on an SMT machine. It enumerates every
-              first thread first, then every sibling -- so on ac-box (56
+              first thread first, then every sibling -- so on llm-box (56
               threads, 2 per core) CPUs 0-27 are the 28 PHYSICAL cores and
               28-55 are their siblings, one per core.
 
@@ -318,7 +318,7 @@ in
       description = ''
         GPU vendor driver to enable, or null for none. Consumed by
         modules/platform/boot.nix to gate hardware.graphics / hardware.nvidia.
-        Only "nvidia" exists today because that's the only value ac-box sets;
+        Only "nvidia" exists today because that's the only value llm-box sets;
         extend the enum when a second vendor shows up rather than widening it
         to a bare string speculatively.
       '';

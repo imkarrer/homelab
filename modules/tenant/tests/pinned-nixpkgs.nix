@@ -11,7 +11,7 @@
 #      ports.nix still *rejects* fixtures/collision.nix, that resources.nix
 #      still fires the 0.9 memoryShare budget assertion, and that a
 #      `forwarded` claim without a justification is still refused.
-#      `nix flake check` cannot cover any of it: the real ac-box config has
+#      `nix flake check` cannot cover any of it: the real host configs have
 #      no collision and no overrun to reject, so it proves only that a good
 #      config passes. .buildkite/pipeline.yml runs this set as its own named
 #      gate for exactly that reason.

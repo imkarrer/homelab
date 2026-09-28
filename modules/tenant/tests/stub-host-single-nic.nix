@@ -2,7 +2,7 @@
 # network -- no `mgmt` attribute at all, not one with a null address. That is
 # arcade-box's real shape (hosts/arcade-box/host.nix: the M920q has one wired
 # port), and it is a different case from stub-host.nix's "mgmt declared,
-# address null" (ac-box's eno1): before homelab-ygc.3, ports.nix read
+# address null" (llm-box's eno1): before homelab-ygc.3, ports.nix read
 # networks.mgmt.interface unconditionally and a host without the attribute
 # failed evaluation with "attribute 'mgmt' missing" -- an error naming no
 # option and no tenant. tests/eval.nix's singleNicNoMgmt case swaps this in

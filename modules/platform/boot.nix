@@ -13,18 +13,18 @@
 # "infinite recursion encountered ... if you reference config in imports").
 # ac-host's own configuration.nix sidesteps this by hardcoding the import at
 # its own top level, next to the file. The same thing lives in this repo's
-# per-host composition, hosts/ac-box/configuration.nix, which already knows its
+# per-host composition, hosts/<name>/configuration.nix, which already knows its
 # own host name and imports
-#   hosts/ac-box/hardware-configuration.nix   (fetched read-only, TRACKED)
+#   hosts/<name>/hardware-configuration.nix   (fetched read-only, TRACKED)
 # — tracked, not gitignored, because a flake copies only git-tracked files into
 # the store; see .gitignore's NOTE. It does NOT fall back to
-# hosts/ac-box/hardware-configuration.nix.example the way ac-host's does: that
+# hosts/<name>/hardware-configuration.nix.example the way ac-host's does: that
 # fallback is silent, and a silent substitution of a stub that will not boot a
 # real machine is what gate 1 caught. A missing hardware file throws there.
 #
 # hardware.graphics / hardware.nvidia are gated on homelab.host.gpu rather
 # than left unconditional, so a future non-nvidia host doesn't inherit a
-# driver stack it doesn't have. For ac-box, gpu = "nvidia", so the effective
+# driver stack it doesn't have. For llm-box, gpu = "nvidia", so the effective
 # config is identical to what configuration.nix sets unconditionally today.
 { config, lib, pkgs, ... }:
 

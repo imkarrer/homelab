@@ -20,7 +20,8 @@
 # ---------------------------------------------------------------------------
 # TWO HOSTS (26 Sep 2026, homelab-ygc.4)
 # ---------------------------------------------------------------------------
-# flake.nix declares ac-box and arcade-box, and after the cutover
+# flake.nix declares arcade-box and llm-box (the Z840, ac-box until
+# homelab-ygc.9 renamed it), and since the cutover
 # (docs/runbook-arcade-box-cutover.md, phase 4) every tenant but agent-hub
 # lives on arcade-box. Everything above is therefore PER HOST, and the host
 # list is never typed here (scripts/lib/hosts.sh reads the flake's
@@ -40,20 +41,30 @@
 #                       the same reason). The address in git follows the
 #                       machines through the cutover (D2), so the pull does too.
 #   to where            /home/nixos/backup/<host>/<the host's absolute path>.
-#                       ac-box's tree is exactly where it has been since 14 Sep
-#                       2026 -- docs/runbook-restore.md and every restic
-#                       snapshot name that layout -- and arcade-box's is a
-#                       sibling, so /var/lib/arcade from each host is a
-#                       different directory here, as it should be.
+#                       Each host's tree is a sibling named for it, so
+#                       /var/lib/arcade from each host is a different
+#                       directory here, as it should be -- and a RENAME starts
+#                       a new tree. The Z840's pulls land in llm-box/ from the
+#                       first run after homelab-ygc.9; ac-box/, its tree from
+#                       14 Sep 2026 to the rename, is never written again and
+#                       is deleted by hand (docs/runbook-llm-box-rename.md
+#                       7.6). This script removes no staging tree.
 #   restic              one snapshot per host, `--host <host> --tag <host>`,
-#                       which is byte-for-byte the call ac-box always got and
-#                       gives each host its own forget group (restic groups by
-#                       host and paths), so ac-box's history runs on unbroken
-#                       and arcade-box's ages out on its own 7/4/6.
+#                       which gives each host its own forget group (restic
+#                       groups by host and paths), each aging out on its own
+#                       7/4/6. A rename splits a host's history the same way:
+#                       the Z840's snapshots are host `ac-box` until
+#                       homelab-ygc.9 and `llm-box` after it, a new group
+#                       whose first run pulls everything (deduplicated
+#                       against the old chunks). A group that stops growing is
+#                       NEVER pruned by the nightly forget -- 7/4/6 keeps the
+#                       newest days, weeks and months that have snapshots,
+#                       however old -- so `ac-box`'s is forgotten by hand on a
+#                       date (that runbook, 4.3 and 9.3).
 #   failure             a host that is down or whose pull breaks fails ITS
 #                       snapshot and the run's verdict (LAST_RESULT names it),
 #                       but not the other host's snapshot -- arcade-box being
-#                       off for a night must not cost ac-box's copy. The
+#                       off for a night must not cost llm-box's copy. The
 #                       status file carries a RESULT_<host> line per host.
 #
 # ---------------------------------------------------------------------------
@@ -328,8 +339,8 @@ write_status() {
   # $1 ok|failed  $2 detail. LAST_SUCCESS is carried forward from the previous
   # file on a failure: "when did this last WORK" is the question hub-status.sh
   # asks, and a failed run must not be able to answer it with today's date.
-  # "Work" means every host: a night that snapshotted ac-box and lost
-  # arcade-box is a failure here and an ok on its RESULT_ac-box line.
+  # "Work" means every host: a night that snapshotted llm-box and lost
+  # arcade-box is a failure here and an ok on its RESULT_llm-box line.
   local state="$1" detail="$2" prev_ts prev_epoch prev_snap prev_n tmp h snaps="" added=""
   prev_ts=$(grep '^LAST_SUCCESS=' "$STATUS" 2>/dev/null | cut -d= -f2-)
   prev_epoch=$(grep '^LAST_SUCCESS_EPOCH=' "$STATUS" 2>/dev/null | cut -d= -f2-)
@@ -380,7 +391,7 @@ die() { say "FAILED: $*"; [ "$RUNNING" = 1 ] && write_status failed "$*"; exit 1
 
 HOSTS=$(hub_hosts "$ROOT") || {
   say "cannot discover the hosts: nix eval of $ROOT#nixosConfigurations failed"
-  say "(scripts/hub-gates.sh homelab says why; HOMELAB_HOSTS=\"ac-box arcade-box\" names them by hand)"
+  say "(scripts/hub-gates.sh homelab says why; HOMELAB_HOSTS=\"arcade-box llm-box\" names them by hand)"
   exit 2
 }
 
@@ -451,7 +462,7 @@ say "read (sha256 $(printf '%s' "$RESTIC_PASSWORD" | sha256sum | cut -c1-8), nev
 
 step "tools"
 # restic comes from nixpkgs on demand, like every other tool a hub script uses;
-# nothing is installed and nothing here is part of ac-box's closure, so README's
+# nothing is installed and nothing here is part of a host's closure, so README's
 # "nixpkgs is owned here" (the host channel, nixos-26.05) is not in play -- this
 # resolves through the running user's flake registry, which for root is the
 # unstable channel. The repo FORMAT is what has to stay readable, not this

@@ -120,7 +120,7 @@ let
 
   # A host may have no mgmt network AT ALL -- arcade-box (hosts/arcade-box/
   # host.nix) has one wired port and declares only `lan`. That is a different
-  # fact from ac-box's "mgmt declared, address null" (eno1, no carrier), and
+  # fact from llm-box's "mgmt declared, address null" (eno1, no carrier), and
   # until 26 Sep 2026 (homelab-ygc.3) this file could not tell them apart:
   # `netCfg.mgmt.interface` below was read unconditionally, so a single-NIC
   # host failed evaluation with "attribute 'mgmt' missing" -- an error that

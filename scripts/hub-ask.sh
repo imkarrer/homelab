@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Ask agent-hub's model server (llama-swap over ik_llama.cpp on ac-box,
+# Ask agent-hub's model server (llama-swap over ik_llama.cpp on llm-box,
 # OpenAI-compatible) one question, with a prompt budget enforced BEFORE the
 # request is sent.
 #
@@ -68,7 +68,7 @@ done
 # llama-swap's /health is a bare "OK"; a llama-server's is {"status":"ok"}.
 H=$(curl -s -m 5 "$LLM/health" 2>/dev/null)
 [ "$H" = OK ] || [ "$(jq -r .status <<<"$H" 2>/dev/null)" = ok ] \
-  || { echo "agent-hub-llm not healthy at $LLM (ssh ac-box 'systemctl status agent-hub-llm')" >&2; exit 4; }
+  || { echo "agent-hub-llm not healthy at $LLM (ssh llm-box 'systemctl status agent-hub-llm')" >&2; exit 4; }
 curl -s -m 5 "$LLM/v1/models" | jq -e --arg m "$MODEL" '.data[] | select(.id == $m)' >/dev/null \
   || { echo "no model '$MODEL' behind $LLM; it lists: $(curl -s -m 5 "$LLM/v1/models" | jq -r '[.data[].id] | join(", ")')" >&2; exit 4; }
 

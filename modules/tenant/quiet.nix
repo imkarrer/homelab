@@ -9,7 +9,7 @@
 # host-options.nix now declares it, that's still an L0 fact, not part of the
 # tenant contract, and this module has no business reaching across layers for
 # it. boxctl takes the maintenance window as its own parameter (default
-# matches hosts/ac-box/host.nix's current "03:00") instead of round-tripping
+# matches hosts/llm-box/host.nix's current "03:00") instead of round-tripping
 # it through this file.
 { config, lib, ... }:
 

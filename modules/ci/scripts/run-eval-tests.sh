@@ -8,7 +8,7 @@
 # `expected` map, ran one `nix eval` per case and compared "did it throw?"
 # against the map -- and .buildkite/pipeline.yml ran it as its own named
 # step, because `nix flake check` on the host config alone cannot prove a
-# colliding fixture is still rejected (ac-box has no collision to reject).
+# colliding fixture is still rejected (neither host has a collision to reject).
 # The harnesses are flake checks now (modules/tenant/tests/check.nix, which
 # also owns the eval*.nix discovery this script used to do with `find`), so
 # the pipeline's `nix flake check -L` step covers all of them and the
@@ -43,7 +43,7 @@ nix_flags=(--extra-experimental-features "nix-command flakes")
 # --impure only for currentSystem; nothing below reads the environment.
 system=$(nix "${nix_flags[@]}" eval --impure --raw --expr builtins.currentSystem)
 
-# The eval-* checks only. checks.<system>.ac-box is the full system
+# The eval-* checks only. checks.<system>.<host> is a host's full system
 # toplevel, minutes rather than seconds, and not this script's job.
 mapfile -t checks < <(nix "${nix_flags[@]}" eval --raw ".#checks.${system}" --apply '
   c: builtins.concatStringsSep "\n" (builtins.filter (n: builtins.substring 0 5 n == "eval-") (builtins.attrNames c))

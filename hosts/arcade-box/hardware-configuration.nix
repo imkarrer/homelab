@@ -4,7 +4,7 @@
 # 2026-09-26 (as the installer's `arcade` login, over the operator's key).
 # Never invented, never hand-edited: re-fetch from the box if it drifts.
 #
-# TRACKED in git, deliberately, like hosts/ac-box's: a flake copies only
+# TRACKED in git, deliberately, like hosts/llm-box's: a flake copies only
 # git-tracked files into the store, and hosts/arcade-box/configuration.nix
 # throws rather than substitute a stub. Disk UUIDs are not secrets.
 #

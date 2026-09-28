@@ -1,7 +1,7 @@
-"""boxctl -- read-only inspector for the ac-box homelab tenant contract.
+"""boxctl -- read-only inspector for a homelab host's tenant contract.
 
 HARD GUARANTEE: boxctl never applies a configuration, restarts a unit, or
-otherwise changes ac-box's running state. There is no subcommand and no flag
+otherwise changes a host's running state. There is no subcommand and no flag
 that invokes `switch-to-configuration switch`, `switch-to-configuration
 boot`, `switch-to-configuration test`, or any `nixos-rebuild` action other
 than a read-only build of the closure. The only activation-related
@@ -29,7 +29,7 @@ from typing import Any, Optional
 
 DEFAULT_TENANTS_FILE = "/etc/homelab/tenants.json"
 
-# hosts/ac-box/host.nix: homelab.host.maintenance.window. quiet.nix
+# hosts/<name>/host.nix: homelab.host.maintenance.window. quiet.nix
 # deliberately does not embed this in tenants.json -- it's an L0 (host) fact,
 # not part of the tenant schema (README.md: "L1 knows only the schema") --
 # so boxctl carries its own default and lets a human override it with
@@ -355,7 +355,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument(
         "--flake-attr",
         help="flake installable to `nix build` (read-only) for the toplevel, "
-        "e.g. .#nixosConfigurations.ac-box.config.system.build.toplevel",
+        "e.g. .#nixosConfigurations.<host>.config.system.build.toplevel",
     )
     plan.add_argument(
         "--dry-activate-output",
@@ -368,7 +368,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--maintenance-window",
         default=DEFAULT_MAINTENANCE_WINDOW,
         help=f"reported in the decision line only (default: {DEFAULT_MAINTENANCE_WINDOW}, "
-        "matching hosts/ac-box/host.nix)",
+        "matching both hosts' host.nix)",
     )
     plan.add_argument(
         "--no-busy-check",

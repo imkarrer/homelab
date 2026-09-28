@@ -44,7 +44,7 @@ let
   stubNetwork = ./stub-network.nix;
   stubDocker = ./stub-docker.nix;
   hostOptions = ../../platform/host-options.nix;
-  hostFacts = ../../../hosts/ac-box/host.nix;
+  hostFacts = ../../../hosts/llm-box/host.nix;
   floxModule = ../../platform/flox.nix;
   schema = ../../tenant/schema.nix;
   enforce = ../../tenant/enforce.nix;

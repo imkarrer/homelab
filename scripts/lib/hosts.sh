@@ -3,8 +3,9 @@
 #   . "$(dirname "$0")/lib/hosts.sh"
 #   HOSTS=$(hub_hosts "$HUB") || exit 2
 #
-# Since 26 Sep 2026 (homelab-ygc.4) flake.nix declares two hosts, ac-box and
-# arcade-box, and after the cutover (docs/runbook-arcade-box-cutover.md,
+# Since 26 Sep 2026 (homelab-ygc.4) flake.nix declares two hosts, arcade-box
+# and the Z840 -- llm-box, ac-box until homelab-ygc.9 renamed it -- and
+# after the cutover (docs/runbook-arcade-box-cutover.md,
 # phase 4) the state hub-status.sh reports on and hub-backup.sh pulls is
 # split between them: every tenant but agent-hub on arcade-box. Neither
 # script may carry its own list of hosts. flake.nix's nixosConfigurations IS
@@ -15,20 +16,22 @@
 # hub_hosts <tree> prints the hosts, space-separated. First match wins:
 #   HOMELAB_BOX=<host>      one host -- the narrowing hub-status.sh and
 #                           hub-deploy.sh honoured before there were two, and
-#                           still the way to ask about one. HOMELAB_BOX=ac-box
-#                           is exactly the pre-26-Sep behaviour of every script.
+#                           still the way to ask about one. HOMELAB_BOX=llm-box
+#                           is the Z840 alone -- what every script did before
+#                           26 Sep, under its old name ac-box.
 #   HOMELAB_HOSTS="a b"     an explicit list, in this order. A host the flake
 #                           does not declare fails where it is used, not here.
 #   the flake               the attribute names of <tree>#nixosConfigurations,
-#                           ~0.05 s warm, alphabetical -- ac-box first today by
-#                           the alphabet, which is also the order the operator
-#                           reads them in.
+#                           ~0.05 s warm, alphabetical -- arcade-box, then
+#                           llm-box.
 # Non-zero when the flake will not evaluate; the caller says what that means
-# for it (hub-status.sh reports one host and a verdict, hub-backup.sh stops).
+# for it (hub-status.sh walks the directories under hosts/ and says so,
+# hub-backup.sh stops).
 #
 # The ssh alias for a host IS its attribute name, and so is what the machine
-# calls itself: ~/.ssh/config carries both aliases (ac-box -> 192.168.1.51 since
-# the cutover, .50 before it;
+# calls itself: ~/.ssh/config carries both aliases (llm-box -> 192.168.1.51,
+# the Z840's address since the cutover -- .50 before it -- and its name since
+# homelab-ygc.9, when the alias ac-box gave way to it;
 # arcade-box -> 192.168.1.50, .218 during the build-up), and networking.hostName
 # is homelab.host.name, which modules/platform/identity.nix ties to
 # hosts/<name>/. Reading homelab.host.name out of the flake to confirm that
