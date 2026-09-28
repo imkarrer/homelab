@@ -957,8 +957,12 @@ Expected: `would activate the configuration...` and no unit under `would
 stop`, `would restart`, `would reload` or `would start`. *Refreshed:* nor a
 `would NOT stop` or `NOT restarting` line for `agent-hub-llm.service` --
 ygc.15's unit change is already live (7.0), and P3 measured the switch's
-whole unit delta as `homelab-deploy.service`, an inactive oneshot. Anything
-else is a stop (section 8).
+whole unit delta as `homelab-deploy.service`, an inactive oneshot. One line
+is expected and is not a stop: `would reload the following units:
+dbus-broker.service`. Every stamped switch makes it -- dbus's
+`X-Restart-Triggers` follow `system.path`, which carries the revision
+stamp -- and it was the only line on 28 Sep (section 10). Anything else is a
+stop (section 8).
 
 ```bash
 ssh llm-box "nixos-rebuild switch --flake github:imkarrer/homelab/$SHA#llm-box"; echo "exit $?"
@@ -967,7 +971,10 @@ ssh llm-box 'hostnamectl --static; cat /proc/sys/kernel/hostname; nixos-version 
 curl -s -m 10 http://192.168.1.51:8100/running
 ```
 
-Expected: `exit 0`; `llm-box`, then `ac-box` (the kernel's, until 7.5);
+Expected: `exit 0`; `llm-box`, then `ac-box` (the kernel's, until 7.5 --
+on 28 Sep it already read `llm-box`: NetworkManager applied the new static
+hostname at the switch; the initrd still carried the old one until the
+reboot);
 `$SHA`; `0`; `active` four times; `/running` answers as before -- the switch
 restarted nothing. `hub-status.sh` now shows llm-box's closure `CLEAN` and a
 reboot owed (the initrd differs), plus the hostname verdict.
@@ -1138,7 +1145,8 @@ Stop -- not judge -- at any of these:
 - **7.3**: the pushed sha's build is not green, arcade-box's `homelab-deploy`
   fails or has not applied it, or it restarts anything but
   `prometheus.service`. 7.4 names a sha CI has built, or does not run.
-- **7.4 dry-activate** lists a unit under stop, restart, reload or start.
+- **7.4 dry-activate** lists a unit under stop, restart, reload or start --
+  except `dbus-broker.service` under reload, which is the revision stamp (7.4).
 - **7.4 switch** exits non-zero, `systemctl --failed` is non-empty, or `ssh
   llm-box` stops answering.
 - **7.5**: the Z840 does not answer ssh within 10 minutes of the reboot
@@ -1268,3 +1276,11 @@ where it differed from the expected._
 | 28 Sep, worker | P3 | `main` `ac-box` `36m0m21k…` against branch `llm-box` `8ryp4kg4…`: `etc-hostname` (`ac-box` -> `llm-box`), `string-hosts` (`127.0.0.2 ac-box` -> `llm-box`), `homelab-deploy` (`host=ac-box` -> `host=llm-box`) and so `unit-homelab-deploy.service`, `system-units`, `hosts`, `etc`, `activate`; `initrd-hostname` and so `initrd-linux-6.18.48`, `boot.json`. Four changed values, all the name; nothing else. `47f5616`'s stripped `ac-box` is `36m0m21k…` too, so this is the Z840's whole switch |
 | 28 Sep, worker | P4 | `main` `0kb3qih8…` against branch `lsnqfkwj…`: `prometheus.rules` (`node_load5{host="ac-box"} > 56` -> `llm-box`), `rules-checkrules-checked`, `prometheus.yml` (the two `192.168.1.51` targets' `host` label, `ac-box` -> `llm-box`, read from `services.prometheus.scrapeConfigs` on both sides), `prometheus.yml-checkconfig-checked`, `unit-prometheus.service`, `system-units`, `etc`, `activate`. No derivation named for `ac-host`, `docker` or `ac-host-ci` |
 | 28 Sep, worker | P5 | `===== GATES PASS - safe to push =====`; the gate ran `nix flake check --no-build --accept-flake-config` (all checks evaluate: `arcade-box`, `llm-box` and the nine harnesses) |
+| 28 Sep, reviewer + supervisor | review | homelab-reviewer on `main..wt/homelab-ygc.9`: **land after fixes** -- every proof reproduced (P1's digest, P3/P4's exact diffs); fixes applied in `1a17f76` (AGENTS.md keeps arcade-box's hand switch for a broken path unit; section 8 made exact; `modules/platform/tests/eval-identity.nix`, mutation-tested against the old `[]` fallback). Placeholders filled with `3ba3f05` and 28 Sep 2026 in `72ec27a` |
+| 28 Sep 13:28, agent (operator's say-so) | 7.1 | `Host llm-box` added above `Host ac-box` in `~/.ssh/config` (backup `config.bak-20260928T182850Z`); `ssh -o BatchMode=yes llm-box hostname` -> `ac-box`, no host-key prompt |
+| 28 Sep 13:56-13:57, supervisor | 7.3 | `1a17f76` fast-forwarded to `main` (PR #23); build 192 green 13:57:25; arcade-box `homelab-deploy` applied it 13:57:51, `prometheus.service` restarted then, nothing else, `systemctl --failed` empty, lobbies and sidecars untouched. Targets: `agent-hub 192.168.1.51:8100 llm-box up`, `node 192.168.1.51:9100 llm-box up`; `HostLoadHigh`: `node_load5{host="arcade-box"} > 6`, `node_load5{host="llm-box"} > 56` |
+| 28 Sep 13:59, agent | 7.4 | bead-loop `cpu` and `gpu` lanes paused (both idle, queues empty). `dry-activate` of `1a17f76#llm-box`: `would activate the configuration...` and `would reload the following units: dbus-broker.service` -- the revision stamp's reload, which the abort list then counted as a stop. Stopped and asked; the operator said proceed |
+| 28 Sep ~16:52, agent | 7.4 | `switch` exit 0 (generation 129): `reloading ... dbus-broker.service`, no unit stopped or restarted. `hostnamectl --static` `llm-box`, kernel hostname **already `llm-box`** (NetworkManager applied it; the runbook expected `ac-box` until the reboot); rev `1a17f76`; `0` failed; `agent-hub-llm nginx qdrant prometheus-node-exporter` active; `/running` answered with `coder` ready |
+| 28 Sep 16:53-16:55, agent | 7.5 | `systemctl reboot` at 16:53:25; previous boot ended 16:53:43, new boot 16:54:45, ssh answered 16:55:07 (1 min 42 s). Static and kernel hostname `llm-box`; booted == current (`ndzgqp8p…`); `0` failed; four units active; poll timer next at 16:59:43; `/running` `[]`; `utility` answered `ok`; `node_uname_info` `nodename="llm-box"`. `hub-status.sh`: llm-box `CLEAN`, no `booted` line, `agent-hub env: staged 9a55c11 / applied 9a55c11`; no verdict for either host. Lanes resumed 16:55:33 |
+| 28 Sep 16:55, agent (operator's say-so) | 7.5 | `Host ac-box` removed (backup `config.bak-20260928T215553Z`); `ssh -G ac-box` -> `hostname ac-box`. `known_hosts`: `.49` and `.218` removed with `ssh-keygen -R`, the stray `# 192.168.1.51:22` banner line deleted; `.50` and `.51` kept |
+| 28 Sep 16:57, agent | 7.5 | The `/etc/nixos` tombstone `sed` on llm-box and 7.6's `sudo systemctl start hub-backup.service` were **refused by the agent harness** (remote/privileged writes). Both are the operator's; 7.6 also happens by itself at the 04:30 CDT run |
