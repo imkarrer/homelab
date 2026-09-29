@@ -1,38 +1,43 @@
 # Runbook: the CI cache leaves MinIO for Garage (ADR 0013)
 
-**Status: drafted 28 Sep 2026, nothing executed.** Every fact below was read
-on 28 Sep 2026 between 13:35 and 14:15 CDT, read-only: over `ssh arcade-box`
-(`192.168.1.50`) and `ssh ac-box` (the Z840, `192.168.1.51` -- llm-box since
-homelab `1a17f76`, which arcade-box took at 13:57; the Z840's own switch to
-the rename is `docs/runbook-llm-box-rename.md` 7.4), from the WSL trees at
-the shas section 3 names, and from a WSL prototype of the pinned Garage with
-the agent's own Nix (ADR 0013, the table under Context). Nothing on either
-host was changed to produce it; everything the prototype started was stopped.
+**Status: drafted 28 Sep 2026; revised 29 Sep for the review and the
+operator's decisions, with ADR 0013 Accepted; nothing executed.** Every fact
+below was read read-only, on 28 Sep 2026 between 13:35 and 14:15 CDT unless
+its row says 29 Sep (07:45-08:30 CDT): over `ssh arcade-box`
+(`192.168.1.50`) and `ssh ac-box` (the Z840, `192.168.1.51`; `ssh llm-box`
+since its switch to homelab `1a17f76` on 28 Sep,
+`docs/runbook-llm-box-rename.md` 7.4), through Buildkite's REST API (the
+hub's token, GETs only) and `gh api`, from the WSL trees at the shas
+section 3 names, and from a WSL prototype of the pinned Garage with the
+agent's own Nix (ADR 0013, the table under Context). Nothing on either host
+was changed to produce it; everything the prototype started was stopped.
 
 ADR 0013 is the why; this is the how. What changes: the cache's server
 (MinIO, a container in `ac-host`'s CI compose project, becomes
 `garage.service` on arcade-box), its name (`minio:9000` becomes
 `flox-binary-cache:3900` to write and `flox-binary-cache:3902` to read), its
-readers (llm-box joins arcade-box), its rank among substituters (priority 0
-by accident becomes 50 on purpose) and its write credential (fresh). What
-does not: the bucket's name and every object in it (the 42 paths that exist
-nowhere else among them), the signing keys and what trusts them
-(`flox-binary-cache-1` and `-2`), the plugin, what any pipeline does, the
-agent's container and HAZARD 2, and the racing tenant -- no step touches a
-lobby, `ac-host-static` or `docker.service`, so none needs the window.
+readers (llm-box joins arcade-box, and trusts the signing keys with it),
+its rank among substituters (priority 0
+by accident becomes 10 on purpose: still asked first, because only a cache
+asked last can fail a build by being unreachable) and its write credential
+(fresh). What does not: the bucket's name and every object in it (the 42
+paths that exist nowhere else among them), the signing keys
+(`flox-binary-cache-1` and `-2`), the plugin, what any pipeline does,
+the agent's container and HAZARD 2, and the racing tenant -- no step touches
+a lobby, `ac-host-static` or `docker.service`, so none needs the window.
 
 ---
 
-## 1. What is known (28 Sep 2026)
+## 1. What is known (28 Sep 2026; the rows that say so, 29 Sep)
 
 | | |
 | --- | --- |
-| MinIO | `ac-host-ci-minio-1`, image `homelab/minio:nixpkgs` since this morning's restart, published on `127.0.0.1:9000/9001` only. Volume `ac-host-ci_minio-data` 3.7 G. Bucket `flox-binary-cache`: 1,197 narinfo objects, 1,161 NARs, `nix-cache-info` = `StoreDir: /nix/store` alone. Anonymous GET, and anonymous LIST: a GET of the bucket returned a 357,585-byte listing. Still written: two narinfos at 09:09 CDT today |
+| MinIO | `ac-host-ci-minio-1`, image `homelab/minio:nixpkgs` since the restart of 28 Sep (container created 04:29:46), published on `127.0.0.1:9000/9001` only. Volume `ac-host-ci_minio-data` 3.7 G. Bucket `flox-binary-cache`: 1,197 narinfo objects, 1,161 NARs, `nix-cache-info` = `StoreDir: /nix/store` alone. Anonymous GET, and anonymous LIST: a GET of the bucket returned a 357,585-byte listing. Still written: two narinfos at 09:09 CDT on 28 Sep |
 | Paths nowhere else | 42 (the bead). The one that matters: `/nix/store/qn6qpywlzv0mi1d80kgk4s3cm8acnr76-llama-cpp-3bb386e` (agent-hub `9a55c11`'s lock): 404 on cache.nixos.org and cache.flox.dev; in MinIO (FileSize 20,030,784, NarSize 162,045,832, `Sig: flox-binary-cache-2`); present in the Z840's store |
 | Priorities, as root's Nix recorded them | arcade-box `binary-cache-v7.sqlite`: cache.nixos.org 40, cache.flox.dev 41, `http://127.0.0.1:9000/flox-binary-cache` **0**. The Z840: the same three (MinIO's from 26 Sep 02:20, before the cutover) and `s3://flox-binary-cache` 0 (18 Sep, the native-CI experiment) |
-| arcade-box `nix.conf` | `substituters = https://cache.nixos.org/ https://cache.flox.dev http://127.0.0.1:9000/flox-binary-cache`, both `flox-binary-cache` keys trusted; `connect-timeout = 15`, `require-sigs = true`, `narinfo-cache-negative-ttl = 3600` |
-| The Z840 `nix.conf` | `substituters = https://cache.nixos.org/ https://cache.flox.dev`; neither `flox-binary-cache` key; same three settings. `curl http://192.168.1.50:3902/` from it times out |
-| `ac-host-ci` | active (exited) since 04:29:49. Its restart at 04:24:10 ran `down` (the agent, MinIO and the network removed 04:24:11-15), loaded both images, rebuilt the agent image from the plugin's `#main` (04:24:21-04:29:41), then created all three (04:29:46): every restart recreates the agent and its bridge |
+| arcade-box `nix.conf` | `substituters = https://cache.nixos.org/ https://cache.flox.dev http://127.0.0.1:9000/flox-binary-cache`, both `flox-binary-cache` keys trusted. In effect (`nix config show`, 29 Sep): Nix 2.34.8, `fallback = false`, `connect-timeout = 15`, `download-attempts = 5`, `require-sigs = true`, `narinfo-cache-negative-ttl = 3600`; all but `require-sigs` are Nix's defaults, absent from `nix.conf` |
+| The Z840 `nix.conf` | `substituters = https://cache.nixos.org/ https://cache.flox.dev`; neither `flox-binary-cache` key; the same settings in effect (29 Sep). `curl http://192.168.1.50:3902/` from it times out |
+| `ac-host-ci` | active (exited) since 04:29:49. Its restart at 04:24:10 ran `down` (the agent, MinIO and the network removed 04:24:11-15), loaded both images (04:24:17-19), rebuilt the agent image from the plugin's `#main` (04:24:19-04:29:46), then created all three (04:29:46-49): every restart recreates the agent and its bridge, not only what changed (`journalctl -u ac-host-ci`, re-read 29 Sep) |
 | The compose network | `ac-host-ci_default`, bridge `br-d12f03aec340`, `172.19.0.0/16`, created 04:29:46. No interface `br-ac-host-ci`. `docker0` is `172.17.0.1/16` -- `host-gateway` |
 | Firewall | iptables (nf_tables). `nixos-fw`: `lo`, established, `22` on every interface, then only the registry's `-i eno2` rules; nothing for any bridge. The nat table's `DOCKER` chain: MinIO's two DNATs (`-d 127.0.0.1/32 … 9000`, `… 9001`) and nothing else. `FORWARD` jumps to `DOCKER-USER`, `DOCKER-FORWARD` |
 | Ports | nothing bound on 3900-3999 |
@@ -41,8 +46,11 @@ lobby, `ac-host-static` or `docker.service`, so none needs the window.
 | Registry | arcade-box's system `nixpkgs` is the pin's source (`vin7xkms…`), so `nix run nixpkgs#rclone` there is rclone 1.75.0 |
 | Disk | arcade-box `/`: 938 G, 70 G used |
 | The agent | idle at 13:40 (no `buildkite-agent bootstrap`). Its argv carries `--token` and its environment every secret compose passes it: see 3.6 |
-| The tenant tree | `/var/lib/ac-host/src` is a synced copy, not a git checkout: the DOWNTIME build (`ci_downtime.py` 48-65) syncs `pending-src` into it at 03:00. `pending-deploy.json` = ac-host `4da4918`, staged 14:18Z for the 29 Sep 03:00 apply |
-| Deployed | arcade-box on homelab `1a17f76` (13:57:51 CDT); the Z840 on `47f5616` (hand-switched 09:04) |
+| The tenant tree | `/var/lib/ac-host/src` is a synced copy, not a git checkout: the DOWNTIME build (`ci_downtime.py` 48-65) syncs `pending-src` into it at 03:00. 29 Sep: `last-applied.json` = ac-host `4da4918` (applied 08:00:14Z); `pending-deploy.json` = `9163f75` (staged 12:54:31Z, for the 30 Sep 03:00 apply) |
+| Deployed | 28 Sep: arcade-box on homelab `1a17f76` (13:57:51 CDT), the Z840 on `47f5616` (hand-switched 09:04). 29 Sep: arcade-box on `f41f61c`, llm-box on `1a17f76` |
+| Pipeline objects (29 Sep) | Eight in the agent's cluster (`9c1e5f56-…`): `ac-host`, `ac-host-ops`, `agent-hub`, `home-arcade`, `homelab`, `bead-loop`, `inquire-platform`, `flox-buildkite-plugin`. `provider.settings.build_pull_request_forks` is `false` on all eight. Their repositories are public but `inquire-platform`'s. The hub's token has `read_pipelines` now (`hub-pipeline.sh --token-check`), though `hub-pipeline.sh` itself has no pipeline read |
+| Who pushes to the cache | every repository whose steps use the plugin, with the agent's default `S3_CACHE_PUSH=true`: `ac-host`, `agent-hub`, `home-arcade`, `bead-loop`, `inquire-platform`, `flox-buildkite-plugin`. Not `homelab`: its jobs carry no plugin (build 196, 29 Sep), so its builds read the cache and write nothing |
+| Branches still naming `minio:9000` (29 Sep) | `ac-host` `ci-cache-probe`, `ci-smoke`; `agent-hub` `claude/work-your-beads-74e362`, `coder-two-slots` (`git ls-remote`; each branch's `.buildkite/pipeline.yml` through `gh api`). `home-arcade` has `main` alone |
 
 ---
 
@@ -59,9 +67,10 @@ build arg -- all inert until the switch. The switch is then three lines of
 homelab's `ci-env`, and so is its revert.
 
 **D2. Garage comes up beside MinIO in one homelab push (H1), with both
-readers configured.** Nothing writes to it; arcade-box asks it last, behind
-MinIO; the Z840 not until its own hand switch (4.8), after the copy is
-proven.
+readers configured.** Nothing writes to it; arcade-box asks it second --
+after MinIO's priority 0, before the public caches -- where an empty Garage
+costs one loopback 404 a lookup; llm-box not until its own hand switch
+(4.8), after the copy is proven.
 
 **D3. Three restarts of `ac-host-ci`, each a verbatim step from ssh.** Each is
 preceded by the busy check and by `docker compose … config --quiet`, the
@@ -73,15 +82,16 @@ sha is recorded before each.
 (`docker stop`), not because it happens to be idle.
 
 **D5. No hand switch of arcade-box, even to roll back.** AGENTS.md keeps that
-for a broken path unit. If a failing push stops CI from staging a revert, the
-record is staged by hand and `homelab-deploy` applies it with its busy check
-and its gates (section 5).
+for a broken path unit. If CI cannot stage a revert, the record is staged by
+hand, under section 5's conditions, and `homelab-deploy` applies it with its
+busy check and its gates.
 
 **D6. The operator adds the three keys on H1's branch before it merges.**
 The toplevel's sops manifest check, which CI builds and the local gate does
 not, needs them.
 
-**D7. MinIO stays a week after the switch, receiving nothing, then leaves.**
+**D7. MinIO stays after the switch, receiving nothing, for 6.1's week, then
+leaves, and its volume with it (6.2).**
 
 ---
 
@@ -89,7 +99,7 @@ not, needs them.
 
 Line numbers are at the shas named; each worker re-reads its own.
 
-### 3.1 ac-host (`4da4918`)
+### 3.1 ac-host (`9163f75`; these files as at `4da4918`)
 
 **A1, the preparation** (one commit, no effect until restart 1):
 
@@ -107,6 +117,11 @@ Line numbers are at the shas named; each worker re-reads its own.
     store; from the switch on those two variables carry the Garage key,
     which MinIO must never see or store.
   - the header (1-5) and 146-149 say where the cache is.
+  - 320-328, the agent's recreate paragraph: a swap of MinIO's image does
+    not leave the agent running once the swap is live, because
+    `systemctl restart ac-host-ci` runs `down` first and recreates every
+    container (the journal of 28 Sep, section 1) -- the same correction H1
+    makes to homelab's HAZARD 2.
 - `.buildkite/pipeline.yml` 10-15 (the `env:` block) and 4-5,
   `.buildkite/ops.yml` 11-16, `.buildkite/series.yml` 8-13: delete. Each
   block is the five `S3_CACHE_*` values compose already gives the agent
@@ -117,19 +132,19 @@ Line numbers are at the shas named; each worker re-reads its own.
 - `compose/docker-compose.buildkite.yml`: the `minio` and `minio-init`
   services (158-204), the agent's `depends_on` (232-234), `minio-data`
   (354); the defaults at 220 and 295 become `http://flox-binary-cache:3900`;
-  the comments at 159-172, 187-189, 320-328 and 345.
+  the comments at 159-172, 187-189 and 345.
 - `compose/minio-init.sh`: delete.
 - `compose/env.buildkite.example` 23-31: the MinIO block becomes the Garage
   key's two variables and the endpoint.
 - `docs/ci-cd.md` 87-103 and 130-150: the cache's section;
   `scripts/ci_containerize.sh` 20 (a comment).
 
-### 3.2 agent-hub (`9a55c11`)
+### 3.2 agent-hub (`9badb07`)
 
-- `.buildkite/pipeline.yml` 37-42: the `env:` block, delete; 19 ("the MinIO
-  cache") names the CI cache.
+- `.buildkite/pipeline.yml` 41-46: the `env:` block, delete; 22-23 ("the
+  MinIO cache") names the CI cache.
 
-### 3.3 home-arcade (`71b34a0`)
+### 3.3 home-arcade (`76b651d`)
 
 - `.buildkite/pipeline.yml` 13-16: delete `s3-cache-bucket`,
   `s3-cache-endpoint`, `s3-cache-region`, `s3-cache-public-key` from the
@@ -137,7 +152,7 @@ Line numbers are at the shas named; each worker re-reads its own.
   list at 16 names `-1` alone). Keep `s3-cache-push` (17, and `false` at
   68): per-step intent. The comments at 27 and 60 say MinIO.
 
-### 3.4 homelab (`1a17f76`)
+### 3.4 homelab (`f41f61c`, the same lines as at `1a17f76`)
 
 **H1, Garage beside MinIO:**
 
@@ -146,14 +161,16 @@ Line numbers are at the shas named; each worker re-reads its own.
     pkgs.garage_2`, `environmentFile = cfg.cache.envFile`,
     `extraEnvironment.GARAGE_DEFAULT_BUCKET = cfg.cacheBucket`;
     `systemd.services.garage.serviceConfig.ExecStart = lib.mkForce
-    "${pkgs.garage_2}/bin/garage server --single-node --default-bucket"`.
+    "${config.services.garage.package}/bin/garage server --single-node
+    --default-bucket"` -- the package the module runs, never a second
+    `pkgs.garage_2` beside it.
   - `ci-cache-init.service`: oneshot, `RemainAfterExit`, `after` and
     `requires` `garage.service`, `partOf` it, `wantedBy` it and
     `multi-user.target`, `EnvironmentFile` the same env file, `path` curl
     and the garage package. Its script: wait for `127.0.0.1:3900` to answer
     (bounded, then fail); `garage bucket website --allow flox-binary-cache`;
     PUT `nix-cache-info` -- a `pkgs.writeText` of `StoreDir: /nix/store` and
-    `Priority: 50` -- with `curl --fail --aws-sigv4 aws:amz:us-east-1:s3 -K
+    `Priority: 10` -- with `curl --fail --aws-sigv4 aws:amz:us-east-1:s3 -K
     <(printf 'user = "%s:%s"\n' …)` (credentials on a file descriptor, never
     argv) and `-H 'Content-Type: text/x-nix-cache-info'`; then GET it back
     through `http://127.0.0.1:3902` with `Host: flox-binary-cache` and `cmp`
@@ -163,11 +180,21 @@ Line numbers are at the shas named; each worker re-reads its own.
     ac-host's compose sets, the same coupling `projectName` (582-593) already
     is, with node-exporter.nix's kind of comment.
   - options `homelab.ci.cache.{envFile,bridge}`; imports the reader half.
-  - the comment at 688-702: the order is Priority's, not `mkOrder`'s.
+  - the substituter's comment (688-704), 698-702 above all: `Priority`, not
+    `mkOrder`, orders the list, and an unreachable cache is harmless only
+    when it is not last (ADR 0013 decision 5). `trusted-public-keys` (707)
+    leaves this half for the reader's, which sets the two keys once;
+    otherwise `nix.conf` lists them twice. MinIO's substituter (706) stays
+    until H3.
+  - HAZARD 2 (120-128) and IMAGES (197-205): a restart runs `down` first
+    and recreates the agent (section 1, the journal of 28 Sep); what compose
+    alone spares on a changed image, `systemctl restart ac-host-ci` does
+    not.
   - untouched: `systemd.services.ac-host-ci` (732-785). H1 must not change
     the agent's unit (4.4, P8).
 - `modules/ci/cache-reader.nix` (new, importable alone): the cache's name,
-  ports and the two public keys, defined once; option
+  ports and the two public keys, defined once (native mode's
+  `S3_CACHE_PUBLIC_KEY`, 847, reads them from here); option
   `homelab.ci.cache.readFrom` (a host name, or null for none). It sets
   `nix.settings.substituters = lib.mkOrder 1700 [
   "http://flox-binary-cache:3902" ]`, the two trusted keys, and
@@ -178,10 +205,13 @@ Line numbers are at the shas named; each worker re-reads its own.
   comment at 605-607; `units` (645-651) gains `garage.service` and
   `ci-cache-init.service`, unconditionally; `ports` (653-664) gains
   `garage-s3` 3900 `local`, `garage-rpc` 3901 `local`, `garage-web` 3902
-  `lan` (the `minio-*` claims stay until H3); a new `state = { dirs = [
-  "/var/lib/ci" "/var/lib/private/garage" ]; backup = false; }`, in that
-  order (ADR 0013 decision 8); `secrets` (668-674) gains `garage-rpc-secret`,
-  `garage-s3-key-id`, `garage-s3-secret-key` and loses
+  `lan` (the `minio-*` claims stay until H3), `garage-s3` with a comment
+  the way `alertmanager-mesh` has one (520-523): `local` here means "not
+  reachable off the host", and `modules/ci` opens it on `br-ac-host-ci` for
+  the agent -- ADR 0013 decision 2's named exception, not a scope; a new
+  `state = { dirs = [ "/var/lib/ci" "/var/lib/private/garage" ]; backup =
+  false; }`, in that order (ADR 0013 decision 8); `secrets` (668-674) gains
+  `garage-rpc-secret`, `garage-s3-key-id`, `garage-s3-secret-key` and loses
   `s3-cache-access-key-id`, which sops never had.
 - `hosts/arcade-box/configuration.nix`: `homelab.ci.cache.readFrom =
   "arcade-box";` beside `homelab.ci.enable` (69); the comments at 57 and 235
@@ -209,15 +239,30 @@ Line numbers are at the shas named; each worker re-reads its own.
   bucket `flox-binary-cache` in Garage on the host that runs `ci`, written
   over S3 on 3900 by the agent, read anonymously over HTTP on 3902; _Avoid_:
   MinIO, the S3 cache.
+- `modules/observability/default.nix`, beside `PracticeLobbiesFailed`
+  (537-543), the failed-unit alert the operator asked for now (6.4):
+  `CiCacheFailed`, `for: 5m`, `severity: warning`, its summary naming the
+  unit and saying that llm-box's pulls read the cache, on
+
+  ```
+  node_systemd_unit_state{name=~"garage.service|ci-cache-init.service",state="failed"} == 1
+  ```
+
+  The series is scraped and kept already (the `node` job's keep regex,
+  86); nixpkgs' `garage.service` sets no `Restart=`, so a crash stays
+  `failed`; `ci-cache-init.service` failing means 3902 did not serve
+  `nix-cache-info` back.
 - The harness (`modules/ci/tests/eval.nix` and its fixtures), a case each
   that rejects: the S3 port at any scope but `local`, or the web port at any
   but `lan`; 3900 in a global `allowedTCPPorts` or on the LAN interface; a
-  `services.garage.package` below version 2; a `readFrom` that is neither
-  this host nor one of its peers; `nix-cache-info` without `Priority: 50`;
-  `ExecStart` without `--single-node --default-bucket`; `garage.service` or
+  `services.garage.package` below version 2; an `ExecStart` without
+  `--single-node --default-bucket`, or not from `services.garage.package`;
+  a `readFrom` that is neither this host nor one of its peers;
+  `nix-cache-info` without `Priority: 10`; `garage.service` or
   `ci-cache-init.service` outside `batch.slice`.
-- `docs/architecture.md`: a delta row for this bead (44 today), and the two
-  diagrams' "buildkite agent · minio" (199, 344) and 292.
+- `docs/architecture.md`: a delta row for this bead (44 today; row 42,
+  `homelab-ygc.11`, is closed already), and the two diagrams' "buildkite
+  agent · minio" (199, 344) and 292.
 
 **H2, the switch** (4.7): `modules/platform/secrets.nix`, `ci-env` (462-482):
 a new line `S3_CACHE_ENDPOINT=http://flox-binary-cache:3900`;
@@ -233,7 +278,9 @@ a new line `S3_CACHE_ENDPOINT=http://flox-binary-cache:3900`;
   MinIO substituter (706); `--remove-orphans` on `ExecStart` and `ExecStop`
   (769, 775), so the restart removes the containers compose no longer
   declares; `ac-host-ci` `after`/`wants` `ci-cache-init.service`; the
-  header's IMAGES (157-237), the MinIO lines of VOLUMES and CREDENTIALS.
+  header's IMAGES (157-237), the MinIO lines of VOLUMES and CREDENTIALS,
+  and HAZARD 1's MinIO steps (67-72, 85-88, 93-97: the ports and the
+  volumes a second adoption would check).
 - `modules/platform/secrets.nix`: `minio-root-password` and
   `s3-cache-secret-access-key` (276-277); `ci-env`'s `MINIO_ROOT_USER` and
   `MINIO_ROOT_PASSWORD` (469-470); the comments at 245-274 and 410-439.
@@ -246,8 +293,8 @@ a new line `S3_CACHE_ENDPOINT=http://flox-binary-cache:3900`;
   nothing); arcade-box takes it with H3's switch, llm-box at its next hand
   switch. Not in H1, whose llm-box switch (4.8) should change nothing but
   `nix-daemon`.
-- `.buildkite/pipeline.yml` 7; `docs/architecture.md` row 42 (440) closed
-  and 454; `docs/current-state.md` 83-85, 138, 159, 187, 320, 327.
+- `.buildkite/pipeline.yml` 7; `docs/architecture.md` the row H1 adds (44),
+  closed, and 454; `docs/current-state.md` 83-89, 138, 159, 187, 320, 327.
 
 **Not here: native mode's MinIO** (`modules/ci/default.nix` 264-426 and
 788-911, `hub/ci/minio-init.sh`, `.flox/env/manifest.toml` 55-58 and 85-86,
@@ -272,8 +319,11 @@ section 5 renames it; `scripts/hub-secret-set.sh` writes whichever it names.
 
 ### 3.6 What never to print
 
-The 28 Sep leak came through a `docker inspect` of the agent. Nothing in
-this runbook runs, and nobody executing it runs:
+The 28 Sep leak came through a `docker inspect` of the agent: what entered
+the transcript was `AWS_SECRET_ACCESS_KEY` (= `s3-cache-secret-access-key`);
+a scan of the transcript by name and length found no other secret, the
+signing key included. Nothing in this runbook runs, and nobody executing it
+runs:
 
 - `docker inspect ac-host-ci-agent-1` -- its `Config.Env` holds every secret
   compose passes it;
@@ -281,8 +331,9 @@ this runbook runs, and nobody executing it runs:
   agent's argv carries `--token` (the busy check below prints a count);
 - `docker compose … config` without `--quiet` -- it prints the interpolated
   environment;
-- `cat` of anything under `/run/secrets`, `systemctl show -p Environment`
-  of `ac-host-ci`, `garage key info --show-secret`.
+- `cat` of anything under `/run/secrets` to the terminal (4.6 reads them
+  into variables), `systemctl show -p Environment` of `ac-host-ci`,
+  `garage key info --show-secret`.
 
 A step that needs a secret reads it into a variable on the box and passes the
 variable's name (`docker exec -e VAR`) or a file descriptor (`curl -K`),
@@ -295,7 +346,7 @@ never a command line.
 | ac-host (A1, the three pipelines, A3) | CI; `queue-prod` stages the tree; the 03:00 DOWNTIME build applies it. A compose change is on disk after that and live at the next restart of `ac-host-ci`, never before | push any day; the restarts are this runbook's |
 | agent-hub | CI; within ~10 minutes llm-box's poll stages the sha and the pull restarts `agent-hub-llm` -- every new sha, this one too | push while bead-loop's lanes are idle, or pause them |
 | home-arcade | CI; manifest and lock unchanged, so the push step stages the live generation again and bounces nothing | any time |
-| homelab H1 | CI; arcade-box's `homelab-deploy` switches within a minute (deferring while anyone races): `garage` and `ci-cache-init` start, `nix-daemon` restarts (`nix.conf` is its restart trigger), the firewall reloads. llm-box only by 4.8 | 4.4 |
+| homelab H1 | CI; arcade-box's `homelab-deploy` switches within a minute (deferring while anyone races): `garage` and `ci-cache-init` start, `nix-daemon` restarts (`nix.conf` is its restart trigger), `prometheus` restarts (its `--config.file` names the new rule; observability, bounced freely), the firewall reloads. llm-box only by 4.8 | 4.4 |
 | homelab H2 | arcade-box switches; `ci-env` re-renders; nothing restarts -- `ac-host-ci` has no `restartUnits` and `restartIfChanged = false` | 4.7, then restart 2 the same session |
 | homelab H3 | arcade-box switches; `nix-daemon` restarts; `ac-host-ci`'s new unit waits for restart 3 | 4.9 |
 
@@ -303,7 +354,8 @@ never a command line.
 
 ## 4. Order: the phases, each with its proof
 
-Who: **operator** (the secret store, the go/no-go of section 6); **agent**
+Who: **operator** (the secret store, the old branches of 4.7(0), and every
+step 4.10 or section 5 puts on the operator's word); **agent**
 (read-only checks, and the box steps below, verbatim, under AGENTS.md's
 migration exception -- the sha on origin, a stop at section 5); **worker** (a
 commit in a worktree, its proofs in the handoff); **supervisor** (merge, push,
@@ -315,10 +367,26 @@ commit in a worktree, its proofs in the handoff); **supervisor** (merge, push,
    arcade-box; every tree's main green.
 2. The rename has reached the Z840 before 4.8:
    `ssh llm-box 'hostname; nixos-version --configuration-revision'` prints
-   `llm-box` and a sha at or after `1a17f76`. Until the operator's `Host
-   llm-box` exists (`docs/runbook-llm-box-rename.md` 7.1), read `ssh ac-box`
-   for `ssh llm-box` in 4.4 and 4.6.
+   `llm-box` and a sha at or after `1a17f76` (29 Sep: `llm-box`, `1a17f76`).
+   Run it again at the start of 4.8 and record the sha in section 7: it is
+   what 4.8's rollback switches back to (section 5).
 3. Everyone executing has read 3.6.
+4. Every pipeline object on the agent refuses builds from forks. Every job
+   there holds `S3_CACHE_SIGNING_KEY`; arcade-box trusts what it signs, and
+   llm-box will from 4.8 (ADR 0013, Consequences); six of the seven
+   repositories are public. Read-only, the token on stdin, never in argv:
+
+   ```bash
+   ( cd /home/nixos/src/homelab && . scripts/lib/buildkite-token.sh && TOKEN=$(buildkite_token) || exit 2
+     printf 'Authorization: Bearer %s\n' "$TOKEN" |
+       curl -sS -H @- 'https://api.buildkite.com/v2/organizations/isaac-karrer/pipelines?per_page=100' |
+       nix shell nixpkgs#jq -c jq -r '.[] | "\(.slug) forks=\(.provider.settings.build_pull_request_forks) cluster=\(.cluster_id)"' )
+   ```
+
+   Expected: section 1's eight slugs, each `forks=false`, each in cluster
+   `9c1e5f56-22de-42cf-aa00-4b91d5583922` (`scripts/lib/buildkite-cluster.sh`).
+   Record the output in section 7. Anything `forks=true`, or a slug section 1
+   does not list: stop, for the operator.
 
 ### 4.1 The pipelines stop naming the cache -- workers, supervisor
 
@@ -401,6 +469,7 @@ nix eval --raw "$W#nixosConfigurations.arcade-box.config.services.garage.package
 nix eval --json "$W#nixosConfigurations.arcade-box.config.networking.firewall.interfaces"      # P6
 nix eval --json "$W#nixosConfigurations.arcade-box.config.nix.settings.substituters"           # P7
 for t in "$M" "$W"; do nix eval --raw "$t#nixosConfigurations.arcade-box.config.systemd.units.\"ac-host-ci.service\".unit.drvPath"; echo; done   # P8
+for h in arcade-box llm-box; do nix eval --json "$W#nixosConfigurations.$h.config.nix.settings.trusted-public-keys"; echo; done   # P9
 ```
 
 Expected:
@@ -413,7 +482,8 @@ Expected:
   (one substituter, the keys unchanged), `unit-nix-daemon.service` (its
   restart trigger), `hosts`, the firewall's scripts (3902 on `eno2`, 3900
   on `br-ac-host-ci`), the sops manifest (three secrets, one template), the
-  inventory (`/etc/homelab/tenants.json`), `system-units`, `etc`,
+  inventory (`/etc/homelab/tenants.json`), Prometheus's rules and config
+  and `unit-prometheus.service` (the new alert), `system-units`, `etc`,
   `activate`. Nothing named for `ac-host-static`, `docker` or `ac-host-ci`.
 - **P3** llm-box differs in `nix.conf` (the substituter and both keys),
   `unit-nix-daemon.service`, `hosts`, and what depends on them; nothing
@@ -425,6 +495,9 @@ Expected:
 - **P7** both `http://127.0.0.1:9000/flox-binary-cache` and
   `http://flox-binary-cache:3902`.
 - **P8** the same drvPath twice: H1 leaves the agent's unit alone.
+- **P9** each host's list holds `flox-binary-cache-1:…` and
+  `flox-binary-cache-2:…` once each: the reader half sets them, and
+  nothing else does.
 - 4.3's proof passes on this branch.
 
 **After the push** -- arcade-box switches by itself:
@@ -439,7 +512,8 @@ ssh arcade-box 'systemctl is-active garage ci-cache-init ac-host-ci
   ss -tlnpH | grep -E ":390[0-2] " | awk "{print \$4}"
   iptables -S nixos-fw | grep -E "dport 390[0-2]"
   getent hosts flox-binary-cache; grep -E "^substituters" /etc/nix/nix.conf
-  curl -s http://flox-binary-cache:3902/nix-cache-info'
+  curl -s http://flox-binary-cache:3902/nix-cache-info
+  curl -s http://127.0.0.1:9090/api/v1/rules | grep -o "\"name\":\"CiCacheFailed\"" | head -1'
 curl -s -m 5 -H 'Host: flox-binary-cache' http://192.168.1.50:3902/nix-cache-info            # from WSL, over the LAN
 ssh llm-box 'curl -s -m 5 -o /dev/null -w "%{http_code}\n" http://192.168.1.50:3900/'
 ```
@@ -453,8 +527,9 @@ exited oneshot); `Slice=batch.slice`, `Nice=19`, `DynamicUser=yes`;
 nixos-fw-accept` and `-A nixos-fw -i eno2 -p tcp -m tcp --dport 3902 -j
 nixos-fw-accept`; `127.0.0.1` with `flox-binary-cache` among its names; the
 substituter list with MinIO's URL and Garage's; `StoreDir: /nix/store` and
-`Priority: 50`, from arcade-box and from WSL alike; and `000` from llm-box:
-the S3 API is not on the LAN.
+`Priority: 10`; `"name":"CiCacheFailed"`; the same two lines of
+`nix-cache-info` from WSL; and `000` from llm-box: the S3 API is not on the
+LAN.
 
 ### 4.5 Restart 1: the agent onto the named bridge, still on MinIO -- agent, verbatim
 
@@ -510,9 +585,10 @@ EOF
 ```
 
 Expected: the sync finishes; `0 differences found`; the two sizes equal,
-objects and bytes (~3.6 GiB); `nix-cache-info` still says `Priority: 50`.
+objects and bytes (~3.6 GiB); `nix-cache-info` still says `Priority: 10`.
 `--exclude /nix-cache-info` is not optional: MinIO's copy has no
-`Priority`, and a reader that read it would record 0.
+`Priority`, and a reader that read it would record 0, not the file in git,
+and keep that in its disk cache.
 
 **(b) Written from inside the agent, with the Garage key** -- the agent's
 own Nix, its own network path, its own signing key; the key passed by name:
@@ -567,6 +643,26 @@ ssh llm-box 'set -eu; for p in '"$P1"' /nix/store/qn6qpywlzv0mi1d80kgk4s3cm8acnr
 Expected: two `OK` lines, each signed `flox-binary-cache-2` (or `-1`).
 
 ### 4.7 The switch (H2, the final copy, restart 2) -- worker, supervisor, agent
+
+**(0) The old branches first** -- operator. No `minio` alias survives the
+switch (ADR 0013 decision 3): a branch cut before 4.1 still says
+`http://minio:9000`, so its next push fails once the agent holds the Garage
+key (MinIO refuses it) and for good after 4.9. Each is rebased onto a main
+that has 4.1, or closed, before (b):
+
+```bash
+for r in ac-host agent-hub home-arcade; do
+  git ls-remote --heads "https://github.com/imkarrer/$r" | sed 's#.*refs/heads/##' | grep -vx main |
+    while read -r b; do
+      printf '%s %s %s\n' "$r" "$b" "$(gh api -H 'Accept: application/vnd.github.raw' \
+        "repos/imkarrer/$r/contents/.buildkite/pipeline.yml?ref=$b" | grep -c 'minio:9000')"
+    done
+done
+```
+
+Expected: no line ending in anything but `0`. On 29 Sep it printed
+`ac-host ci-cache-probe 2`, `ac-host ci-smoke 2`, `agent-hub
+claude/work-your-beads-74e362 1` and `agent-hub coder-two-slots 1`.
 
 **(a) H2** (3.4). Proofs before the push: P1; P2's recipe for arcade-box
 names the `ci-env` template's inputs and `activate`, and no unit file; P3's
@@ -635,11 +731,12 @@ Expected: `0`.
 
 ### 4.8 llm-box reads -- agent, verbatim
 
-Needs 4.6(d), 4.7(d) and 4.0's second precondition. Nothing restarts the
-model server here, so bead-loop's lanes run on. `SHA` is the full sha of
-origin's main, which carries H1 and H2.
+Needs 4.6(d), 4.7(d) and 4.0's second and fourth preconditions. Nothing
+restarts the model server here, so bead-loop's lanes run on. `SHA` is the
+full sha of origin's main, which carries H1 and H2.
 
 ```bash
+ssh llm-box 'hostname; nixos-version --configuration-revision'     # 4.0.2 again: record the sha, the rollback target
 SHA=<full sha>
 ssh llm-box "nixos-rebuild dry-activate --flake github:imkarrer/homelab/$SHA#llm-box" 2>&1 | tail -15
 ```
@@ -656,7 +753,8 @@ ssh llm-box 'grep -E "^substituters" /etc/nix/nix.conf; grep -c flox-binary-cach
   systemctl is-active agent-hub-llm nginx qdrant; systemctl --failed --no-legend | wc -l'
 ```
 
-Expected: `exit 0`; the substituters end with `http://flox-binary-cache:3902`;
+Expected: `exit 0`; the substituters end with `http://flox-binary-cache:3902`
+(the line's order is `mkOrder`'s; Nix asks it first, for its `Priority: 10`);
 `1`; `192.168.1.50 flox-binary-cache`; the two lines of `nix-cache-info`;
 `copying path '…' from 'http://flox-binary-cache:3902'` and `P2` signed
 `flox-binary-cache-2`; `active` three times; `0`. The proof that matters
@@ -693,7 +791,8 @@ completes.
 
 ### 4.10 The volume, the images, the retired keys -- agent, operator
 
-On the operator's word (6.2):
+The day of 4.9, as the operator decided (6.2), and on the operator's word
+that 4.9 is done:
 
 ```bash
 ssh arcade-box 'docker image rm homelab/minio:nixpkgs homelab/minio-client:nixpkgs'
@@ -719,14 +818,14 @@ encrypted file.
 - Close `homelab-ygc.20` after 4.10.
 - New beads: native mode's MinIO (3.4's "Not here"; the native agent's
   cache is the same `garage.service`, at `http://flox-binary-cache:3900` on
-  loopback); Garage's metrics in observability, if 6.4 says so; private
-  trees' pushes, if 6.3 says so; `modules/deploy/default.nix` 195's comment,
-  which assumes the closure is pushed to the cache (it never is: the bead's
-  fact 5).
+  loopback); Garage's metrics in observability (6.4);
+  `modules/deploy/default.nix` 195's comment, which assumes the closure is
+  pushed to the cache (it never is: the bead's fact 5).
 - `bd` memory `flox-environment-deploy-edge`: "MinIO is no substituter on
-  the Z840" becomes "llm-box reads the CI cache from arcade-box, priority
-  50".
-- `docs/architecture.md` rows 42 and the new one closed.
+  the Z840" becomes "llm-box reads the CI cache from arcade-box, Priority
+  10, asked first".
+- `docs/architecture.md`: the row H1 adds (44) closed. Row 42
+  (`homelab-ygc.11`) was closed on 29 Sep.
 
 ---
 
@@ -734,15 +833,17 @@ encrypted file.
 
 Stop -- not judge -- at any of these:
 
+- **4.0**: a pipeline object `forks=true`, or a slug section 1 does not
+  list.
 - **4.1**: a pushing step logs `no S3 cache configured`, or its push fails.
 - **4.2**: the rendered config lacks the bridge or the host line, or shows
   an endpoint other than `http://minio:9000`.
 - **4.3**: a length other than 64, 26, 64, or an id not starting `GK`.
 - **4.4, before the push**: P2 or P3 names a derivation outside its list;
-  P8's two drvPaths differ; anything in P2 named for `ac-host-static`,
-  `docker` or `ac-host-ci`.
+  P8's two drvPaths differ; P9 lists a key twice; anything in P2 named for
+  `ac-host-static`, `docker` or `ac-host-ci`.
 - **4.4, after**: `homelab-deploy` refuses or fails; `garage` or
-  `ci-cache-init` not active; `nix-cache-info` without `Priority: 50`; any
+  `ci-cache-init` not active; `nix-cache-info` without `Priority: 10`; any
   HTTP code from 3900 at llm-box; nothing from 3902 at WSL; `ac-host-ci`'s
   timestamp moved.
 - **4.5**: before, the agent busy (wait), `CONFIG-OK` missing, or the bridge
@@ -765,24 +866,43 @@ Rollback, by how far it got:
   no-ops.
 - **After 4.4** (Garage beside MinIO; nothing writes it). Revert H1 and push
   -- CI is healthy, the agent still writes to MinIO. The switch stops and
-  removes both units, the rules and the substituter. `/var/lib/private/garage`
-  stays (ADR 0003) until removed by hand, if the ADR is abandoned.
-- **After 4.5** (the agent on the named bridge). Nothing to undo: it still
-  writes to MinIO. If the agent does not come back -- which also means no CI
-  and no DOWNTIME build to deliver a revert of A1 -- put the previous compose
-  file back and restart, then land A1's revert the same session, so that the
-  next 03:00 apply agrees with the file on disk (the one hand edit in this
-  ladder):
+  removes both units, the rules and the substituter. H1 carries `Priority:
+  10` so that a dead Garage cannot block `homelab-deploy`'s build of this
+  revert: asked before the public caches, its error is cleared when they
+  are asked (ADR 0013 decision 5); asked last, it would fail the build.
+  `/var/lib/private/garage` stays (ADR 0003) until removed by hand, if the
+  ADR is abandoned.
+- **After 4.5** (the agent on the named bridge). Nothing to undo while the
+  agent is back: it still writes to MinIO. If it does not come back within
+  10 minutes, that is 4.5's abort, where AGENTS.md has the agent stop, so
+  everything below is on the operator's word. No agent also means no CI and
+  no DOWNTIME build to deliver a revert of A1. Read the restart's journal
+  first (`journalctl -u ac-host-ci --since <the restart>`): if `Image
+  ac-host-buildkite-agent:flox` never reached `Built`, the plugin's `#main`
+  failed to build, the compose file is not the cause, and a second restart
+  fails the same way -- stop. Only when the journal shows compose rejecting
+  the file: push A1's revert to origin, then put the file from that revert
+  on disk and restart, so that the next 03:00 apply agrees with the file on
+  disk (one of two hand writes in this ladder; the other is 4.7's staged
+  record):
 
   ```bash
-  git -C /home/nixos/src/ac-host show <A1's parent>:compose/docker-compose.buildkite.yml \
+  git -C /home/nixos/src/ac-host fetch origin
+  git -C /home/nixos/src/ac-host show <A1's revert, full sha, on origin>:compose/docker-compose.buildkite.yml \
     | ssh arcade-box 'f=/var/lib/ac-host/src/compose/docker-compose.buildkite.yml; cat > "$f.tmp" && mv -f "$f.tmp" "$f" && systemctl restart ac-host-ci'
   ```
 
-- **After 4.7** (the switch). Revert H2 -- three lines -- and push. If the
-  revert's own build cannot go green because pushes fail, stage it by hand in
-  exactly the record `scripts/hub-queue-closure.sh` writes, and let
-  `homelab-deploy` apply it with its busy check and its gates (D5):
+- **After 4.7** (the switch). Revert H2 -- three lines -- and push.
+  homelab's own pipeline pushes nothing to the cache (section 1), so a
+  failing push elsewhere does not keep the revert's build from going green
+  and staging itself. Stage it by hand only if that build is red and its log
+  shows the cache as the only failure -- on homelab's pipeline, the flake
+  check stopped by the agent's Nix refusing a query to
+  `s3://flox-binary-cache` (ADR 0013 decision 5), never an error of the
+  revert's own -- and `hub-gates.sh homelab` is green on the revert. The
+  record is the one `scripts/hub-queue-closure.sh` writes, with `source`
+  `runbook` (the deploy reads only `.rev`), and `homelab-deploy` applies it
+  with its busy check and its gates (D5):
 
   ```bash
   REV=<the revert's full sha, on origin>
@@ -794,43 +914,57 @@ Rollback, by how far it got:
   Once `ci-env` is back -- `grep -c "^S3_CACHE_ENDPOINT=" /run/secrets/rendered/ci-env`
   prints `0` and `grep -o "^S3_CACHE_ACCESS_KEY_ID=flox-cache$"` finds the
   old id -- 4.5's checks and `systemctl restart ac-host-ci`: the agent writes
-  to MinIO again. What was
-  pushed to Garage in between is not in MinIO; each tree's next build pushes
-  it again. Garage keeps running; llm-box, if already switched, keeps
-  reading it.
-- **After 4.8.** `ssh llm-box nixos-rebuild switch --rollback`, minutes;
-  nothing on llm-box needs the reader until its next pull.
+  to MinIO again. What was pushed to Garage in between is not in MinIO;
+  each repository's next build pushes it again. Garage keeps running;
+  llm-box, if already switched, keeps reading it.
+- **After 4.8.** Back to the sha recorded at the start of 4.8 (4.0.2's
+  command), by the same edge llm-box always uses, minutes; nothing on
+  llm-box needs the reader until its next pull:
+
+  ```bash
+  ssh llm-box "nixos-rebuild switch --flake github:imkarrer/homelab/<the sha 4.0.2 printed>#llm-box"
+  ```
+
 - **After 4.9, before 4.10.** Revert A3 and H3 (the MinIO images come back
   -- a Go compile of `minio` in arcade-box's deploy, a few minutes, since
   Hydra builds no insecure-marked package), restart: MinIO returns on its
   volume, without what went to Garage since T2.
 - **After 4.10.** None to MinIO, by design. If Garage's data is ever lost,
-  CI regrows it, and the unique paths return with their trees' next builds.
+  CI regrows it, and the unique paths return with their repositories' next
+  builds.
 
 ---
 
-## 6. Open decisions -- the operator's, each with a recommendation
+## 6. The operator's decisions (28-29 Sep 2026)
 
-**6.1 MinIO's week.** Recommend seven days after 4.7(d), and at least one
-green push from each tree that pushes (ac-host, agent-hub, home-arcade,
-homelab, bead-loop, inquire-platform) landed in Garage. The leaked secret
-stays valid on MinIO that long -- over loopback and the compose bridge, and
-it cannot sign.
+Each was open in the draft of 28 Sep, with a recommendation; the operator
+took all four on review. The design's own calls are ADR 0013's.
 
-**6.2 The volume.** Recommend deleting it in 4.10, the day of 4.9. Once
-MinIO's container is gone the volume is a cold copy whose IAM store keeps
-the leaked secret and the root password in the clear
-(`modules/platform/secrets.nix` 412-420), and a rollback to MinIO after a
-week of Garage is not one anybody will want.
+**6.1 MinIO's week.** Seven days after 4.7(d), and at least one green push
+landed in Garage from each repository whose pipeline pushes: `ac-host`,
+`agent-hub`, `home-arcade`, `bead-loop`, `inquire-platform`,
+`flox-buildkite-plugin` (section 1; `homelab`'s pushes nothing). The leaked
+secret stays valid on MinIO that long -- over loopback and the compose
+bridge, and it cannot sign.
 
-**6.3 Private trees in a LAN-readable cache.** Recommend accepting it: no
-listing, and a store hash is 160 bits a reader must already know (ADR 0013,
-Consequences). The alternative is `S3_CACHE_PUSH: "false"` in
-inquire-platform's pipeline: its cold CI starts refill from the public
-caches, and nothing on either host substitutes its paths anyway.
+**6.2 The volume.** Deleted in 4.10, the day of 4.9. Once MinIO's container
+is gone the volume is a cold copy whose IAM store keeps the leaked secret
+and the root password in the clear (`modules/platform/secrets.nix`
+412-420), and a rollback to MinIO after a week of Garage is not one anybody
+will want.
 
-**6.4 Garage's metrics.** Recommend a bead after 4.9: an admin bind on
-loopback, a metrics token in sops, a scrape job in observability.
+**6.3 Private repositories in a LAN-readable cache.** Accepted:
+`inquire-platform` keeps pushing, and no pipeline gains
+`S3_CACHE_PUSH: "false"`. There is no listing, but a store hash opens a
+closure, not a path -- each narinfo's `References` names its dependencies --
+and what `inquire-platform` pushes (at `1f1c9a9`) is catalog packages plus
+its manifest text: two non-secret variables and an `on-activate` hook (ADR
+0013, Consequences).
+
+**6.4 Garage's metrics.** A bead after 4.9: an admin bind on loopback, a
+metrics token in sops, a scrape job in observability. Not deferred with
+them: a failed-unit alert on `garage.service`, which is H1's (3.4), because
+llm-box depends on the cache from 4.8.
 
 ---
 
