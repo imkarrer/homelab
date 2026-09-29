@@ -409,12 +409,13 @@ cfg=$(env -i PATH="$PATH" HOME="$HOME" NIX_CONFIG="extra-experimental-features =
   BUILDKITE_AGENT_TOKEN=x S3_CACHE_ACCESS_KEY_ID=x S3_CACHE_SECRET_ACCESS_KEY=x \
   S3_CACHE_SIGNING_KEY=x MINIO_ROOT_USER=x MINIO_ROOT_PASSWORD=x \
   nix run nixpkgs#docker-compose -- -f docker-compose.buildkite.yml -p ac-host-ci config)
-printf '%s\n' "$cfg" | grep -E 'br-ac-host-ci|flox-binary-cache:host-gateway|S3_CACHE_ENDPOINT'
+printf '%s\n' "$cfg" | grep -E 'br-ac-host-ci|flox-binary-cache[:=]host-gateway|S3_CACHE_ENDPOINT'
 printf '%s\n' "$cfg" | grep -c S3_CACHE_SECRET_ACCESS_KEY
 ```
 
 Expected: the bridge name under `networks.default.driver_opts`, the
-`extra_hosts` line, and `S3_CACHE_ENDPOINT: http://minio:9000` twice (the
+`extra_hosts` line (docker-compose 5.4.0 renders it as
+`- flox-binary-cache=host-gateway`; the compose file spells it with `:`), and `S3_CACHE_ENDPOINT: http://minio:9000` twice (the
 build arg and the agent's environment): unchanged. Then `0`: only
 `minio-init` was ever given that variable (the agent gets it as
 `AWS_SECRET_ACCESS_KEY`), and it no longer is.
