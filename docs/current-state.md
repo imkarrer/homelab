@@ -80,14 +80,14 @@ hand switches its only kind. Every unit named in this paragraph except
   rename (section 5), the strip of the moved state from the Z840's disk
   (section 6), the other trees' docs (7.10) and the tracker (7.11). In
   anything older, "ac-box" means the Z840 (CONTEXT.md).
-- **MinIO's restart** (`homelab-ygc.11`): `minio/minio` and `minio/mc` are
-  gone from every public registry, so `modules/ci` now builds
-  `homelab/minio:nixpkgs` and `homelab/minio-client:nixpkgs` from homelab's
-  nixpkgs pin and `docker load`s them at every start of `ac-host-ci.service`;
-  the `ac-host` compose file names those tags. The running containers still
-  carry the `docker save | docker load`ed 2025-09-07 copies until a
-  deliberate `systemctl restart ac-host-ci` from ssh with the agent idle,
-  once both halves are on the box.
+- ~~**MinIO's restart**~~ (`homelab-ygc.11`) **Done 28 Sep, 04:24–04:29
+  CDT.** `minio/minio` and `minio/mc` left every public registry, so
+  `modules/ci` builds `homelab/minio:nixpkgs` and its client image from
+  homelab's pin and `docker load`s both at every start of
+  `ac-host-ci.service`. The restart, from ssh with the agent idle, recreated
+  all three containers — MinIO on `homelab/minio:nixpkgs` (read 29 Sep).
+  Owed now is leaving MinIO: ADR 0013 (`homelab-ygc.20`,
+  `docs/runbook-ci-cache-garage.md`).
 - ~~**agent-hub's script defaults**~~ (`homelab-ygc.7`) **Landed 26 Sep,
   20:14 CDT** (27 Sep 01:14 UTC), agent-hub PR #7, fast-forwarded: `68f50f5`
   moved `vectors-smoke.sh`'s `LLM` and `QDRANT` and `compare.sh`'s second
@@ -135,7 +135,7 @@ Live from arcade-box, 26 Sep 2026 17:45 CDT, closure `ab21161`.
 | `arcade-freeciv`, `arcade-mindustry` | arcade | `interactive.slice`. 5556/tcp and 4555/udp (freeciv), 6567 tcp+udp and 20151/udp (Mindustry) live and declared. Generation 2 of `imkarrer/arcade`, run path `f6m1q3pd…` — the path the Z840 ran. |
 | `samba-smbd`, `samba-winbindd`, `rsync` | arcade | `interactive.slice`; 139/445/873 bound on `192.168.1.50` — the stations' mount and the two rsync stations followed the address, unchanged. |
 | observability, 8 units: `prometheus`, `grafana`, `alertmanager`, `cadvisor`, `unifi-poller`, `udr-fw-exporter`, `docker-name-exporter`, `prometheus-node-exporter` | observability | All `interactive.slice`. Grafana on `192.168.1.50:3000`; 9090, 9093, 9100, 9102, 9130–9132 on loopback; 9094 (alertmanager cluster) on the wildcard. Since `116c12e` the scrape config also carries the Z840 as a peer with `host=` on every target, and the host alerts are per machine: `HostDiskHigh`, `HostLoadHigh` (arcade-box > 6, llm-box > 56), `HostMemLow`, `NodeExporterDown`, `CadvisorDown`. |
-| `ac-host-ci.service` (active, exited) + `ac-host-ci-agent-1`, `ac-host-ci-minio-1` | ci | `batch.slice` (unit and both containers' `CgroupParent`), beside `nix-daemon`. Agent `arcade-box` on `queue=self`, `--spawn 1`; MinIO on 127.0.0.1:9000/9001 serving the copied `ac-host-ci_minio-data` (3.9 GB, 5,913 files; the cache bucket inside it 2,355 objects, 3.6 GiB). Image source since `homelab-ygc.11`: `homelab/minio:nixpkgs` and `homelab/minio-client:nixpkgs`, built by `modules/ci` from homelab's nixpkgs pin (`pkgs.minio` 2025-10-15T17-29-55Z, `pkgs.minio-client` 2025-08-13T08-35-41Z) and `docker load`ed by the unit's `ExecStartPre` at every start — no registry. The containers move onto them at the first deliberate restart after the switch; until then `ac-host-ci-minio-1` runs the loaded copy of `minio/minio:latest` (RELEASE.2025-09-07T16-13-09Z, id `14cea493d9a3`). |
+| `ac-host-ci.service` (active, exited) + `ac-host-ci-agent-1`, `ac-host-ci-minio-1` | ci | `batch.slice` (unit and both containers' `CgroupParent`), beside `nix-daemon`. Agent `arcade-box` on `queue=self`, `--spawn 1`; MinIO on 127.0.0.1:9000/9001 serving the copied `ac-host-ci_minio-data` (3.9 GB, 5,913 files; the cache bucket inside it 2,355 objects, 3.6 GiB). Image source since `homelab-ygc.11`: `homelab/minio:nixpkgs` and `homelab/minio-client:nixpkgs`, built by `modules/ci` from homelab's nixpkgs pin (`pkgs.minio` 2025-10-15T17-29-55Z, `pkgs.minio-client` 2025-08-13T08-35-41Z) and `docker load`ed by the unit's `ExecStartPre` at every start — no registry. The containers moved onto them at the restart of 28 Sep, 04:24–04:29 CDT, from ssh with the agent idle: `ac-host-ci-minio-1` runs `homelab/minio:nixpkgs`, created 04:29:46 (`docker ps`, 29 Sep). |
 
 ### llm-box — conforming
 
@@ -156,7 +156,7 @@ Live from the Z840, 26 Sep 2026 17:45 CDT, closure `ab21161`.
 | Item | Host | Gap |
 | --- | --- | --- |
 | The Z840's closure edge | llm-box | No CI agent, so nothing stages a closure on this host; every switch is an operator's, from a sha on origin. **Accepted** (ADR 0010; row 41). |
-| MinIO's images | arcade-box | Running from `docker save \| docker load` copies; the compose file's `image:` lines are not pullable (`homelab-ygc.11`). |
+| MinIO | arcade-box | Its images **settled 28 Sep** (`homelab-ygc.11`): since the restart at 04:24–04:29 CDT it runs `homelab/minio:nixpkgs`, built from the pin and loaded by the unit, not the `docker save \| docker load` copies. Still accepted rather than conforming: nixpkgs marks that `minio` insecure (abandoned upstream), acknowledged for the image alone; leaving it is ADR 0013 (`homelab-ygc.20`). |
 | ~~Commit statuses~~ | Buildkite | **Settled 26 Sep** — `homelab`'s published from 18:16 CDT and `agent-hub`'s from 20:05; the Z840's poll, the one unit that reads a status, staged from agent-hub's at 20:19. `home-arcade` unobserved: no push since 19 Sep (row 35). |
 
 ### Decommission
