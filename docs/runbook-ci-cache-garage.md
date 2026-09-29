@@ -327,7 +327,7 @@ runs:
 
 - `docker inspect ac-host-ci-agent-1` -- its `Config.Env` holds every secret
   compose passes it;
-- `docker top ac-host-ci-agent-1` bare, or with `-eo args` unfiltered -- the
+- `docker top ac-host-ci-agent-1` bare, or with `-eo pid,args` unfiltered -- the
   agent's argv carries `--token` (the busy check below prints a count);
 - `docker compose … config` without `--quiet` -- it prints the interpolated
   environment;
@@ -541,11 +541,14 @@ git ls-remote https://github.com/imkarrer/flox-buildkite-plugin refs/heads/main 
 ssh arcade-box 'cd /var/lib/ac-host/src/compose &&
   docker compose -f docker-compose.buildkite.yml -p ac-host-ci --env-file /run/secrets/rendered/ci-env config --quiet && echo CONFIG-OK
   ip link show br-ac-host-ci 2>&1 | head -1
-  docker top ac-host-ci-agent-1 -eo args | grep -c "[b]uildkite-agent bootstrap"'
+  docker top ac-host-ci-agent-1 -eo pid,args | awk "/[b]uildkite-agent start/{s++} /[b]uildkite-agent bootstrap/{b++} END{print \"start=\" s+0, \"bootstrap=\" b+0}"'
 ```
 
-Expected: `CONFIG-OK`; `Device "br-ac-host-ci" does not exist.`; `0` (idle
--- anything else, wait). Then:
+Expected: `CONFIG-OK`; `Device "br-ac-host-ci" does not exist.`;
+`start=` at least 1 and `bootstrap=0` (idle -- a `bootstrap` above 0 is a job
+running: wait; `start=0` means the check itself failed, since `docker top
+… -eo args` without `pid` exits 1 here and a count of it reads idle whatever
+the agent is doing). Then:
 
 ```bash
 ssh arcade-box 'systemctl restart ac-host-ci'      # ~6 minutes: down, two loads, the agent image build, up
@@ -685,7 +688,7 @@ Expected: applied; the timestamp unchanged (nothing restarted); `1`;
 the final copy; if one happens, run the copy anyway, before anything else.
 
 ```bash
-ssh arcade-box 'docker top ac-host-ci-agent-1 -eo args | grep -c "[b]uildkite-agent bootstrap"'     # 0, or wait
+ssh arcade-box 'docker top ac-host-ci-agent-1 -eo pid,args | awk "/[b]uildkite-agent start/{s++} /[b]uildkite-agent bootstrap/{b++} END{print \"start=\" s+0, \"bootstrap=\" b+0}"'     # start>=1 bootstrap=0, or wait (4.5)
 ssh arcade-box 'docker stop ac-host-ci-agent-1'       # no job writes to MinIO after this line
 # 4.6(a) again, verbatim: the delta since the bulk copy, then check and sizes
 ssh arcade-box 'cd /var/lib/ac-host/src/compose &&
