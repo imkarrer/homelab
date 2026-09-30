@@ -1,7 +1,8 @@
 # Nightly, at 04:30 in the BOX'S timezone. The time is chosen, not arbitrary:
-# ac-host's DOWNTIME build applies the tenant tree at 03:00 box-local and
-# homelab-deploy.timer switches the closure at 03:30 (ADR 0006). Backing up
-# after both means a snapshot reflects a settled box rather than one mid-switch.
+# ac-host's DOWNTIME build applies the tenant tree at 03:00 box-local, and
+# homelab-deploy's 03:00-03:30 blackout lifts at 03:30, the first moment a
+# deferred closure switch can land (ADR 0008). Backing up after both means a
+# snapshot reflects a settled box rather than one mid-switch.
 #
 # The timezone suffix is load-bearing and is why this is not plain "04:30:00":
 # the operator's machine runs UTC and the box runs America/Chicago, so a bare

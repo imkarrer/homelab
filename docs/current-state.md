@@ -25,7 +25,9 @@ value is from `hosts/<host>/` at this commit.
 > box" and means the Z840 when it ran all six.
 
 Diagrams of the structures this document reports on —
-[`docs/architecture.md`](architecture.md), tracked in git.
+[`docs/architecture.md`](architecture.md), tracked in git. The map of
+machines, network and cross-host flows, in the present tense —
+[`docs/topology.md`](topology.md).
 
 Visual companion to this survey (hosted, outside version control):
 <https://claude.ai/code/artifact/49abb0ae-3374-4ba4-921f-8e87fba0c52d>
@@ -45,7 +47,7 @@ landed on both hosts the same day (`docs/architecture.md` Part III, rows
 | | arcade-box | llm-box (the Z840; `ac-box` until `homelab-ygc.9`) |
 | --- | --- | --- |
 | Hardware | Lenovo ThinkCentre M920q Tiny: i7-8700T, 6 cores / 12 threads, 31 GiB usable, 954 GB NVMe (`lscpu`, `/proc/meminfo`, `lsblk`, 26 Sep) | HP Z840: 2 × E5-2680 v4, 28 cores / 56 threads, 251 GiB (`lscpu` 26 Sep; `dmidecode` 19 Sep) |
-| Address | `192.168.1.50/24` on `eno2`, MAC `e8:6a:64:f4:81:94` — a Dream Router reservation; the lobby forwards point here (§4) | `192.168.1.51/24` on `enp8s0`, MAC `c8:d3:ff:b9:28:0b` — a reservation; `eno1` has no carrier and no address (§4) |
+| Address | `192.168.1.50/24` on `eno2`, MAC `e8:6a:64:f4:81:94` — a Dream Router reservation; the lobby forwards point here ([topology.md](topology.md#network)) | `192.168.1.51/24` on `enp8s0`, MAC `c8:d3:ff:b9:28:0b` — a reservation; `eno1` has no carrier and no address ([topology.md](topology.md#network)) |
 | Tenants | `assetto`, `bot`, `arcade`, `observability`, `ci` — five in `/etc/homelab/tenants.json` | `agent-hub` — one in `/etc/homelab/tenants.json` |
 | Closure reaches it | by itself: its own agent's `queue-closure` stages, `homelab-deploy` (`schedule = "continuous"`, ADR 0006/0008) switches within a minute — `pending-closure.json` 13:47 CDT, `last-applied-closure.json` 13:48, running `ab21161` | by hand: `nixos-rebuild switch --refresh --flake github:imkarrer/homelab/<sha>#llm-box`. `homelab-deploy.timer` is armed and nothing stages on this host; its `pending-closure.json` is the cutover's own record, 10:27 CDT (ADR 0010, "no machinery"; architecture row 41) |
 | Tenant tree (`ac-host`) | `queue-prod` on this agent; the bot's 03:00 DOWNTIME build applies. `last-downtime.json` reads `2026-09-26T08:00:12Z` — the Z840's last run, copied over; tonight's is the first here | none |
@@ -206,35 +208,13 @@ still the ceiling a runaway job hits.
 
 ---
 
-## 4. The LAN, as the router has it (`homelab-bqo.42`)
+## 4. The LAN
 
-Facts read off the Dream Router's UI by the operator on 26 Sep 2026 (runbook
-4.1, "As it ran") and off each host over ssh the same evening. None of it is
-in code: `hosts/<host>/host.nix` declares each address, and only this table
-and the router say the router will hand it out (architecture row 26).
-
-| | |
-| --- | --- |
-| Router | UniFi Dream Router, `192.168.1.1` — the default route of both hosts (`ip route`) and the controller `unifi-poller` and `udr-fw-exporter` speak to (`homelab.host.unifi.address`, both host files) |
-| DHCP | one `/24` pool, `192.168.1.6`–`.254`; both hosts lease (`ipv4.method auto`), pinned by a reservation per MAC |
-| Reservation: arcade-box | MAC `e8:6a:64:f4:81:94` (`eno2`, the M920q's one wired port) → `192.168.1.50`. Set 15:43 UTC 26 Sep, once the Z840's lease had released it; the build-up ran on `.218` |
-| Reservation: the Z840 | MAC `c8:d3:ff:b9:28:0b` (`enp8s0`) → `192.168.1.51`. Set 15:20 UTC 26 Sep; the lowest free address beside `.50` |
-| Forwards | nine rules, `ac-prod-s{0,1,2}-{game,http,details}`, for the three lobby slots (9600–9602 tcp+udp, 8081–8083, 8181–8183) → `192.168.1.50`, by number, hand-set. `unifi_pf.py` is off (`/var/lib/ac-host/.env` has no `UNIFI_*` keys). Untouched by the cutover, which is why `.50` moved with the lobbies (runbook D2) |
-| The Z840's two ports | `enp8s0` `c8:d3:ff:b9:28:0b` is live and reserved. `eno1` `c8:d3:ff:b9:28:0a` is administratively up with no carrier (NetworkManager "unavailable"), declared `mgmt` with `address = null` — the scope stays in the contract, nothing is plugged in, nothing is scoped to it (ADR 0007, row 11) |
-| arcade-box's other port | `wlo1`, Wi-Fi, no carrier; `wireless.enable = mkForce false` |
-
-**What breaks if the Z840's cable goes into `eno1`** — which is what happened
-on 13 Sep 2026, the incident behind `homelab-bqo.42`: `eno1`'s MAC has no
-reservation, so if NetworkManager brings it up it leases an address from the
-pool that nothing knows — not `~/.ssh/config`, not arcade-box's peer entry,
-not the operator's script defaults — and `.51` goes away with `enp8s0`'s
-link. nginx, qdrant and the node exporter bind `192.168.1.51` and fail to
-start without it (the cutover's own switch exited status 4 for exactly that
-reason while the lease had not yet moved), and the firewall opens 8100, 6333
-and 9100 on `enp8s0` only. Cabling both ports on one LAN gives the Z840 two
-leases and two default routes and opens nothing on the second; it isolates
-nothing, which is why ADR 0007 plugs nothing in. The one right cable is
-`enp8s0`, and the check is `ip -br addr show enp8s0` reading `.51`.
+Moved to [`topology.md`, Network](topology.md#network) on 29 Sep 2026, so the
+network has one home: the DHCP pool, both reservations, the nine forwards,
+each host's ports and what cabling llm-box's `eno1` breaks (`homelab-bqo.42`).
+The router's facts there are still the operator's reading of 26 Sep 2026;
+when each reservation was set is in `docs/runbook-arcade-box-cutover.md`, "As it ran".
 
 ---
 

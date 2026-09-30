@@ -39,7 +39,8 @@ the snippet, then `Read` the file at those lines. Grep is still right for an
 exact identifier. The index is rebuilt by `bash scripts/hub-index.sh` (seconds
 when little changed); if a hit looks stale, that is why. The four trees are
 also linked under `hub/trees/`; `hub/repos.psv` is the registry.
-`docs/current-state.md` classifies every service; `docs/architecture.md`
+`docs/topology.md` is the map of machines, addresses, ports and cross-host
+flows; `docs/current-state.md` classifies every service; `docs/architecture.md`
 Part III is the delta narrative -- cite a row number when it answers the
 question.
 

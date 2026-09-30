@@ -12,6 +12,9 @@ Six workloads, one contract, two machines. Until this repo existed, the host
 configuration lived inside the oldest of them; until 26 Sep 2026 all six
 shared the Z840, fenced apart by cgroups.
 
+The lab on one page — machines, network, what runs where, and what crosses
+between them: [`docs/topology.md`](docs/topology.md).
+
 Diagrams — layers, the two delivery paths, where work actually runs, and what
 gates a change: [`docs/architecture.md`](docs/architecture.md). Tracked in git
 so they can be corrected in the same diff as the code that invalidates them.

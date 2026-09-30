@@ -55,6 +55,7 @@ was meant. Two checks close that gap, and the handoff names which one applied:
 
 ## What the local gate cannot prove
 
-`diff-closures` and `switch-to-configuration dry-activate` run on the box, by
-`modules/deploy` in the 03:30 window. A local green means *evaluates*, not
-*activates cleanly* — say so in the handoff rather than upgrading the claim.
+Nothing runs `diff-closures` or `switch-to-configuration dry-activate` before
+`modules/deploy` switches arcade-box: it asks `busyCheck`, builds, asks
+again, and switches (ADR 0008). A local green means *evaluates*, not *activates
+cleanly* — say so in the handoff rather than upgrading the claim.

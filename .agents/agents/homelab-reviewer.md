@@ -31,8 +31,9 @@ deploy path (only `modules/deploy` calls `nixos-rebuild`; CI stages, never
 applies); 0007 the `mgmt` scope stays, nothing plugs in.
 
 **Docs that the diff invalidates** — a change to a delivery path, a tenant, a
-port or a unit invalidates a row of `docs/architecture.md` or
-`docs/current-state.md`; the same diff should correct it. Name the row.
+port or a unit invalidates a row of `docs/architecture.md`,
+`docs/current-state.md` or `docs/topology.md`; the same diff should correct
+it. Name the row.
 
 **Proof** — the change claims a gate result. Say whether the claim matches
 what the diff could produce: a no-op refactor should show an unchanged

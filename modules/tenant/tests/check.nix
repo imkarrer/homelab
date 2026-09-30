@@ -4,7 +4,7 @@
 # map. flake.nix's `checks` output is `{ <host> = <its toplevel>; … } // .checks`
 # from here.
 #
-# WHY THIS FILE EXISTS (F7's open follow-up, docs/current-state.md §4; delta
+# WHY THIS FILE EXISTS (F7's open follow-up, docs/current-state.md §5; delta
 # row 14). The harnesses are the only coverage proving ports.nix still
 # REJECTS fixtures/collision.nix and resources.nix still refuses a broken
 # budget; `nix flake check` on the host config alone cannot show that,

@@ -47,9 +47,10 @@ refactor was a no-op (`drvPath` unchanged) rather than merely evaluable.
 | --- | --- |
 | What is decided and not up for discussion | `README.md` → Pinned conventions |
 | Why it was decided | `docs/adr/` |
-| What the box runs, every service classified | `docs/current-state.md` |
-| How code reaches the box, and the delta to the target | `docs/architecture.md` (Part III rows carry bead ids) |
-| What to do at the box, step by step | `docs/runbook-*.md` |
+| What runs where — machines, addresses, LAN ports, what crosses between hosts | `docs/topology.md` |
+| What each host runs, every service classified | `docs/current-state.md` |
+| How code reaches each host, and the delta to the target | `docs/architecture.md` (Part III rows carry bead ids) |
+| What to do on a host, step by step | `docs/runbook-*.md` |
 | Why CI is shaped the way it is, and what must never bounce | `modules/ci/default.nix` HAZARD 1 and 2 |
 | What is actionable now | `bd ready` — the one open-work list |
 | What a word means — box, tree, closure, window, bead | `CONTEXT.md`, the glossary; use its term, not a synonym |
@@ -71,9 +72,13 @@ abort criteria. On arcade-box,
 `ac-host-static.service` or `docker.service` under stop/restart in
 `dry-activate` is an abort, full stop.
 
-The closure gates (`diff-closures`, `switch-to-configuration dry-activate`)
-run on the box, by `modules/deploy` in the window. Prove Nix work in WSL with
-the gate above.
+`modules/deploy` runs no closure gate of its own: it asks `busyCheck`,
+builds the staged revision, asks again, and switches (ADR 0008). Nothing
+proves a closure activates cleanly before it is switched: CI builds both
+hosts' toplevels, and the gate above evaluates them. Prove Nix work in WSL
+with that gate before pushing. `switch-to-configuration dry-activate` belongs
+to a hand switch: run it first, and read its output against the abort
+criteria above.
 
 ## Which tenants may be disrupted
 
@@ -130,13 +135,15 @@ main does not contain as unlanded work. `hub-gates.sh <tree> <path>` gates
 a worktree; `hub-worktree.sh rm` refuses while dirty and keeps the branch
 while unmerged.
 
-Every tree reaches the box through git (ADR 0006): a green `homelab` build
-stages its sha in `/var/lib/homelab/pending-closure.json` and
-`homelab-deploy.timer` switches at 03:30; `ac-host` stages through
-`queue-prod` and the bot's DOWNTIME build applies it at 03:00 (a human may
-apply early with `scripts/hub-deploy.sh`); module-only trees arrive by
-bumping `flake.lock`. `hub/repos.psv` says per tree whether an agent pushes green
-work unattended (`yes`) or asks. The `homelab-land` skill is the procedure.
+Every tree reaches its host through git (ADR 0006); `docs/topology.md`
+tabulates the edge for each tree. The one to hold in mind: a green homelab
+build stages its sha on arcade-box, and `homelab-deploy` switches to it
+within a minute of staging, unless drivers are racing or it is the
+03:00–03:30 blackout (ADR 0008); llm-box takes the same sha only by hand
+(ADR 0010). A human may apply a staged `ac-host` tree before its
+03:00 DOWNTIME build with `scripts/hub-deploy.sh`. `hub/repos.psv` says per
+tree whether an agent pushes green work unattended (`yes`) or asks. The
+`homelab-land` skill is the procedure.
 
 ## Agent skills
 
