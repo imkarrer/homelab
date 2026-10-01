@@ -4,6 +4,9 @@
 # unit that keeps the Samba password -- plus the host facts
 # hosts/arcade-box/configuration.nix reads to fill the two unit stubs
 # (homelab.tenants.arcade.environment).
+# Since 1 Oct 2026 also one thing that module never had: arcade-library-sync,
+# which copies home-arcade main's station files into /srv/arcade
+# (homelab-786).
 #
 # Moved here from home-arcade's modules/arcade-hub.nix on 18 Sep 2026
 # (homelab-158.11), verbatim where it is not dead, when that module left the
@@ -40,6 +43,60 @@
 
 let
   cfg = config.services.arcade-hub;
+
+  # arcade-library-sync's tick; the unit's comment below says why it is
+  # shaped this way.
+  librarySyncScript = pkgs.writeShellApplication {
+    name = "arcade-library-sync";
+    runtimeInputs = [
+      pkgs.git
+      pkgs.rsync
+      pkgs.coreutils
+    ];
+    text = ''
+      remote=${lib.escapeShellArg cfg.librarySync.remote}
+      clone=${lib.escapeShellArg "${toString cfg.stateDir}/home-arcade"}
+      library=${lib.escapeShellArg (toString cfg.dataDir)}
+      # The station files, and the only paths under the library this writes.
+      dirs=(catalog www metadata shaders windows)
+
+      log() { echo "arcade-library-sync: $*"; }
+      retry() { log "$*; retrying next tick."; exit 0; }
+      refuse() { log "$*" >&2; exit 1; }
+      git_noprompt() { git -c credential.helper= "$@"; }
+
+      if [ ! -d "$library" ] || [ ! -w "$library" ]; then
+        refuse "$library is not a writable directory here -- nowhere to copy into."
+      fi
+
+      if [ ! -d "$clone/.git" ]; then
+        if [ -e "$clone" ]; then
+          refuse "$clone exists and is not a git checkout -- refusing to overwrite it."
+        fi
+        git_noprompt clone --quiet --single-branch --branch main --no-checkout "$remote" "$clone" \
+          || retry "could not clone $remote (git exit $?)"
+      fi
+      git -C "$clone" remote set-url origin "$remote"
+      git_noprompt -C "$clone" fetch --quiet origin +refs/heads/main:refs/remotes/origin/main \
+        || retry "could not fetch main from $remote (git exit $?)"
+      git -C "$clone" reset --quiet --hard origin/main
+      git -C "$clone" clean --quiet -ffdx
+      sha=$(git -C "$clone" rev-parse HEAD)
+
+      for d in "''${dirs[@]}"; do
+        if [ ! -d "$clone/$d" ]; then
+          log "main $sha has no $d/; leaving $library/$d as it is."
+          continue
+        fi
+        # -rlt: contents, symlinks as symlinks (--safe-links drops any that
+        # point outside the tree), mtimes. No --delete: see the unit.
+        changed=$(rsync -rlt --safe-links --out-format='%n' "$clone/$d/" "$library/$d/")
+        if [ -n "$changed" ]; then
+          log "$d/ from main $sha: $(tr '\n' ' ' <<<"$changed")"
+        fi
+      done
+    '';
+  };
 in
 {
   options.services.arcade-hub = {
@@ -149,6 +206,27 @@ in
         sandbox has no enemy waves, which is the point for the kids' arcade
         -- survival (the server's default when nothing is specified) attacks
         them.
+      '';
+    };
+
+    librarySync.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        arcade-library-sync: keep the station files in dataDir (the five
+        directories named in the unit below) in step with home-arcade's
+        `main`, from a private clone under stateDir, every ten minutes.
+      '';
+    };
+
+    librarySync.remote = lib.mkOption {
+      type = lib.types.str;
+      default = "https://github.com/imkarrer/home-arcade";
+      description = ''
+        Where the clone fetches from: hub/repos.psv's home-arcade remote over
+        anonymous https. The repository is public, so the box holds no key
+        or token for it, as for every other read it makes of a public
+        remote.
       '';
     };
   };
@@ -300,6 +378,77 @@ in
       # value (hub-gates caught exactly that). Fighting nixpkgs over a number
       # that no longer matters is not worth a mkForce.
       serviceConfig.Restart = "on-failure";
+    };
+
+    # The station files' deploy edge (homelab-786, 1 Oct 2026). Stations
+    # robocopy this share (home-arcade windows/sync.ps1) and, since
+    # home-arcade arc-0qy/arc-df4, install their launcher scripts from
+    # ${dataDir}/windows/ every time Home Arcade opens -- so a home-arcade
+    # change reaches a kid only once it is HERE, and until this unit nothing
+    # put it here: catalog/games.json was still the 6 Sep copy on 1 Oct.
+    # home-arcade's CI promises never to touch the share (arc-2g0), which
+    # is why the edge is the host's. The flox environment's edge
+    # (arcade-environment-pull) carries the game servers, not these files.
+    #
+    # One tick: fetch main into a private clone under stateDir and make the
+    # checkout exactly main (reset --hard, clean -ffdx: nothing writes there
+    # but this unit), then `rsync -rlt` each of the five directories into
+    # dataDir. Every merge to main is copied, green or not: home-arcade's
+    # bead-loop merges only on green, so main is the green line, and the
+    # commit status the environment poll reads is unobserved for this tree
+    # (docs/architecture.md row 35).
+    #
+    # NO --delete, on purpose. The five directories hold files that are not
+    # in git -- on 1 Oct catalog/games.json's GoldenEye entry was a
+    # hand-edit (arc-k4a puts it in git) -- and nothing here may remove what
+    # it did not put there. The cost, accepted: a file deleted from git
+    # lingers in the share until someone removes it by hand. A file that IS
+    # in git is overwritten by git's copy, hand-edits and all. Nothing
+    # outside the five is named, so roms/, cores/, apps/, saves/ and
+    # hub.json are never read or written; no -o/-g/-p, so what lands is
+    # owned by arcade (the unit's user) and keeps the modes it already had.
+    #
+    # Weather is a retry, not a failed unit (environment-poll.nix's rule): a
+    # fetch that fails is one journal line and the next tick asks again.
+    # Configuration is a failed unit: a library that is not a writable
+    # directory, or a clone path that is something other than a clone.
+    #
+    # Named in homelab.tenants.arcade.units (tenants.nix), so it runs in the
+    # tenant's slice; it bounces freely, like everything arcade owns.
+    systemd.services.arcade-library-sync = lib.mkIf cfg.librarySync.enable {
+      description = "Copy home-arcade main's station files into ${toString cfg.dataDir}";
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      # A switch that changes the unit mid-tick would kill a fetch for
+      # nothing; the new unit applies at the next firing.
+      restartIfChanged = false;
+      # git that can never ask anyone anything, as environment-pull's.
+      environment.GIT_TERMINAL_PROMPT = "0";
+      serviceConfig = {
+        Type = "oneshot";
+        User = "arcade";
+        Group = "arcade";
+        UMask = "0022";
+        ExecStart = lib.getExe librarySyncScript;
+        ProtectSystem = "strict";
+        ReadWritePaths = [
+          (toString cfg.stateDir)
+          (toString cfg.dataDir)
+        ];
+        PrivateTmp = true;
+        NoNewPrivileges = true;
+      };
+    };
+
+    systemd.timers.arcade-library-sync = lib.mkIf cfg.librarySync.enable {
+      description = "Copy home-arcade main's station files into the arcade share";
+      wantedBy = [ "timers.target" ];
+      timerConfig = {
+        # Soon after boot, then every ten minutes: a merge reaches the
+        # share within ten, and a station picks it up at its next launch.
+        OnBootSec = "2min";
+        OnUnitActiveSec = "10min";
+      };
     };
 
     assertions = [

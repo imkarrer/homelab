@@ -59,7 +59,10 @@ until `6e18170`, and that was the last such literal in the module layer.
 Since the cutover of 26 Sep 2026 there are two hosts, and the edges split by
 where the CI agent is. **arcade-box has every automatic edge**: the tenant
 tree, the closure and arcade's environment are staged by its own agent
-(`arcade-box`, `queue=self`) and applied by units on the same host. **The
+(`arcade-box`, `queue=self`) and applied by units on the same host; the
+fourth, home-arcade's station files into `/srv/arcade`, goes round the agent:
+`arcade-library-sync` fetches `main` itself every ten minutes (`homelab-786`,
+not yet watched running). **The
 Z840 has one automatic edge and no closure edge**: `agent-hub`'s environment
 is staged by the host's own poll of GitHub (`homelab-ygc.14`) and applied by
 its pull unit, and its closure is switched by an operator from a sha already
@@ -81,6 +84,7 @@ flowchart LR
         B4 -- "homelab-deploy, continuous (ADR 0008)<br/>busyCheck · within a minute<br/><i>13:47 staged → 13:48 switched</i>" --> B6["/run/current-system<br/><b>ab21161</b>"]
         AG -- "queue-environment<br/><i>stages a FloxHub generation</i>" --> C4["pending-environment-arcade.json"]
         C4 --> C5["arcade-environment-pull"] --> C6["arcade-freeciv · arcade-mindustry<br/><b>generation 2</b>"]
+        E4["arcade-library-sync.timer<br/>every 10 min: home-arcade main<br/><i>homelab-786</i>"] -- "rsync -rlt, no --delete<br/>catalog · www · metadata · shaders · windows" --> E6["/srv/arcade<br/><b>the stations' share</b>"]
     end
 
     subgraph Z ["llm-box (the Z840) — 192.168.1.51 — agent-hub"]
@@ -94,6 +98,7 @@ flowchart LR
 
     ORIGIN["origin: ac-host · homelab · home-arcade · agent-hub"] --> AG
     ORIGIN -- "GitHub API" --> D4
+    ORIGIN -- "git fetch, anonymous https" --> E4
 
     classDef ok fill:#dae8df,stroke:#2c6b4b,color:#101819;
     classDef hand fill:#f0e6d0,stroke:#8d5c0c,color:#101819;
