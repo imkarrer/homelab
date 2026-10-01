@@ -376,6 +376,12 @@
         "samba-smbd.service"
         "samba-winbindd.service"
         "rsync.service"
+        # The share's content edge (tenants/arcade.nix, homelab-786): a
+        # oneshot of that file's own, so there is no upstream slice to
+        # outrank; named so its git and rsync run in interactive.slice with
+        # the share they fill, not in system.slice. Its .timer is not listed:
+        # a timer runs nothing (resources.nix refuses non-.service units).
+        "arcade-library-sync.service"
       ];
 
       ports = {

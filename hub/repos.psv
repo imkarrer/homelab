@@ -59,6 +59,10 @@ homelab|/home/nixos/src/homelab|git@github.com:imkarrer/homelab|buildkite|yes
 #                  rows 35 and 40).
 #   home-arcade -> arcade-box. queue-environment on arcade-box's agent stages
 #                  the FloxHub generation; arcade-environment-pull applies it.
+#                  Its station files (catalog/ www/ metadata/ shaders/ windows/)
+#                  take a second edge the column cannot say: arcade-library-sync
+#                  on arcade-box copies main into /srv/arcade every ten minutes
+#                  (hosts/arcade-box/tenants/arcade.nix, homelab-786).
 agent-hub|/home/nixos/src/agent-hub|git@github.com:imkarrer/agent-hub|environment|yes
 home-arcade|/home/nixos/src/home-arcade|git@github.com:imkarrer/home-arcade|environment|yes
 # bead-loop: deploy=none for either host -- the loop runs on the workstation and
