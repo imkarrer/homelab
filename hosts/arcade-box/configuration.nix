@@ -11,7 +11,7 @@
 # Same two reasons as hosts/llm-box/configuration.nix for what lives here:
 # the hardware import (a literal path -- `imports` cannot read `config`),
 # and the wiring of tenant options to host facts.
-{ config, lib, ... }:
+{ config, lib, pkgs, ... }:
 
 let
   # Fetched read-only from the box on 26 Sep 2026 and TRACKED (README's
@@ -180,6 +180,13 @@ in
           "${state}/freeciv"
           "--log"
           "${state}/freeciv/server.log"
+          # Without a startup script freeciv-server gives every connection
+          # `basic`, so nobody could /load an autosave, /reset or kick: the
+          # only reset was a restart. `first` hands ctrl to the first player
+          # in the lobby; /save and /endgame need admin and stay off on the
+          # shared server, where a restart is still the hard reset.
+          "--read"
+          "${pkgs.writeText "arcade-freeciv.serv" "cmdlevel ctrl first\n"}"
         ];
       };
       units."arcade-mindustry.service" = {
