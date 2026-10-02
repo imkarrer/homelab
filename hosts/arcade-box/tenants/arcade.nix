@@ -283,6 +283,23 @@ in
           "force user" = "arcade";
           "force group" = "arcade";
         };
+        # Player saves, the one place a station writes (homelab-zvi, 2 Oct
+        # 2026). home-arcade's Windows stations push saves/<profile>/ here
+        # when a game exits so a kid's saves follow them to any PC; [arcade]
+        # stays read-only, and rsync's arcade-saves needs WSL the stations
+        # no longer have. The real arcade user only -- the stations already
+        # hold its password (hub.json) -- never a guest.
+        arcade-saves = {
+          path = "${cfg.dataDir}/saves";
+          "browseable" = "yes";
+          "read only" = "no";
+          "guest ok" = "no";
+          "valid users" = "arcade";
+          "force user" = "arcade";
+          "force group" = "arcade";
+          "create mask" = "0664";
+          "directory mask" = "0775";
+        };
       };
     };
 
