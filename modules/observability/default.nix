@@ -194,6 +194,15 @@ let
     inherit name;
     line = p.loadHigh;
   }) peerSet.nodePeers;
+  # NodeExporterDown's selector, minus the peers that are shut down on
+  # purpose (homelab.host.peers.<n>.onDemand). Prometheus anchors a label
+  # regex, so a bare name matches only that host. Empty when no peer is
+  # on-demand, which leaves the rule exactly `up{job="node"} == 0`.
+  onDemandHosts = lib.attrNames peerSet.onDemandPeers;
+  nodeDownSkips = lib.optionalString (
+    onDemandHosts != [ ]
+  ) ", host!~\"${lib.concatMapStringsSep "|" lib.escapeRegex onDemandHosts}\"";
+
   # Explicit indentation per line, not an indented '' string: Nix strips a
   # ''-string's own common indentation, which put the first rendering of
   # this at column 0 of the rules file.
@@ -451,8 +460,11 @@ in
               # not a quiet gap in its graphs. cadvisor is its own rule
               # because it runs on this host alone; the two were one rule
               # (up{job=~"node|cadvisor"}) until the split, with no other change.
+              # Except a peer that is off on purpose (onDemand, nodeDownSkips
+              # above): llm-box is shut down for long stretches, and this rule
+              # posted it to Discord every four hours from 7 Oct 2026 (homelab-zj7).
               - alert: NodeExporterDown
-                expr: up{job="node"} == 0
+                expr: up{job="node"${nodeDownSkips}} == 0
                 for: 5m
                 labels:
                   severity: warning

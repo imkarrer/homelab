@@ -11,7 +11,7 @@
 # the local list unchanged and `assertions` is [].
 {
   lib,
-  # homelab.host.peers: name -> { address; metrics = [ { job; port; interval; path; keep; } ]; loadHigh; }
+  # homelab.host.peers: name -> { address; metrics = [ { job; port; interval; path; keep; } ]; loadHigh; onDemand; }
   peers,
   # this host's own scrape configs, in Prometheus's shape (job_name, static_configs, ...)
   localScrapeConfigs,
@@ -105,6 +105,11 @@ let
   # every machine's line -- see loadHigh in host-options.nix.
   nodePeers = lib.filterAttrs (_: p: lib.any (m: m.job == "node") p.metrics) peers;
 
+  # Peers whose being unreachable is not news (homelab.host.peers.<n>.onDemand).
+  # Named here rather than in default.nix so the set is one place a harness
+  # case can read; NodeExporterDown is the only consumer.
+  onDemandPeers = lib.filterAttrs (_: p: p.onDemand) peers;
+
   show = k: if k == null then "null" else k;
 
   assertions =
@@ -141,5 +146,5 @@ let
 in
 {
   scrapeConfigs = scrapeConfigsWithPeers ++ peerScrapeConfigs;
-  inherit assertions nodePeers;
+  inherit assertions nodePeers onDemandPeers;
 }

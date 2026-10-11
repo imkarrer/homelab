@@ -124,6 +124,21 @@ let
           own hosts/<name>/host.nix capacity, never typed.
         '';
       };
+
+      onDemand = mkOption {
+        type = types.bool;
+        default = false;
+        description = ''
+          The peer is shut down by its operator for long stretches, and
+          that is its normal state. NodeExporterDown skips it: a rule that
+          reads "the exporter is unreachable" cannot tell an outage from a
+          machine that is off on purpose, and Alertmanager re-posts the
+          firing alert to Discord every repeat_interval (4h) for as long as
+          the machine stays off. Nothing else changes: the peer is still scraped, still graphed,
+          and its other rules still read it while it is up. The cost is that
+          an exporter dying on a machine that IS running goes unannounced.
+        '';
+      };
     };
   };
 

@@ -79,9 +79,11 @@ let
     }:
     let
       out = peersFn {
+        # What the module system would have filled in: the function sees
+        # evaluated options, so a fixture need only spell the ones it sets.
+        peers = lib.mapAttrs (_: p: { onDemand = false; } // p) peers;
         inherit
           lib
-          peers
           localScrapeConfigs
           hostAddresses
           scrapeInterval
@@ -93,7 +95,7 @@ let
     in
     {
       inherit messages;
-      inherit (out) scrapeConfigs nodePeers;
+      inherit (out) scrapeConfigs nodePeers onDemandPeers;
       checked =
         if messages == [ ] then
           "ok: ${toString (lib.length out.scrapeConfigs)} scrape configs, ${toString (lib.length (lib.attrNames out.nodePeers))} node peer(s)"
@@ -117,6 +119,10 @@ in
       {
         assertion = out.nodePeers == { };
         message = "with no peers there are no node peers";
+      }
+      {
+        assertion = out.onDemandPeers == { };
+        message = "with no peers there are no on-demand peers";
       }
     ];
   };
@@ -178,7 +184,48 @@ in
           assertion = out.nodePeers == { z840 = peersOf out "z840"; } && out.nodePeers.z840.loadHigh == 56;
           message = "the peer that declares node must be the one node peer, with its loadHigh";
         }
+        {
+          assertion = out.onDemandPeers == { };
+          message = "a peer that does not say onDemand must not be one: NodeExporterDown has to keep watching it";
+        }
       ];
+  };
+
+  # A peer that is shut down on purpose: still scraped and still a node peer
+  # (its HostLoadHigh line and its graphs are unchanged), but named in
+  # onDemandPeers, which is what NodeExporterDown skips. Only that peer: the
+  # one beside it, which stays watched, must not be swept in.
+  onDemand = mkCase {
+    peers = {
+      z840 = {
+        address = "192.168.1.51";
+        loadHigh = 56;
+        onDemand = true;
+        metrics = [ (nodeEndpoint nodeKeep) ];
+      };
+      always = {
+        address = "192.168.1.52";
+        loadHigh = 8;
+        metrics = [ (nodeEndpoint nodeKeep) ];
+      };
+    };
+    checks = out: [
+      {
+        assertion = lib.attrNames out.onDemandPeers == [ "z840" ];
+        message = "onDemandPeers must be exactly the peers that say onDemand";
+      }
+      {
+        assertion = lib.attrNames out.nodePeers == [
+          "always"
+          "z840"
+        ];
+        message = "onDemand must not take a peer out of nodePeers: it is still scraped and still has a load line";
+      }
+      {
+        assertion = lib.length (byJob out.scrapeConfigs "node").static_configs == 3;
+        message = "onDemand must not take a peer's target out of the scrape config";
+      }
+    ];
   };
 
   # A peer at one of this host's own addresses is not a peer.
@@ -241,6 +288,7 @@ in
   expected = {
     noPeers = true;
     z840 = true;
+    onDemand = true;
     peerIsThisHost = false;
     peerIsLoopback = false;
     mergedJobCurationDiffers = false;

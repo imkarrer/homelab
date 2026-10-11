@@ -63,6 +63,10 @@ in
       # an alert. Above 56 something besides the model server is running
       # the machine flat out.
       loadHigh = llmBox.capacity.cpuThreads;
+      # The operator shuts the Z840 down for long stretches; off is its normal
+      # state, not an outage. Without this NodeExporterDown posted it to
+      # Discord every four hours from 7 Oct 2026 (homelab-zj7).
+      onDemand = true;
       metrics = [
         # The platform's node exporter on the Z840 (modules/platform/
         # node-exporter.nix, enabled in hosts/llm-box/configuration.nix).
