@@ -134,9 +134,10 @@ let
           reads "the exporter is unreachable" cannot tell an outage from a
           machine that is off on purpose, and Alertmanager re-posts the
           firing alert to Discord every repeat_interval (4h) for as long as
-          the machine stays off. Nothing else changes: the peer is still scraped, still graphed,
-          and its other rules still read it while it is up. The cost is that
-          an exporter dying on a machine that IS running goes unannounced.
+          the machine stays off. Nothing else changes: the peer is still
+          scraped, still graphed, and its other rules still read it while
+          it is up. The cost is that an exporter dying on a machine that IS
+          running goes unannounced.
         '';
       };
     };

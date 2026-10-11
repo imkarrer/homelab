@@ -197,11 +197,14 @@ let
   # NodeExporterDown's selector, minus the peers that are shut down on
   # purpose (homelab.host.peers.<n>.onDemand). Prometheus anchors a label
   # regex, so a bare name matches only that host. Empty when no peer is
-  # on-demand, which leaves the rule exactly `up{job="node"} == 0`.
+  # on-demand, which leaves the rule exactly `up{job="node"} == 0`. The names
+  # go in unescaped: a peer is keyed by its homelab.host.name, a hostname
+  # ([[:alnum:]_-]), and lib.escapeRegex's backslashes are not valid escapes
+  # inside a PromQL string, so it would break the one input it could help.
   onDemandHosts = lib.attrNames peerSet.onDemandPeers;
   nodeDownSkips = lib.optionalString (
     onDemandHosts != [ ]
-  ) ", host!~\"${lib.concatMapStringsSep "|" lib.escapeRegex onDemandHosts}\"";
+  ) ", host!~\"${lib.concatStringsSep "|" onDemandHosts}\"";
 
   # Explicit indentation per line, not an indented '' string: Nix strips a
   # ''-string's own common indentation, which put the first rendering of

@@ -1153,7 +1153,8 @@ Stop -- not judge -- at any of these:
   (the operator goes to the console), or the kernel hostname is not
   `llm-box` (it booted another generation), or `agent-hub-llm` is not
   active, or `:8100` does not answer. A reboot longer than 5 minutes also
-  posts `NodeExporterDown` to Discord (`for: 5m`) -- expected, not an abort.
+  posts `NodeExporterDown` to Discord (`for: 5m`) -- expected, not an abort
+  (since homelab-zj7 it does not: llm-box is `onDemand`).
 - **7.6**: `LAST_RESULT` or `RESULT_llm-box` is not `ok`, or there is no
   `SNAPSHOT_llm-box`: keep `/home/nixos/backup/ac-box`.
 - **Section 5**: `VALUES-DIFFER`, or a recipient count other than 2.
