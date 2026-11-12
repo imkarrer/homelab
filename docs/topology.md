@@ -16,7 +16,12 @@ read-only (`ss`, `iptables`, `ip`, `lsblk`, `docker ps`, `systemctl`,
 `/etc/homelab/tenants.json`), and the access points from `unifi-poller`'s
 metrics. Declared values are from homelab `7a644ec`, which both hosts ran.
 The router's reservations and forwards are not in code. The operator read
-them off the Dream Router's UI on 26 Sep 2026.
+them off the Dream Router's UI on 26 Sep 2026. That router was replaced by a
+Cloud Gateway Fiber on 11 Nov 2026. Only llm-box's row below is from the new
+one, read off llm-box on 12 Nov (`homelab-cyt`). The operator re-entered the
+pool, arcade-box's reservation and the nine forwards by hand that day: the
+nine forwarded ports answered from arcade-box through the public address,
+and the pool and arcade-box's reservation have not been re-read here.
 
 ---
 
@@ -93,8 +98,8 @@ repo's current record of it.
 | arcade-box's other port | `wlo1`, Wi-Fi, disabled (`networking.wireless.enable = mkForce false`) |
 | llm-box's other port | `enp8s0` (`c8:d3:ff:b9:28:0b`): no cable, no carrier, no address. It is declared as the `mgmt` scope with `address = null`, and nothing is scoped to it (ADR 0007) |
 
-**On llm-box the one right cable is `eno1`.** `enp8s0`'s MAC has no
-reservation. If NetworkManager brings it up, it leases an address from the
+**On llm-box the one right cable is `eno1`.** `enp8s0`'s MAC is not
+the one `.51` is reserved for. If NetworkManager brings it up, it leases an address from the
 pool that nothing knows: not `~/.ssh/config`, not arcade-box's peer entry, not
 the operator's script defaults. `.51` then goes away with `eno1`'s link.
 nginx, qdrant and the node exporter bind `192.168.1.51` and fail to start

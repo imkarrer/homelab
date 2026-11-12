@@ -13,12 +13,13 @@
         # eno1 since 12 Nov 2026 (homelab-cyt); enp8s0 until then. The Dream
         # Router was replaced by a Cloud Gateway Fiber on 11 Nov, the Z840 was
         # re-cabled into this port, and the operator set the new router's fixed
-        # IP on this port's MAC, c8:d3:ff:b9:28:0a. Read live that day: eno1
+        # IP on this port's MAC, c8:d3:ff:b9:28:0a. Read live on 12 Nov: eno1
         # leased 192.168.1.51 from 192.168.1.1 while the firewall still opened
         # 8100/6333/9100 on enp8s0 only, so all three timed out from the LAN
-        # with every service active. UniFi would not move .51 to enp8s0's MAC,
-        # so the declaration moved to the port instead. The two onboard ports
-        # are both 1 GbE; nothing but the name changed.
+        # with every service active. The operator could not get UniFi to move
+        # .51 to enp8s0's MAC, so the declaration moved to the port instead.
+        # Both onboard ports linked at 1000 Mbps that day (kernel log);
+        # nothing but the name changed.
         interface = "eno1";
         # 192.168.1.50 went to arcade-box at the cutover
         # (docs/runbook-arcade-box-cutover.md 4.1, decision D2) with the
@@ -38,7 +39,9 @@
       };
     };
 
-    # The UniFi Dream Router. It is this LAN's default route AND its controller
+    # The UniFi gateway: a Cloud Gateway Fiber since 11 Nov 2026, the Dream
+    # Router before, at the same address. It is this LAN's default route AND
+    # its controller
     # API, but only the second is what reads this field -- see the option's
     # description for why it is not networks.lan.gateway. Surveyed live on
     # ac-box 9 Sep 2026: `ip route` -> "default via 192.168.1.1 dev enp8s0",

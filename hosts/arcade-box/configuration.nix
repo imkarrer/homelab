@@ -114,8 +114,8 @@ in
   # does not consult a script that is not here yet. 4.2 flips all four.
   #
   # lanInterface is set even while off, and it is the one line the Z840 never
-  # needed: the module's default is `enp8s0`, which is llm-box's NIC name and
-  # nobody else's. Read from the host fact, never repeated.
+  # needed: the module's default is `enp8s0`, which is a Z840 port name (llm-box's
+  # LAN port until 12 Nov 2026) and nobody else's. Read from the host fact, never repeated.
   # ---------------------------------------------------------------------------
   services.ac-host = {
     enable = true;

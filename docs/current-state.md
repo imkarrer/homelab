@@ -47,7 +47,7 @@ landed on both hosts the same day (`docs/architecture.md` Part III, rows
 | | arcade-box | llm-box (the Z840; `ac-box` until `homelab-ygc.9`) |
 | --- | --- | --- |
 | Hardware | Lenovo ThinkCentre M920q Tiny: i7-8700T, 6 cores / 12 threads, 31 GiB usable, 954 GB NVMe (`lscpu`, `/proc/meminfo`, `lsblk`, 26 Sep) | HP Z840: 2 × E5-2680 v4, 28 cores / 56 threads, 251 GiB (`lscpu` 26 Sep; `dmidecode` 19 Sep) |
-| Address | `192.168.1.50/24` on `eno2`, MAC `e8:6a:64:f4:81:94` — a Dream Router reservation; the lobby forwards point here ([topology.md](topology.md#network)) | `192.168.1.51/24` on `eno1`, MAC `c8:d3:ff:b9:28:0a` — a reservation, on this port since 12 Nov 2026 (`homelab-cyt`); `enp8s0` has no carrier and no address ([topology.md](topology.md#network)) |
+| Address | `192.168.1.50/24` on `eno2`, MAC `e8:6a:64:f4:81:94` — a router reservation; the lobby forwards point here ([topology.md](topology.md#network)) | `192.168.1.51/24` on `eno1`, MAC `c8:d3:ff:b9:28:0a` — a reservation, on this port since 12 Nov 2026 (`homelab-cyt`); `enp8s0` has no carrier and no address ([topology.md](topology.md#network)) |
 | Tenants | `assetto`, `bot`, `arcade`, `observability`, `ci` — five in `/etc/homelab/tenants.json` | `agent-hub` — one in `/etc/homelab/tenants.json` |
 | Closure reaches it | by itself: its own agent's `queue-closure` stages, `homelab-deploy` (`schedule = "continuous"`, ADR 0006/0008) switches within a minute — `pending-closure.json` 13:47 CDT, `last-applied-closure.json` 13:48, running `ab21161` | by hand: `nixos-rebuild switch --refresh --flake github:imkarrer/homelab/<sha>#llm-box`. `homelab-deploy.timer` is armed and nothing stages on this host; its `pending-closure.json` is the cutover's own record, 10:27 CDT (ADR 0010, "no machinery"; architecture row 41) |
 | Tenant tree (`ac-host`) | `queue-prod` on this agent; the bot's 03:00 DOWNTIME build applies. `last-downtime.json` reads `2026-09-26T08:00:12Z` — the Z840's last run, copied over; tonight's is the first here | none |
@@ -150,7 +150,7 @@ Live from the Z840, 26 Sep 2026 17:45 CDT, closure `ab21161`.
 | `qdrant.service` | agent-hub | `192.168.1.51:6333` (`vectors`, scope `lan`); `system.slice`. State `/var/lib/qdrant`, `backup = true`. |
 | `agent-hub-environment-pull.{path,timer}` | agent-hub | The applying half of ADR 0009's edge, armed; `last-applied-environment-agent-hub.json` 25 Sep 21:20 CDT at this reading, then 26 Sep 20:19:58 CDT: `b16781d`, the poll's first staged sha, restarting `agent-hub-llm` (the record and both units' journals, read 28 Sep). |
 | `agent-hub-environment-poll.timer` | agent-hub | The staging half since `ab21161` (`homelab-ygc.14`): `OnUnitActiveSec=10min`, last 17:38, next 17:48 CDT. Two GitHub API calls per tick; stages a sha only when `buildkite/agent-hub` reads `success` on it — first at 20:19:52 CDT, `b16781d`, green in build 32 (row 35). |
-| `prometheus-node-exporter.service` | platform, not a tenant (`modules/platform/node-exporter.nix`, `homelab-ygc.10`) | `192.168.1.51:9100`, opened on `eno1` only, scraped by arcade-box. Not in the port registry — the module header says why, and what it costs. |
+| `prometheus-node-exporter.service` | platform, not a tenant (`modules/platform/node-exporter.nix`, `homelab-ygc.10`) | `192.168.1.51:9100`, opened on the LAN interface only (`enp8s0` at this reading; `eno1` since 12 Nov 2026, `homelab-cyt`), scraped by arcade-box. Not in the port registry — the module header says why, and what it costs. |
 | `homelab-deploy.{path,timer}` | platform | Armed (every 10 minutes) with nothing to do: no agent stages here. Accepted (architecture row 41). |
 
 ### Nonconforming and accepted
@@ -213,7 +213,7 @@ still the ceiling a runaway job hits.
 Moved to [`topology.md`, Network](topology.md#network) on 29 Sep 2026, so the
 network has one home: the DHCP pool, both reservations, the nine forwards,
 each host's ports and what cabling llm-box's wrong port breaks (`homelab-bqo.42`).
-The router's facts there are still the operator's reading of 26 Sep 2026;
+The router's facts there are still the operator's reading of 26 Sep 2026, except llm-box's reservation, which moved to `eno1`'s MAC on a new router on 12 Nov 2026 (`homelab-cyt`);
 when each reservation was set is in `docs/runbook-arcade-box-cutover.md`, "As it ran".
 
 ---
