@@ -66,7 +66,7 @@ flowchart LR
 | **Dream Router** | UniFi Dream Router: gateway, DHCP, DNS and the UniFi controller | `192.168.1.1` | The LAN's default route and resolver for both hosts; the nine lobby forwards; the controller API that `unifi-poller` and `udr-fw-exporter` read (`homelab.host.unifi.address`) | By hand in the UniFi UI. Nothing in git drives it. `unifi_pf.py` could manage the forwards but is off: the tenant's `.env` template in `modules/platform/secrets.nix` carries no `UNIFI_*` keys |
 | Access points | Two UniFi access points, adopted by the router (`unifi-poller`'s device metrics) | DHCP | Wi-Fi | The router |
 | **arcade-box** | Lenovo ThinkCentre M920q Tiny: i7-8700T, 6 cores / 12 threads, 31 GiB, 954 GB NVMe (`lscpu`, `/proc/meminfo`, `lsblk`) | `192.168.1.50` on `eno2` | Every tenant except `agent-hub`, and the only Buildkite agent | By itself. A green push to homelab `main` is staged by its own agent and switched by `homelab-deploy` within a minute. It defers while anyone races and during the 03:00–03:30 blackout (ADR 0006, ADR 0008) |
-| **llm-box** | HP Z840: 2 × Xeon E5-2680 v4, 28 cores / 56 threads, 251 GiB, 1 TB NVMe (a WD_BLACK SN850X). No GPU is on the PCI bus, so inference is CPU-only. `host.nix` still says `gpu = "nvidia"` (`homelab-9di`). Sources: `lscpu`, `free`, `lsblk`, the PCI class list in sysfs | `192.168.1.51` on `enp8s0` | `agent-hub` and nothing else | By hand: `nixos-rebuild switch --refresh --flake github:imkarrer/homelab/<full-sha>#llm-box`, from a sha already on origin (ADR 0010) |
+| **llm-box** | HP Z840: 2 × Xeon E5-2680 v4, 28 cores / 56 threads, 251 GiB, 1 TB NVMe (a WD_BLACK SN850X). No GPU is on the PCI bus, so inference is CPU-only. `host.nix` still says `gpu = "nvidia"` (`homelab-9di`). Sources: `lscpu`, `free`, `lsblk`, the PCI class list in sysfs | `192.168.1.51` on `eno1` | `agent-hub` and nothing else | By hand: `nixos-rebuild switch --refresh --flake github:imkarrer/homelab/<full-sha>#llm-box`, from a sha already on origin (ADR 0010) |
 | **operator's PC** | Windows with an RTX 4080, and NixOS-WSL 26.05 inside | Windows leases from the pool; WSL sits behind Windows' NAT, so nothing on the LAN can reach WSL | The registry checkouts, the `bd` tracker, the `hub-*` scripts and the nightly backup; `bead-loop`; a second agent-hub model server on the RTX 4080 (llama-swap on WSL's `127.0.0.1:8100`), which `gpu-mode-guard` stops while a game runs | Its own flake, `imkarrer/flox-workstation` (`~/src/workstation`). Two pieces of this lab reach it as pinned inputs of that flake: see [How code reaches each machine](#how-code-reaches-each-machine) |
 | **stations** | The arcade's Windows mini PCs (8th-gen i5, Intel iGPU; `home-arcade` README) | DHCP pool | Arcade clients. They mount `/srv/arcade` over SMB (read-only) or rsync it, push player saves to the `arcade-saves` SMB share (`/srv/arcade/saves`, read-write), and join freeciv and Mindustry | `home-arcade`'s `windows/` setup |
 
@@ -88,21 +88,24 @@ repo's current record of it.
 | --- | --- |
 | DHCP pool | `192.168.1.6`–`.254`, one pool |
 | Reservation: arcade-box | `e8:6a:64:f4:81:94` (`eno2`, the M920q's one wired port) → `192.168.1.50` |
-| Reservation: llm-box | `c8:d3:ff:b9:28:0b` (`enp8s0`) → `192.168.1.51` |
+| Reservation: llm-box | `c8:d3:ff:b9:28:0a` (`eno1`) → `192.168.1.51`. Until 12 Nov 2026 it was on `enp8s0`'s MAC; the new router's fixed IP was set on `eno1`'s and the declaration followed it (`homelab-cyt`) |
 | Port forwards | Nine hand-set rules, `ac-prod-s{0,1,2}-{game,http,details}`, all to `192.168.1.50`: game 9600–9602 tcp+udp, http 8081–8083 tcp, details 8181–8183 tcp. They cover the three lobby slots. `.50` moved to arcade-box with the lobbies at the cutover, so the rules never changed |
 | arcade-box's other port | `wlo1`, Wi-Fi, disabled (`networking.wireless.enable = mkForce false`) |
-| llm-box's other port | `eno1` (`c8:d3:ff:b9:28:0a`): no cable, no carrier, no address. It is declared as the `mgmt` scope with `address = null`, and nothing is scoped to it (ADR 0007) |
+| llm-box's other port | `enp8s0` (`c8:d3:ff:b9:28:0b`): no cable, no carrier, no address. It is declared as the `mgmt` scope with `address = null`, and nothing is scoped to it (ADR 0007) |
 
-**On llm-box the one right cable is `enp8s0`.** `eno1`'s MAC has no
+**On llm-box the one right cable is `eno1`.** `enp8s0`'s MAC has no
 reservation. If NetworkManager brings it up, it leases an address from the
 pool that nothing knows: not `~/.ssh/config`, not arcade-box's peer entry, not
-the operator's script defaults. `.51` then goes away with `enp8s0`'s link.
+the operator's script defaults. `.51` then goes away with `eno1`'s link.
 nginx, qdrant and the node exporter bind `192.168.1.51` and fail to start
-without it, and the firewall opens their ports on `enp8s0` only. Cabling both
+without it, and the firewall opens their ports on `eno1` only. Cabling both
 ports on one LAN gives the Z840 two leases and two default routes and opens
 nothing on the second, which isolates nothing; that is why ADR 0007 plugs
-nothing in. This happened on 13 Sep 2026 (`homelab-bqo.42`). The check is
-`ip -br addr show enp8s0` reading `.51`.
+nothing in. The wrong cable has happened twice: on 13 Sep 2026
+(`homelab-bqo.42`), and on 12 Nov 2026 after the router was replaced, when
+the reservation and the cable both landed on the port the firewall did not
+open and the declaration was moved to match (`homelab-cyt`). The check is
+`ip -br addr show eno1` reading `.51`.
 
 **Port scopes** (README, pinned; `modules/tenant/ports.nix`):
 
@@ -111,7 +114,7 @@ nothing in. This happened on 13 Sep 2026 (`homelab-bqo.42`). The check is
   ports on 11200+, and the firewall is what refuses them.
 - `lan` opens the port on the host's LAN interface.
 - `forwarded` is `lan` plus a router forward, and it needs a `justification`.
-- `mgmt` is declared for llm-box's `eno1` and used by nothing.
+- `mgmt` is declared for llm-box's `enp8s0` and used by nothing.
 
 sshd's 22/tcp is open on every interface of both hosts: `modules/platform/ssh.nix`
 leaves openssh's own `openFirewall` at its default. That is the one opening
@@ -155,7 +158,7 @@ has the numbers.
 | `agent-hub` | background, declared only: this host has no tier slices (`homelab.enforce.slices = false`) | `agent-hub-llm`: llama-swap on `127.0.0.1:8100` starts `llama-server` on demand, for the models `services.agent-hub.llm.models` lists in `hosts/llm-box/configuration.nix`, from the flox environment at `/var/lib/agent-hub/env`. It runs on all 28 physical cores (`AllowedCPUs = 0-27`, placement rather than a fence). Also `nginx` and `qdrant` | lan: 8100, where nginx proxies llama-swap (also the scrape target); 6333, qdrant, which binds the LAN address only | `/var/lib/agent-hub`, `/var/lib/qdrant`, both backed up; `/srv/agent-hub`, the model files, not backed up |
 
 Platform pieces on llm-box: sshd with fail2ban, and the node exporter on
-`192.168.1.51:9100`. The node exporter is opened on `enp8s0` only, and it is
+`192.168.1.51:9100`. The node exporter is opened on `eno1` only, and it is
 not in the port registry because it belongs to the platform, not a tenant
 (`modules/platform/node-exporter.nix`). Two environment units form its one
 automatic edge, `agent-hub-environment-poll` and `-pull`. `homelab-deploy`

@@ -10,24 +10,30 @@
 
     networks = {
       lan = {
-        interface = "enp8s0";
-        # Since the cutover (docs/runbook-arcade-box-cutover.md 4.1, decision D2):
-        # 192.168.1.50 went to arcade-box with the lobbies, the forwards, the
-        # stations' SMB path and Grafana's URL that name it. This is the Dream
-        # Router reservation for enp8s0's MAC c8:d3:ff:b9:28:0b, read off the
-        # router, never guessed: the /24 is one DHCP pool (.6-.254) and this was
-        # its lowest free address beside the old one on 26 Sep 2026.
+        # eno1 since 12 Nov 2026 (homelab-cyt); enp8s0 until then. The Dream
+        # Router was replaced by a Cloud Gateway Fiber on 11 Nov, the Z840 was
+        # re-cabled into this port, and the operator set the new router's fixed
+        # IP on this port's MAC, c8:d3:ff:b9:28:0a. Read live that day: eno1
+        # leased 192.168.1.51 from 192.168.1.1 while the firewall still opened
+        # 8100/6333/9100 on enp8s0 only, so all three timed out from the LAN
+        # with every service active. UniFi would not move .51 to enp8s0's MAC,
+        # so the declaration moved to the port instead. The two onboard ports
+        # are both 1 GbE; nothing but the name changed.
+        interface = "eno1";
+        # 192.168.1.50 went to arcade-box at the cutover
+        # (docs/runbook-arcade-box-cutover.md 4.1, decision D2) with the
+        # lobbies, the forwards, the stations' SMB path and Grafana's URL that
+        # name it; .51 was the pool's lowest free address beside it on 26 Sep
+        # 2026 and the new router's fixed IP keeps it.
         address = "192.168.1.51";
         prefixLength = 24;
       };
-      # NO-CARRIER as of 12 Sep 2026 (`cat /sys/class/net/eno1/carrier` = 0,
-      # speed -1, NetworkManager "unavailable"): administratively up, no link.
-      # An earlier comment said "cabled but down"; the box cannot confirm a
-      # cable, only that nothing is on the other end of it. What moves here
-      # once it has a link is ADR 0007's decision. Nothing may be scoped to it
-      # until it has an address, and it cannot have one until it has a link.
+      # The port with no cable: enp8s0, MAC c8:d3:ff:b9:28:0b, the LAN port
+      # until 12 Nov 2026. What would move to a second port is ADR 0007's
+      # decision (nothing). Nothing may be scoped to it until it has an
+      # address, and it cannot have one until it has a link.
       mgmt = {
-        interface = "eno1";
+        interface = "enp8s0";
         address = null;
       };
     };

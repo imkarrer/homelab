@@ -20,7 +20,7 @@ let
   #              router forwards it (ac-host/scripts/unifi_pf.py does this per
   #              lobby slot). Requires `justification` — being internet-facing
   #              is a decision, not a default.
-  #   mgmt       opened on host.networks.mgmt.interface (eno1, currently down)
+  #   mgmt       opened on host.networks.mgmt.interface (llm-box's unplugged second port)
   portScope = types.enum [ "local" "lan" "forwarded" "mgmt" ];
 
   portClaim = types.submodule {

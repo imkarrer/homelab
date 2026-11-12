@@ -6,6 +6,14 @@ the call ("I don't see a decision I need to make; what cable do you need?").
 The answer to the second question is *none*, and here is why that is also the
 answer to the first.
 
+**Amended 12 Nov 2026 (`homelab-cyt`): the two port names swapped; the
+decision did not.** The Dream Router was replaced by a Cloud Gateway Fiber,
+the Z840 was re-cabled into `eno1`, and the new router's fixed IP for
+`192.168.1.51` was set on `eno1`'s MAC. `hosts/llm-box/host.nix` now declares
+`lan` on `eno1` and `mgmt` on `enp8s0`. Read every `eno1` below as "the
+second, unplugged port" and every `enp8s0` as "the LAN port": the text is
+left as written. Still one cable, still nothing scoped to `mgmt`.
+
 ## Context
 
 `hosts/ac-box/host.nix` declares two networks: `lan` on `enp8s0` (192.168.1.50,
