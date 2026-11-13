@@ -259,10 +259,10 @@ let
   # unpoller-pass secret, whose name is older than this account). `unpoller`
   # until 12 Nov 2026: the Cloud Gateway Fiber that replaced the Dream Router
   # answered every login for that name with 403 AUTHENTICATION_FAILED_ACCOUNT_LOCKED
-  # ("SSO Account locked") after about a day of both exporters retrying
-  # against it, and the lock had not cleared an hour after they were stopped.
-  # A new name logged in at once (homelab-5af). Create it in UniFi OS, Admins
-  # & Users, as local access only, Network role View Only.
+  # ("SSO Account locked"). The lock outlasted an hour with both exporters
+  # stopped, and outlasted the operator recreating the account. The same
+  # password logged in at once under a new name (homelab-5af). Create it in
+  # UniFi OS, Admins & Users, as local access only, Network role View Only.
   unifiUser = "homelab-poller";
 
   secretsDir = "/var/lib/monitoring/secrets";

@@ -63,7 +63,7 @@ class UnifiClient:
         self.host = _env("UNIFI_HOST", "https://192.168.1.1").rstrip("/")
         if not self.host.startswith("http"):
             self.host = f"https://{self.host}"
-        self.user = _env("UNIFI_USER", "unpoller")
+        self.user = _env("UNIFI_USER", "homelab-poller")
         self.password = load_password()
         self._opener: urllib.request.OpenerDirector | None = None
         self._csrf: str | None = None
