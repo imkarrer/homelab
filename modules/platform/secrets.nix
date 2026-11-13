@@ -206,7 +206,8 @@
       };
       # Two readers, not one: unpoller's controller `pass` (a file path, to
       # unpoller) and udr-fw-exporter's UNIFI_PASS_FILE, both for the same
-      # `unpoller` account on the UDR, and both gate on the path with
+      # local router account (`homelab-poller` since 12 Nov 2026, `unpoller`
+      # before; modules/observability's unifiUser), and both gate on the path with
       # ConditionPathExists. The sops key is unpoller-pass; the file keeps
       # its dot.
       unpoller-pass = {

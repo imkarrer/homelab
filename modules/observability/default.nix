@@ -255,6 +255,16 @@ let
   unifiPolled = unifiAddr != null;
   unifiUrl = "https://${unifiAddr}";
 
+  # The local, view-only account both exporters log in as (password: the
+  # unpoller-pass secret, whose name is older than this account). `unpoller`
+  # until 12 Nov 2026: the Cloud Gateway Fiber that replaced the Dream Router
+  # answered every login for that name with 403 AUTHENTICATION_FAILED_ACCOUNT_LOCKED
+  # ("SSO Account locked") after about a day of both exporters retrying
+  # against it, and the lock had not cleared an hour after they were stopped.
+  # A new name logged in at once (homelab-5af). Create it in UniFi OS, Admins
+  # & Users, as local access only, Network role View Only.
+  unifiUser = "homelab-poller";
+
   secretsDir = "/var/lib/monitoring/secrets";
   grafanaAdminFile = "${secretsDir}/grafana-admin";
   grafanaSecretFile = "${secretsDir}/grafana-secret-key";
@@ -351,7 +361,7 @@ in
       controllers = [
         {
           url = unifiUrl;
-          user = "unpoller";
+          user = unifiUser;
           pass = unpollerPassFile;
           verify_ssl = false;
           sites = "default";
@@ -399,7 +409,7 @@ in
       Group = "monitoring";
       Environment = [
         "UNIFI_HOST=${unifiUrl}"
-        "UNIFI_USER=unpoller"
+        "UNIFI_USER=${unifiUser}"
         "UNIFI_PASS_FILE=${unpollerPassFile}"
         "UDR_FW_BIND=127.0.0.1:9131"
         # How often the exporter itself asks the router, independent of how
