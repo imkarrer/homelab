@@ -19,7 +19,7 @@
   homelab.tenants = {
 
     # Assetto Corsa lobby host. Internet-facing on purpose: unifi_pf.py opens
-    # a UniFi Dream Router forward per lobby slot so drivers off the LAN can
+    # a UniFi gateway forward per lobby slot so drivers off the LAN can
     # join. Gated by the ac-host-auth sidecar, not by network obscurity.
     assetto = {
       description = "Assetto Corsa practice/race lobby host (Docker + auth sidecar + static lobbies).";
@@ -111,7 +111,7 @@
           scope = "forwarded";
           justification = ''
             unifi_pf.py opens an "ac-{env}-s{slot}-game" TCP+UDP forward per
-            lobby slot on the Dream Router. Reachable from the internet by
+            lobby slot on the UniFi gateway. Reachable from the internet by
             design, but every connecting Steam ID still has to pass the
             ac-host-auth sidecar (authOpen=false, requiredRole="ac-practice")
             before the lobby accepts them.

@@ -1,6 +1,6 @@
 {
   "uid": "ac-overview",
-  "title": "Hosts + Dream Router",
+  "title": "Hosts + Gateway",
   "timezone": "America/Chicago",
   "schemaVersion": 39,
   "refresh": "30s",
@@ -131,7 +131,7 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "Dream Router CPU (%)",
+      "title": "Gateway CPU (%)",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -149,7 +149,7 @@
     {
       "id": 8,
       "type": "timeseries",
-      "title": "Dream Router RAM (%)",
+      "title": "Gateway RAM (%)",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -167,7 +167,7 @@
     {
       "id": 10,
       "type": "timeseries",
-      "title": "Dream Router WAN",
+      "title": "Gateway WAN",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 32 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -177,12 +177,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "rate(unpoller_device_wan_receive_bytes_total{name=\"Dream Router\"}[10m])",
+          "expr": "rate(unpoller_device_wan_receive_bytes_total[10m])",
           "legendFormat": "in"
         },
         {
           "refId": "B",
-          "expr": "rate(unpoller_device_wan_transmit_bytes_total{name=\"Dream Router\"}[10m])",
+          "expr": "rate(unpoller_device_wan_transmit_bytes_total[10m])",
           "legendFormat": "out"
         }
       ]
@@ -190,7 +190,7 @@
     {
       "id": 11,
       "type": "timeseries",
-      "title": "Dream Router WAN packets",
+      "title": "Gateway WAN packets",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 32 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {
@@ -200,12 +200,12 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "rate(unpoller_device_wan_receive_packets_total{name=\"Dream Router\"}[10m])",
+          "expr": "rate(unpoller_device_wan_receive_packets_total[10m])",
           "legendFormat": "in"
         },
         {
           "refId": "B",
-          "expr": "rate(unpoller_device_wan_transmit_packets_total{name=\"Dream Router\"}[10m])",
+          "expr": "rate(unpoller_device_wan_transmit_packets_total[10m])",
           "legendFormat": "out"
         }
       ]
@@ -314,7 +314,7 @@
       "id": 14,
       "type": "stat",
       "title": "unpoller",
-      "description": "Dream Router CPU/RAM/WAN. Green = Prometheus got a reply.",
+      "description": "Gateway CPU/RAM/WAN. Green = Prometheus got a reply.",
       "gridPos": { "h": 3, "w": 4, "x": 10, "y": 48 },
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "fieldConfig": {

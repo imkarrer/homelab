@@ -327,7 +327,7 @@ schema addition (a gateway or `unifi.address` field on `homelab.host`), which
 makes it a contract change rather than a drive-by edit. Landed in `6e18170`
 as `homelab.host.unifi.address` — deliberately not `networks.lan.gateway`,
 since the consumers speak the UniFi controller API and do not care what the
-default route is; on both hosts those are one Dream Router wearing both hats
+default route is; on both hosts those are one UniFi gateway wearing both hats
 (arcade-box's `host.nix` states the field again as its own host fact), and a
 `gateway` field would record the coincidence and go quietly wrong the day the
 controller moves. Proven a no-op: the toplevel drvPath is byte-identical with

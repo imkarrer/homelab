@@ -108,7 +108,7 @@ let
         }
       ];
     }
-    # The two UniFi jobs poll the Dream Router's Network application, a Java
+    # The two UniFi jobs poll the gateway's Network application (a 2 GB Dream Router until 11 Nov 2026, a 3 GB Cloud Gateway Fiber since), a Java
     # process sharing 2 GB with everything else on the router. In Prometheus
     # mode unpoller fetches from the controller ON EVERY SCRAPE, so this
     # interval IS the load we put on it: at 30s it was ~2,900 fetches/day of
@@ -396,7 +396,7 @@ in
   };
 
   systemd.services.udr-fw-exporter = {
-    description = "Dream Router firewall hit exporter";
+    description = "UniFi gateway firewall hit exporter";
     wantedBy = [ "multi-user.target" ];
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
@@ -509,7 +509,7 @@ in
                 labels:
                   severity: warning
                 annotations:
-                  summary: "unpoller is down or cannot reach the Dream Router API"
+                  summary: "unpoller is down or cannot reach the gateway API"
 
               # The leading indicator. Healthy, the controller answers unpoller in
               # 1.2-1.5s (p95 2-3s); in the week before it wedged the p95 rose
@@ -522,7 +522,7 @@ in
                 labels:
                   severity: warning
                 annotations:
-                  summary: "Dream Router API is averaging {{ $value | printf \"%.1f\" }}s per poll (healthy: ~1.5s)"
+                  summary: "Gateway API is averaging {{ $value | printf \"%.1f\" }}s per poll (healthy: ~0.3s on the Cloud Gateway Fiber, ~1.5s on the Dream Router it replaced)"
 
               # Sustained, not peak. Daily average CPU is ~20% with spikes to
               # 100% that mean nothing; an hourly average above 60% does.
@@ -532,7 +532,7 @@ in
                 labels:
                   severity: warning
                 annotations:
-                  summary: "Dream Router CPU has averaged {{ $value | printf \"%.0f\" }}% for an hour"
+                  summary: "Gateway CPU has averaged {{ $value | printf \"%.0f\" }}% for an hour"
 
               # The app failed with hourly-average RAM around 85%. 80% sustained
               # is the "act today" line; the trend rule below is the "act this
@@ -543,7 +543,7 @@ in
                 labels:
                   severity: warning
                 annotations:
-                  summary: "Dream Router RAM has averaged {{ $value | printf \"%.0f\" }}% for an hour"
+                  summary: "Gateway RAM has averaged {{ $value | printf \"%.0f\" }}% for an hour"
 
               # Extrapolate the last two days of RAM three days forward. On the
               # slope seen in Sep 2026 (+1.5-3 points/day from ~70%) this fires
@@ -557,7 +557,7 @@ in
                 labels:
                   severity: warning
                 annotations:
-                  summary: "Dream Router RAM is on course for {{ $value | printf \"%.0f\" }}% within 3 days"
+                  summary: "Gateway RAM is on course for {{ $value | printf \"%.0f\" }}% within 3 days"
 
               - alert: PracticeLobbiesFailed
                 expr: node_systemd_unit_state{name="ac-host-static.service",state="failed"} == 1

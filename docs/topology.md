@@ -39,7 +39,7 @@ flowchart LR
     end
 
     subgraph LAN ["LAN 192.168.1.0/24"]
-        UDR["<b>Dream Router</b> · .1<br/>gateway · DHCP · DNS<br/>UniFi controller · 2 APs"]
+        UDR["<b>Cloud Gateway Fiber</b> · .1<br/>gateway · DHCP · DNS<br/>UniFi controller · 1 AP · 1 switch"]
         ARC["<b>arcade-box</b> · .50<br/>Lenovo M920q<br/>assetto · bot · arcade<br/>observability · ci"]
         LLM["<b>llm-box</b> · .51<br/>HP Z840<br/>agent-hub"]
         ST["stations<br/>Windows mini PCs"]
@@ -68,8 +68,8 @@ flowchart LR
 
 | Machine | What it is | Address | Role | How its configuration arrives |
 | --- | --- | --- | --- | --- |
-| **Dream Router** | UniFi Dream Router: gateway, DHCP, DNS and the UniFi controller | `192.168.1.1` | The LAN's default route and resolver for both hosts; the nine lobby forwards; the controller API that `unifi-poller` and `udr-fw-exporter` read (`homelab.host.unifi.address`) | By hand in the UniFi UI. Nothing in git drives it. `unifi_pf.py` could manage the forwards but is off: the tenant's `.env` template in `modules/platform/secrets.nix` carries no `UNIFI_*` keys |
-| Access points | Two UniFi access points, adopted by the router (`unifi-poller`'s device metrics) | DHCP | Wi-Fi | The router |
+| **Cloud Gateway Fiber** | UniFi Cloud Gateway Fiber (replaced a Dream Router on 11 Nov 2026; no built-in Wi-Fi): gateway, DHCP, DNS and the UniFi controller | `192.168.1.1` | The LAN's default route and resolver for both hosts; the nine lobby forwards; the controller API that `unifi-poller` and `udr-fw-exporter` read (`homelab.host.unifi.address`) | By hand in the UniFi UI. Nothing in git drives it. `unifi_pf.py` could manage the forwards but is off: the tenant's `.env` template in `modules/platform/secrets.nix` carries no `UNIFI_*` keys |
+| UniFi access point and switch | One U6+ access point and one USW Flex 2.5G 8 PoE switch, adopted by the gateway (`unifi-poller`'s device metrics, 12 Nov 2026; the "Basement" access point that was offline since May is no longer listed) | DHCP | Wi-Fi; a PoE switch | The gateway |
 | **arcade-box** | Lenovo ThinkCentre M920q Tiny: i7-8700T, 6 cores / 12 threads, 31 GiB, 954 GB NVMe (`lscpu`, `/proc/meminfo`, `lsblk`) | `192.168.1.50` on `eno2` | Every tenant except `agent-hub`, and the only Buildkite agent | By itself. A green push to homelab `main` is staged by its own agent and switched by `homelab-deploy` within a minute. It defers while anyone races and during the 03:00–03:30 blackout (ADR 0006, ADR 0008) |
 | **llm-box** | HP Z840: 2 × Xeon E5-2680 v4, 28 cores / 56 threads, 251 GiB, 1 TB NVMe (a WD_BLACK SN850X). No GPU is on the PCI bus, so inference is CPU-only. `host.nix` still says `gpu = "nvidia"` (`homelab-9di`). Sources: `lscpu`, `free`, `lsblk`, the PCI class list in sysfs | `192.168.1.51` on `eno1` | `agent-hub` and nothing else | By hand: `nixos-rebuild switch --refresh --flake github:imkarrer/homelab/<full-sha>#llm-box`, from a sha already on origin (ADR 0010) |
 | **operator's PC** | Windows with an RTX 4080, and NixOS-WSL 26.05 inside | Windows leases from the pool; WSL sits behind Windows' NAT, so nothing on the LAN can reach WSL | The registry checkouts, the `bd` tracker, the `hub-*` scripts and the nightly backup; `bead-loop`; a second agent-hub model server on the RTX 4080 (llama-swap on WSL's `127.0.0.1:8100`), which `gpu-mode-guard` stops while a game runs | Its own flake, `imkarrer/flox-workstation` (`~/src/workstation`). Two pieces of this lab reach it as pinned inputs of that flake: see [How code reaches each machine](#how-code-reaches-each-machine) |
@@ -83,7 +83,7 @@ arcade-box with the lobbies. ADR 0012 is drafted but not yet in `docs/adr/`
 
 ## Network
 
-One flat `/24` behind the Dream Router. Neither host configures its own
+One flat `/24` behind the Cloud Gateway Fiber. Neither host configures its own
 address: both lease by DHCP (`ipv4.method auto`), and a reservation on each
 MAC pins the address. `hosts/<host>/host.nix` declares that address. The
 reservation itself lives only on the router, and the table below is this

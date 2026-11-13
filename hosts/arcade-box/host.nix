@@ -42,7 +42,7 @@ in
       };
     };
 
-    # The same Dream Router the Z840 sits behind; the two hosts share one LAN
+    # The same gateway the Z840 sits behind; the two hosts share one LAN
     # and one controller. See hosts/llm-box/host.nix for why this is not a
     # gateway field.
     unifi.address = "192.168.1.1";
