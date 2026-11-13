@@ -108,8 +108,10 @@ let
         }
       ];
     }
-    # The two UniFi jobs poll the gateway's Network application (a 2 GB Dream Router until 11 Nov 2026, a 3 GB Cloud Gateway Fiber since), a Java
-    # process sharing 2 GB with everything else on the router. In Prometheus
+    # The two UniFi jobs poll the gateway's Network application, a Java
+    # process sharing the gateway's RAM with everything else on it (the 2 GB
+    # Dream Router these numbers were measured on, until 11 Nov 2026; a Cloud
+    # Gateway Fiber since). In Prometheus
     # mode unpoller fetches from the controller ON EVERY SCRAPE, so this
     # interval IS the load we put on it: at 30s it was ~2,900 fetches/day of
     # ~270 KB each (~2.5s of controller time per fetch, ~8% of wall-clock),
@@ -414,7 +416,7 @@ in
         "UDR_FW_BIND=127.0.0.1:9131"
         # How often the exporter itself asks the router, independent of how
         # often Prometheus scrapes it. Firewall hit counters do not need finer
-        # than this, and every call is work for the router's 2 GB Network app.
+        # than this, and every call is work for the gateway's Network app.
         "UDR_FW_POLL_SECONDS=300"
       ];
     };
@@ -522,7 +524,7 @@ in
                 labels:
                   severity: warning
                 annotations:
-                  summary: "Gateway API is averaging {{ $value | printf \"%.1f\" }}s per poll (healthy: ~0.3s on the Cloud Gateway Fiber, ~1.5s on the Dream Router it replaced)"
+                  summary: "Gateway API is averaging {{ $value | printf \"%.1f\" }}s per poll (~0.3s on the Cloud Gateway Fiber, one reading on 12 Nov 2026; ~1.5s was healthy on the Dream Router it replaced)"
 
               # Sustained, not peak. Daily average CPU is ~20% with spikes to
               # 100% that mean nothing; an hourly average above 60% does.

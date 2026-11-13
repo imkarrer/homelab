@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prometheus exporter for Dream Router firewall / port-forward hit counters.
+"""Prometheus exporter for UniFi gateway firewall / port-forward hit counters.
 
 UniFi's API does not expose nf_conntrack / NAT table size. The closest
 signal for WAN scans and lobby-port bots is firewall_hits_state, especially

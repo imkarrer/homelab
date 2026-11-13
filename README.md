@@ -64,8 +64,8 @@ container names to Grafana dashboards; `arcade-freeciv`, `arcade-mindustry`,
 names. The contract assigns units to slices; it does not rename them.
 
 **Port scopes** are `local` / `lan` / `forwarded` / `mgmt`. `forwarded` exists
-because AC is internet-facing on purpose: `unifi_pf.py` opens UniFi Dream
-Router forwards per lobby slot at the lobby host's LAN address — arcade-box,
+because AC is internet-facing on purpose: `unifi_pf.py` opens UniFi
+gateway forwards per lobby slot at the lobby host's LAN address — arcade-box,
 `192.168.1.50`, since 26 Sep 2026. Forwarded traffic still arrives on that
 host's LAN interface (`eno2`; the Z840's `enp8s0` before the cutover), so
 interface-scoping is correct — but it must be declared, and it requires a
